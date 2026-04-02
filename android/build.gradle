@@ -1,0 +1,74 @@
+buildscript {
+    ext.kotlin_version = '1.9.10'
+    repositories {
+        google()
+        mavenCentral()
+    }
+
+    dependencies {
+        classpath 'com.android.tools.build:gradle:8.6.0'
+        classpath "org.jetbrains.kotlin:kotlin-gradle-plugin:$kotlin_version"
+    }
+}
+
+allprojects {
+    repositories {
+        google()
+        mavenCentral()
+        maven { url 'https://jitpack.io' }
+        maven { url "https://maven.aliyun.com/repository/public" }
+    }
+}
+
+// Fix legacy plugins for AGP 8.x + Java 21 compatibility
+subprojects {
+    afterEvaluate { project ->
+        try {
+            if (project.hasProperty("android")) {
+                def android = project.android
+
+                // Inject namespace from AndroidManifest if missing (required by AGP 8.x)
+                try {
+                    if (android.namespace == null || android.namespace.toString().isEmpty()) {
+                        def manifestFile = project.file("src/main/AndroidManifest.xml")
+                        if (manifestFile.exists()) {
+                            def manifest = new XmlSlurper().parse(manifestFile)
+                            def pkg = manifest.@package?.toString()
+                            if (pkg) {
+                                android.namespace = pkg
+                            }
+                        }
+                    }
+                } catch (Exception e) { /* namespace already set */ }
+
+                // Force JVM 17 target for all submodules to avoid "Unknown Kotlin JVM target: 21"
+                try {
+                    android.compileOptions {
+                        sourceCompatibility JavaVersion.VERSION_17
+                        targetCompatibility JavaVersion.VERSION_17
+                    }
+                } catch (Exception e) { /* ignore */ }
+
+                try {
+                    project.tasks.withType(org.jetbrains.kotlin.gradle.tasks.KotlinCompile).configureEach {
+                        kotlinOptions { jvmTarget = "17" }
+                    }
+                } catch (Exception e) { /* ignore */ }
+            }
+        } catch (Exception e) {
+            // ignore - plugin may not have android extension yet
+        }
+    }
+}
+
+rootProject.buildDir = '../build'
+subprojects {
+    project.buildDir = "${rootProject.buildDir}/${project.name}"
+}
+subprojects {
+    project.evaluationDependsOn(':app')
+}
+
+tasks.register("clean", Delete) {
+    delete rootProject.buildDir
+}
