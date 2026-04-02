@@ -42,8 +42,6 @@ flutter pub get
 flutter build apk --release
 ```
 
-产物路径：`build/app/outputs/flutter-apk/app-release.apk`
-
 ## 依赖
 
 - [AList](https://github.com/alist-org/alist) — 后端服务
