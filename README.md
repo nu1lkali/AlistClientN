@@ -1,7 +1,9 @@
 # AlistClient
 
 基于 [AList](https://github.com/alist-org/alist) 的 Flutter 移动客户端，支持 Android 平台。
-fork至[BFWXKJGS/AlistClient](https://github.com/BFWXKJGS/AlistClient)
+
+fork于[BFWXKJGS/AlistClient](https://github.com/BFWXKJGS/AlistClient)
+
 在原仓库代码做了一些功能改进
 
 ## 功能
