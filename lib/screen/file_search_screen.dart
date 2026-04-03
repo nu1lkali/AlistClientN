@@ -143,32 +143,34 @@ class FileSearchScreen extends StatelessWidget {
           var isDir = item.isDir ?? false;
           var sizeDesc = isDir ? null : FileUtils.formatBytes(item.size ?? 0);
           final keyword = controller.textEditingController.text.trim();
-          final isSelected = controller.selectedIndices.contains(index);
           return GestureDetector(
             onLongPress: () => controller.enterMultiSelect(index),
-            child: Obx(() => controller.isMultiSelect.value
-                ? CheckboxListTile(
-                    value: isSelected,
-                    onChanged: (_) => controller.toggleSelect(index),
-                    title: Text(item.name ?? ""),
-                    subtitle: Text(item.parent ?? ""),
-                    secondary: Image.asset(
-                      FileUtils.getFileIcon(isDir, item.name ?? ""),
-                      width: 36,
-                      height: 36,
-                    ),
-                    controlAffinity: ListTileControlAffinity.leading,
-                  )
-                : FileListItemView(
-                    icon: FileUtils.getFileIcon(isDir, item.name ?? ""),
-                    fileName: item.name ?? "",
-                    time: item.parent,
-                    sizeDesc: sizeDesc,
-                    thumbnail: null,
-                    fileNameMaxLines: 100,
-                    highlightKeyword: keyword,
-                    onTap: () => controller.onFileTap(context, index),
-                  )),
+            child: Obx(() {
+              final isSelected = controller.selectedIndices.contains(index);
+              return controller.isMultiSelect.value
+                  ? CheckboxListTile(
+                      value: isSelected,
+                      onChanged: (_) => controller.toggleSelect(index),
+                      title: Text(item.name ?? ""),
+                      subtitle: Text(item.parent ?? ""),
+                      secondary: Image.asset(
+                        FileUtils.getFileIcon(isDir, item.name ?? ""),
+                        width: 36,
+                        height: 36,
+                      ),
+                      controlAffinity: ListTileControlAffinity.leading,
+                    )
+                  : FileListItemView(
+                      icon: FileUtils.getFileIcon(isDir, item.name ?? ""),
+                      fileName: item.name ?? "",
+                      time: item.parent,
+                      sizeDesc: sizeDesc,
+                      thumbnail: null,
+                      fileNameMaxLines: 100,
+                      highlightKeyword: keyword,
+                      onTap: () => controller.onFileTap(context, index),
+                    );
+            }),
           );
         },
         separatorBuilder: (context, index) => const Divider(),
