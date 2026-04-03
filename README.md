@@ -8,8 +8,8 @@
 https://github.com/nu1lkali/AlistClientN/releases
 
 **蓝奏云**
-https://wwanb.lanzoum.com/iycRi3m99qch
-密码：9854
+https://wwanb.lanzoum.com/b016kpl6ub
+密码:cwc3
 
 ## 新增功能
 
@@ -20,7 +20,7 @@ https://wwanb.lanzoum.com/iycRi3m99qch
 - 图片/视频按日期分组显示
 - 多选模式：批量下载、删除、移动
 - 文件夹详情支持计算大小
-- 排序新增随机模式
+- 排序新增随机模式、按文件大小排序
 
 **图片画廊**
 - 图片旋转
