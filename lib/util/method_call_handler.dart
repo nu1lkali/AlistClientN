@@ -103,6 +103,7 @@ class MethodCallHandler {
                     .findRecordByPath(user.baseUrl, user.username, pendingDelete);
                 if (record != null) db.videoViewingRecordDao.deleteRecord(record);
                 SmartDialog.showToast("删除成功");
+                uc.notifyFileDeleted();
               },
               onError: (_, msg) {
                 if (attempt == 2) SmartDialog.showToast("删除失败：$msg");

@@ -114,6 +114,7 @@ class _FileListScreenState extends State<FileListScreen>
   bool _hasWritePermission = false;
   User? _currentUser;
   StreamSubscription? _userStreamSubscription;
+  StreamSubscription? _fileDeletedSubscription;
   final RefreshController _refreshController =
       RefreshController(initialRefresh: false);
 
@@ -174,6 +175,11 @@ class _FileListScreenState extends State<FileListScreen>
     }
     LogUtil.d("initState ${DateTime.now().millisecondsSinceEpoch}", tag: tag);
     _loadFiles();
+
+    // refresh when a file is deleted from the video player
+    _fileDeletedSubscription = _userController.fileDeletedSignal.stream.listen((_) {
+      if (mounted) _refreshController.requestRefresh();
+    });
   }
 
   Future<void> _loadFiles() async {
@@ -270,6 +276,7 @@ class _FileListScreenState extends State<FileListScreen>
   void dispose() {
     super.dispose();
     _userStreamSubscription?.cancel();
+    _fileDeletedSubscription?.cancel();
     _cancelToken?.cancel();
     Log.d("dispose", tag: tag);
   }

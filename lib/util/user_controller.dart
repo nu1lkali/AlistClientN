@@ -11,6 +11,12 @@ import 'constant.dart';
 class UserController extends GetxController {
   var user = User(baseUrl: "", serverUrl: "").obs;
   var searchIndex = "".obs;
+  // incremented when a remote file is deleted, file list screens observe this to refresh
+  var fileDeletedSignal = 0.obs;
+
+  void notifyFileDeleted() {
+    fileDeletedSignal.value++;
+  }
 
   void login(User user, {bool fromCache = false}) {
     this.user.value = user;
