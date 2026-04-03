@@ -6,6 +6,7 @@ import 'package:alist/database/dao/favorite_dao.dart';
 import 'package:alist/database/table/favorite.dart';
 import 'package:alist/database/table/file_password.dart';
 import 'package:alist/database/table/file_viewing_record.dart';
+import 'package:alist/entity/copy_move_req.dart';
 import 'package:alist/entity/file_list_resp_entity.dart';
 import 'package:alist/entity/file_remove_req.dart';
 import 'package:alist/entity/file_rename_req.dart';
@@ -88,6 +89,9 @@ class FileListScreen extends StatefulWidget {
 class _FileListScreenState extends State<FileListScreen>
     with AutomaticKeepAliveClientMixin {
   final UserController _userController = Get.find();
+
+  // in-memory cache: path -> file list, shared across all instances
+  static final Map<String, List<FileItemVO>> _preloadCache = {};
   final AlistDatabaseController _databaseController = Get.find();
   final FileListMenuAnchorController _menuAnchorController =
       FileListMenuAnchorController();
@@ -193,6 +197,15 @@ class _FileListScreenState extends State<FileListScreen>
       }
       _queryPassword = false;
     }
+
+    // show cached data immediately while fetching fresh data in background
+    final cached = _preloadCache[path];
+    if (cached != null && cached.isNotEmpty && mounted) {
+      setState(() {
+        _files = cached;
+      });
+    }
+
     return _loadFilesInner();
   }
 
@@ -234,6 +247,11 @@ class _FileListScreenState extends State<FileListScreen>
       }
       // async load video watch progress
       _loadVideoProgress(fileItemVOs);
+      // cache this result and preload subdirectories
+      _preloadCache[path] = fileItemVOs;
+      if (_isRootPath(path)) {
+        _preloadSubdirectories(fileItemVOs);
+      }
     }, onError: (code, msg) {
       _refreshController.refreshFailed();
       _forceRefresh = false;
@@ -309,6 +327,8 @@ class _FileListScreenState extends State<FileListScreen>
               SmartDialog.show(builder: (context) {
                 return const ConfigFileNameMaxLinesDialog();
               });
+            } else if (menu.menuId == MenuId.organizeByType) {
+              _organizeByType();
             }
             break;
           case MenuGroupId.sort:
@@ -418,6 +438,103 @@ class _FileListScreenState extends State<FileListScreen>
       }
     } else {
       SmartDialog.showToast(Intl.downloadManager_tips_noDownloadableFiles.tr);
+    }
+  }
+
+  void _organizeByType() {
+    // collect files that need moving, grouped by target folder
+    final Map<String, List<FileItemVO>> groups = {};
+    for (final file in _files) {
+      if (file.isDir) continue;
+      String? targetFolder;
+      if (file.type == FileType.image) targetFolder = '图片';
+      else if (file.type == FileType.video) targetFolder = '视频';
+      else if (file.type == FileType.audio) targetFolder = '音频';
+      else if (file.type == FileType.word ||
+               file.type == FileType.excel ||
+               file.type == FileType.ppt ||
+               file.type == FileType.pdf ||
+               file.type == FileType.txt) targetFolder = '文档';
+      if (targetFolder == null) continue;
+      groups.putIfAbsent(targetFolder, () => []).add(file);
+    }
+
+    if (groups.isEmpty) {
+      SmartDialog.showToast('没有可归类的文件');
+      return;
+    }
+
+    final summary = groups.entries
+        .map((e) => '${e.key}(${e.value.length}个)')
+        .join('、');
+
+    SmartDialog.show(
+      clickMaskDismiss: false,
+      builder: (context) => AlertDialog(
+        title: const Text('按类型归类'),
+        content: Text('将把以下文件移动到对应子文件夹：\n$summary\n\n确认继续？'),
+        actions: [
+          TextButton(
+            onPressed: () => SmartDialog.dismiss(),
+            child: const Text('取消'),
+          ),
+          TextButton(
+            onPressed: () {
+              SmartDialog.dismiss();
+              _doOrganizeByType(groups);
+            },
+            child: const Text('确认'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _doOrganizeByType(Map<String, List<FileItemVO>> groups) async {
+    SmartDialog.showLoading(msg: '归类中…');
+    int successCount = 0;
+    int failCount = 0;
+
+    for (final entry in groups.entries) {
+      final folderName = entry.key;
+      final files = entry.value;
+      final targetPath = path == '/' ? '/$folderName' : '$path/$folderName';
+
+      // create target folder if not exists
+      final mkdirReq = MkdirReq();
+      mkdirReq.path = targetPath;
+      bool folderReady = false;
+      await DioUtils.instance.requestNetwork<String?>(
+        Method.post, 'fs/mkdir',
+        params: mkdirReq.toJson(),
+        onSuccess: (_) { folderReady = true; },
+        onError: (code, _) {
+          // 409 = already exists, that's fine
+          if (code == 409 || code == 200) folderReady = true;
+        },
+      );
+
+      if (!folderReady) { failCount += files.length; continue; }
+
+      // move files
+      final req = CopyMoveReq();
+      req.srcDir = path;
+      req.dstDir = targetPath;
+      req.names = files.map((f) => f.name).toList();
+      await DioUtils.instance.requestNetwork<String?>(
+        Method.post, 'fs/move',
+        params: req.toJson(),
+        onSuccess: (_) { successCount += files.length; },
+        onError: (_, __) { failCount += files.length; },
+      );
+    }
+
+    SmartDialog.dismiss();
+    _refreshController.requestRefresh();
+    if (failCount == 0) {
+      SmartDialog.showToast('归类完成，共移动 $successCount 个文件');
+    } else {
+      SmartDialog.showToast('完成：$successCount 个成功，$failCount 个失败');
     }
   }
 
@@ -794,6 +911,36 @@ class _FileListScreenState extends State<FileListScreen>
     var user = _userController.user.value;
     return _databaseController.filePasswordDao
         .deleteByPath(user.serverUrl, user.username, path);
+  }
+
+  void _preloadSubdirectories(List<FileItemVO> files) async {
+    // only preload top-level folders, limit to 10 to avoid hammering the server
+    final dirs = files.where((f) => f.isDir).take(10).toList();
+    for (final dir in dirs) {
+      if (_preloadCache.containsKey(dir.path)) continue;
+      await Future.delayed(const Duration(milliseconds: 200));
+      if (!mounted) return;
+      final body = {
+        "path": dir.path,
+        "password": _password ?? "",
+        "page": 1,
+        "per_page": 0,
+        "refresh": false,
+      };
+      DioUtils.instance.requestNetwork<FileListRespEntity>(
+        Method.post, "fs/list",
+        params: body,
+        onSuccess: (data) {
+          if (data == null) return;
+          final vos = (data.content ?? [])
+              .map((f) => _fileResp2VO(data.provider, f))
+              .toList();
+          _sort(vos);
+          _preloadCache[dir.path] = vos;
+        },
+        onError: (_, __) {},
+      );
+    }
   }
 
   void _loadVideoProgress(List<FileItemVO> files) async {

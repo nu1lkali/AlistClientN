@@ -47,6 +47,12 @@ final menuGroupOperations = MenuGroupEntity(
       name: Intl.fileList_menu_fileNameLines.tr,
       iconData: Icons.line_weight_rounded,
     ),
+    MenuItemEntity(
+      menuGroupId: MenuGroupId.operations,
+      menuId: MenuId.organizeByType,
+      name: "按类型归类",
+      iconData: Icons.folder_special_rounded,
+    ),
   ],
 );
 
@@ -300,6 +306,7 @@ enum MenuId {
   uploadPhotos,
   uploadFiles,
   configFileNameLines,
+  organizeByType,
 }
 
 class MenuGroupEntity {

@@ -218,12 +218,32 @@ class GalleryController extends GetxController {
       urls.add(url);
     }
     this.urls.value = urls;
+    // preload images around initial index
+    _preloadAround(index.value);
   }
 
   void updateIndex(int index) {
     this.index.value = index;
     rotation.value = 0; // reset rotation on page change
     LogUtil.d("update index=$index");
+    _preloadAround(index);
+  }
+
+  void _preloadAround(int index) {
+    const preloadCount = 2;
+    for (int i = 1; i <= preloadCount; i++) {
+      final next = index + i;
+      final prev = index - i;
+      if (next < urls.length) _preloadImage(urls[next]);
+      if (prev >= 0) _preloadImage(urls[prev]);
+    }
+  }
+
+  void _preloadImage(String url) {
+    try {
+      final config = ExtendedNetworkImageProvider(url, cache: true);
+      precacheImage(config, Get.context!);
+    } catch (_) {}
   }
 
   void rotate() {
