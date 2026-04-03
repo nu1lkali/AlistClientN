@@ -2,14 +2,25 @@ package com.github.alist.widget;
 
 import android.animation.ObjectAnimator;
 import android.animation.ValueAnimator;
+import android.content.ContentValues;
 import android.content.Context;
+import android.graphics.Bitmap;
 import android.graphics.Outline;
+import android.graphics.Rect;
+import android.net.Uri;
+import android.os.Build;
+import android.os.Environment;
+import android.provider.MediaStore;
 import android.util.AttributeSet;
 import android.util.DisplayMetrics;
 import android.view.GestureDetector;
 import android.view.MotionEvent;
+import android.view.SurfaceView;
+import android.view.TextureView;
 import android.view.View;
+import android.view.ViewGroup;
 import android.view.ViewOutlineProvider;
+import android.widget.Toast;
 
 import androidx.annotation.NonNull;
 import androidx.core.view.GestureDetectorCompat;
@@ -18,16 +29,55 @@ import com.github.alist.client.R;
 import com.shuyu.gsyvideoplayer.video.NormalGSYVideoPlayer;
 import com.shuyu.gsyvideoplayer.video.base.GSYBaseVideoPlayer;
 
+import java.io.File;
+import java.io.FileOutputStream;
+import java.io.OutputStream;
+import java.text.SimpleDateFormat;
+import java.util.Date;
+import java.util.Locale;
+
 public class AlistClientVideoPlayer extends NormalGSYVideoPlayer {
     private GestureDetectorCompat gestureDetector;
     protected View btnPrevious;
     protected View btnNext;
     protected View btnRewind;
     protected View btnFfwd;
+    protected View btnScreenshot;
+    protected View btnDelete;
+    protected View btnPlaylist;
     private View llPlayingAtDoubleSpeed;
     protected boolean isEnableSeek;
     private boolean isLongPressing;
     private ValueAnimator ffwdIconAnimator;
+
+    public interface OnDeleteClickListener {
+        void onDeleteClick();
+    }
+
+    public interface OnPlaylistClickListener {
+        void onPlaylistClick();
+    }
+
+    private OnDeleteClickListener deleteClickListener;
+    private OnPlaylistClickListener playlistClickListener;
+
+    public void setOnDeleteClickListener(OnDeleteClickListener listener) {
+        this.deleteClickListener = listener;
+        if (btnDelete != null) {
+            btnDelete.setOnClickListener(v -> {
+                if (deleteClickListener != null) deleteClickListener.onDeleteClick();
+            });
+        }
+    }
+
+    public void setOnPlaylistClickListener(OnPlaylistClickListener listener) {
+        this.playlistClickListener = listener;
+        if (btnPlaylist != null) {
+            btnPlaylist.setOnClickListener(v -> {
+                if (playlistClickListener != null) playlistClickListener.onPlaylistClick();
+            });
+        }
+    }
 
     public AlistClientVideoPlayer(Context context, Boolean fullFlag) {
         super(context, fullFlag);
@@ -52,8 +102,12 @@ public class AlistClientVideoPlayer extends NormalGSYVideoPlayer {
         btnNext = findViewById(R.id.btn_next);
         btnRewind = findViewById(R.id.btn_rewind);
         btnFfwd = findViewById(R.id.btn_ffwd);
+        btnScreenshot = findViewById(R.id.btn_screenshot);
+        btnDelete = findViewById(R.id.btn_delete);
+        btnPlaylist = findViewById(R.id.btn_playlist);
         btnRewind.setVisibility(View.INVISIBLE);
         btnFfwd.setVisibility(View.INVISIBLE);
+        btnScreenshot.setOnClickListener(v -> takeScreenshot());
 
         View ivPlayingAtDoubleSpeed = findViewById(R.id.iv_playing_at_double_speed);
         ffwdIconAnimator = ObjectAnimator.ofFloat(ivPlayingAtDoubleSpeed, "alpha", 1f, 0f);
@@ -236,8 +290,121 @@ public class AlistClientVideoPlayer extends NormalGSYVideoPlayer {
             if (isEnableSeek && videoPlayer.getStartButton() != null && videoPlayer.getStartButton().getVisibility() == View.VISIBLE) {
                 videoPlayer.setCenterButtonsVisibility(View.VISIBLE);
             }
+            videoPlayer.btnScreenshot.setOnClickListener(v -> videoPlayer.takeScreenshot());
+            // propagate delete listener to fullscreen instance
+            videoPlayer.setOnDeleteClickListener(this.deleteClickListener);
+            videoPlayer.setOnPlaylistClickListener(this.playlistClickListener);
         }
         return videoPlayer;
+    }
+
+    public View getBtnScreenshot() {
+        return btnScreenshot;
+    }
+
+    private void takeScreenshot() {
+        try {
+            // find the actual video rendering view inside surface_container
+            ViewGroup container = findViewById(R.id.surface_container);
+            if (container == null) {
+                Toast.makeText(getContext(), "截图失败", Toast.LENGTH_SHORT).show();
+                return;
+            }
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                android.os.Handler handler = new android.os.Handler(android.os.Looper.getMainLooper());
+
+                // prefer TextureView: supports getBitmap() directly
+                TextureView textureView = findTextureView(container);
+                if (textureView != null) {
+                    Bitmap bitmap = textureView.getBitmap();
+                    if (bitmap != null) {
+                        saveBitmapToAlbum(bitmap);
+                        return;
+                    }
+                }
+
+                // fallback: PixelCopy on SurfaceView
+                SurfaceView surfaceView = findSurfaceView(container);
+                if (surfaceView != null) {
+                    Bitmap bitmap = Bitmap.createBitmap(surfaceView.getWidth(), surfaceView.getHeight(), Bitmap.Config.ARGB_8888);
+                    android.view.PixelCopy.request(surfaceView, bitmap, copyResult -> {
+                        if (copyResult == android.view.PixelCopy.SUCCESS) {
+                            saveBitmapToAlbum(bitmap);
+                        } else {
+                            Toast.makeText(getContext(), "截图失败", Toast.LENGTH_SHORT).show();
+                        }
+                    }, handler);
+                    return;
+                }
+
+                Toast.makeText(getContext(), "截图失败：未找到视频渲染层", Toast.LENGTH_SHORT).show();
+            } else {
+                // API < 26: TextureView only
+                TextureView textureView = findTextureView(container);
+                if (textureView != null) {
+                    Bitmap bitmap = textureView.getBitmap();
+                    if (bitmap != null) {
+                        saveBitmapToAlbum(bitmap);
+                        return;
+                    }
+                }
+                Toast.makeText(getContext(), "截图失败", Toast.LENGTH_SHORT).show();
+            }
+        } catch (Exception e) {
+            Toast.makeText(getContext(), "截图失败: " + e.getMessage(), Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    private TextureView findTextureView(ViewGroup root) {
+        for (int i = 0; i < root.getChildCount(); i++) {
+            View child = root.getChildAt(i);
+            if (child instanceof TextureView) return (TextureView) child;
+            if (child instanceof ViewGroup) {
+                TextureView found = findTextureView((ViewGroup) child);
+                if (found != null) return found;
+            }
+        }
+        return null;
+    }
+
+    private SurfaceView findSurfaceView(ViewGroup root) {
+        for (int i = 0; i < root.getChildCount(); i++) {
+            View child = root.getChildAt(i);
+            if (child instanceof SurfaceView) return (SurfaceView) child;
+            if (child instanceof ViewGroup) {
+                SurfaceView found = findSurfaceView((ViewGroup) child);
+                if (found != null) return found;
+            }
+        }
+        return null;
+    }
+
+    private void saveBitmapToAlbum(Bitmap bitmap) {
+        try {
+            String fileName = "screenshot_" + new SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(new Date()) + ".jpg";
+            OutputStream out;
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                ContentValues values = new ContentValues();
+                values.put(MediaStore.Images.Media.DISPLAY_NAME, fileName);
+                values.put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg");
+                values.put(MediaStore.Images.Media.RELATIVE_PATH, Environment.DIRECTORY_PICTURES);
+                Uri uri = getContext().getContentResolver().insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values);
+                if (uri == null) return;
+                out = getContext().getContentResolver().openOutputStream(uri);
+            } else {
+                File dir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES);
+                File file = new File(dir, fileName);
+                out = new FileOutputStream(file);
+            }
+            if (out != null) {
+                bitmap.compress(Bitmap.CompressFormat.JPEG, 95, out);
+                out.close();
+                Toast.makeText(getContext(), "截图已保存到相册", Toast.LENGTH_SHORT).show();
+            }
+        } catch (Exception e) {
+            Toast.makeText(getContext(), "截图失败: " + e.getMessage(), Toast.LENGTH_SHORT).show();
+        }
     }
 
     @Override

@@ -21,31 +21,81 @@ class CacheManagerScreen extends StatelessWidget {
       body: SingleChildScrollView(
         child: Column(
           children: [
-            ListTile(
-              title: Text(Intl.cacheManagement_imageCache.tr),
-              subtitle: Obx(() => Text(controller.imageCacheSizeStr.value)),
-              onTap: () {
-                controller.clearImageCache();
-              },
+            _CacheTile(
+              title: Intl.cacheManagement_imageCache.tr,
+              sizeStr: controller.imageCacheSizeStr,
+              onClear: () => _confirm(context, "清除图片缓存？", controller.clearImageCache),
             ),
             const Divider(),
-            ListTile(
-              title: Text(Intl.cacheManagement_audioCache.tr),
-              subtitle: Obx(() => Text(controller.audioCacheSizeStr.value)),
-              onTap: () {
-                controller.clearAudioCache();
-              },
+            _CacheTile(
+              title: "视频缓存",
+              sizeStr: controller.videoCacheSizeStr,
+              onClear: () => _confirm(context, "清除视频缓存？", controller.clearVideoCache),
             ),
             const Divider(),
-            ListTile(
-              title: Text(Intl.cacheManagement_otherCache.tr),
-              subtitle: Obx(() => Text(controller.otherCacheSizeStr.value)),
-              onTap: () {
-                controller.clearOtherCache();
-              },
+            _CacheTile(
+              title: Intl.cacheManagement_audioCache.tr,
+              sizeStr: controller.audioCacheSizeStr,
+              onClear: () => _confirm(context, "清除音频缓存？", controller.clearAudioCache),
             ),
+            const Divider(),
+            _CacheTile(
+              title: Intl.cacheManagement_otherCache.tr,
+              sizeStr: controller.otherCacheSizeStr,
+              onClear: () => _confirm(context, "清除其他缓存？", controller.clearOtherCache),
+            ),
+            const Divider(),
+            Obx(() => ListTile(
+              title: const Text("清除全部缓存"),
+              subtitle: Text("共 ${controller.totalCacheSizeStr.value}"),
+              trailing: const Icon(Icons.delete_sweep_outlined),
+              onTap: () => _confirm(context, "清除全部缓存？", controller.clearAllCache),
+            )),
           ],
         ),
+      ),
+    );
+  }
+
+  void _confirm(BuildContext context, String message, VoidCallback onConfirm) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text("确认"),
+        content: Text(message),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("取消")),
+          TextButton(
+            onPressed: () {
+              Navigator.pop(ctx);
+              onConfirm();
+            },
+            child: const Text("确定"),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _CacheTile extends StatelessWidget {
+  const _CacheTile({
+    required this.title,
+    required this.sizeStr,
+    required this.onClear,
+  });
+  final String title;
+  final RxString sizeStr;
+  final VoidCallback onClear;
+
+  @override
+  Widget build(BuildContext context) {
+    return ListTile(
+      title: Text(title),
+      subtitle: Obx(() => Text(sizeStr.value)),
+      trailing: IconButton(
+        icon: const Icon(Icons.delete_outline),
+        onPressed: onClear,
       ),
     );
   }
@@ -54,13 +104,17 @@ class CacheManagerScreen extends StatelessWidget {
 class CacheManagerController extends GetxController {
   var _imageCacheSize = 0;
   var _audioCacheSize = 0;
+  var _videoCacheSize = 0;
   var _otherCacheSize = 0;
   var imageCacheSizeStr = "0 B".obs;
   var audioCacheSizeStr = "0 B".obs;
+  var videoCacheSizeStr = "0 B".obs;
   var otherCacheSizeStr = "0 B".obs;
+  var totalCacheSizeStr = "0 B".obs;
 
   final Set<String> _imageCachePaths = {};
   final Set<String> _audioCachePaths = {};
+  final Set<String> _videoCachePaths = {};
   String _downloadDir = "";
 
   @override
@@ -72,16 +126,25 @@ class CacheManagerController extends GetxController {
   void _calculateCacheFilesSize() async {
     var temporaryDirectory = await getTemporaryDirectory();
     _downloadDir = (await DownloadManager.acquireDownloadDirectory()).path;
-    if (isClosed) {
-      return;
-    }
+    final videoDir = await DownloadManager.findDownloadDir("video");
+    if (isClosed) return;
     _imageCachePaths.add(path.join(temporaryDirectory.path, "cacheimage"));
-    _imageCachePaths
-        .add(path.join(temporaryDirectory.path, "libCachedImageData"));
-    _audioCachePaths
-        .add(path.join(temporaryDirectory.path, "just_audio_cache"));
+    _imageCachePaths.add(path.join(temporaryDirectory.path, "libCachedImageData"));
+    _audioCachePaths.add(path.join(temporaryDirectory.path, "just_audio_cache"));
+    // flutter_aliplayer local cache lives in the video download dir
+    _videoCachePaths.add(videoDir.path);
 
     await _calculateDirectoryFilesSize(temporaryDirectory);
+    // video cache is outside temp dir, calculate separately
+    if (await videoDir.exists()) {
+      await _calculateDirectoryFilesSize(videoDir);
+    }
+    _updateTotal();
+  }
+
+  void _updateTotal() {
+    final total = _imageCacheSize + _audioCacheSize + _videoCacheSize + _otherCacheSize;
+    totalCacheSizeStr.value = _formatBytes(total);
   }
 
   Future<void> _calculateDirectoryFilesSize(Directory directory) async {
@@ -103,6 +166,9 @@ class CacheManagerController extends GetxController {
         } else if (_checkIsAudioPath(path)) {
           _audioCacheSize += filesSize;
           audioCacheSizeStr.value = _formatBytes(_audioCacheSize);
+        } else if (_checkIsVideoPath(path)) {
+          _videoCacheSize += filesSize;
+          videoCacheSizeStr.value = _formatBytes(_videoCacheSize);
         } else if (path.startsWith(_downloadDir)) {
           // do nothing
         } else {
@@ -132,9 +198,14 @@ class CacheManagerController extends GetxController {
 
   bool _checkIsAudioPath(String path) {
     for (var value in _audioCachePaths) {
-      if (path.startsWith(value)) {
-        return true;
-      }
+      if (path.startsWith(value)) return true;
+    }
+    return false;
+  }
+
+  bool _checkIsVideoPath(String path) {
+    for (var value in _videoCachePaths) {
+      if (path.startsWith(value)) return true;
     }
     return false;
   }
@@ -195,21 +266,34 @@ class CacheManagerController extends GetxController {
 
   void clearImageCache() async {
     SmartDialog.showLoading(msg: Intl.cacheManagement_tips_clearing_cache.tr);
-    for (var path in _imageCachePaths) {
-      await _deleteFilesByDirectory(Directory(path));
+    for (var p in _imageCachePaths) {
+      await _deleteFilesByDirectory(Directory(p));
     }
     _imageCacheSize = 0;
     imageCacheSizeStr.value = "0 B";
+    _updateTotal();
+    SmartDialog.dismiss();
+  }
+
+  void clearVideoCache() async {
+    SmartDialog.showLoading(msg: Intl.cacheManagement_tips_clearing_cache.tr);
+    for (var p in _videoCachePaths) {
+      await _deleteFilesByDirectory(Directory(p));
+    }
+    _videoCacheSize = 0;
+    videoCacheSizeStr.value = "0 B";
+    _updateTotal();
     SmartDialog.dismiss();
   }
 
   void clearAudioCache() async {
     SmartDialog.showLoading(msg: Intl.cacheManagement_tips_clearing_cache.tr);
-    for (var path in _audioCachePaths) {
-      await _deleteFilesByDirectory(Directory(path));
+    for (var p in _audioCachePaths) {
+      await _deleteFilesByDirectory(Directory(p));
     }
     _audioCacheSize = 0;
     audioCacheSizeStr.value = "0 B";
+    _updateTotal();
     SmartDialog.dismiss();
   }
 
@@ -219,12 +303,24 @@ class CacheManagerController extends GetxController {
     var excludePaths = <String>[];
     excludePaths.addAll(_imageCachePaths);
     excludePaths.addAll(_audioCachePaths);
+    excludePaths.addAll(_videoCachePaths);
     excludePaths.add(_downloadDir);
-    await _deleteFilesByDirectory(temporaryDirectory,
-        excludePaths: excludePaths);
-
+    await _deleteFilesByDirectory(temporaryDirectory, excludePaths: excludePaths);
     _otherCacheSize = 0;
     otherCacheSizeStr.value = "0 B";
+    _updateTotal();
+    SmartDialog.dismiss();
+  }
+
+  void clearAllCache() async {
+    SmartDialog.showLoading(msg: Intl.cacheManagement_tips_clearing_cache.tr);
+    var temporaryDirectory = await getTemporaryDirectory();
+    await _deleteFilesByDirectory(temporaryDirectory, excludePaths: [_downloadDir]);
+    _imageCacheSize = 0; imageCacheSizeStr.value = "0 B";
+    _videoCacheSize = 0; videoCacheSizeStr.value = "0 B";
+    _audioCacheSize = 0; audioCacheSizeStr.value = "0 B";
+    _otherCacheSize = 0; otherCacheSizeStr.value = "0 B";
+    totalCacheSizeStr.value = "0 B";
     SmartDialog.dismiss();
   }
 }

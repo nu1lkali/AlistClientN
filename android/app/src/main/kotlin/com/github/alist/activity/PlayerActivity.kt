@@ -1,5 +1,8 @@
 package com.github.alist.activity
 
+import android.animation.Animator
+import android.animation.AnimatorListenerAdapter
+import android.animation.ObjectAnimator
 import android.content.res.Configuration
 import android.os.Bundle
 import android.os.Handler
@@ -16,6 +19,8 @@ import androidx.core.view.WindowInsetsControllerCompat
 import androidx.core.view.isInvisible
 import androidx.core.view.isVisible
 import androidx.core.view.updateLayoutParams
+import androidx.recyclerview.widget.LinearLayoutManager
+import androidx.recyclerview.widget.RecyclerView
 import com.github.alist.bean.VideoItem
 import com.github.alist.client.BuildConfig
 import com.github.alist.client.R
@@ -52,6 +57,9 @@ class PlayerActivity : AppCompatActivity(), GSYVideoProgressListener {
     private lateinit var orientationUtils: OrientationUtils
     private var isPause = false
     private var isPlay = true
+    private var isPlaylistVisible = false
+    private lateinit var playlistDrawer: View
+    private lateinit var playlistAdapter: PlaylistAdapter
 
     private val messageRecordWatchTime = 1
     private val handler = object : Handler(Looper.getMainLooper()) {
@@ -116,6 +124,29 @@ class PlayerActivity : AppCompatActivity(), GSYVideoProgressListener {
         gsyVideoPlayer.setGSYVideoProgressListener(this)
         orientationUtils = OrientationUtils(this, gsyVideoPlayer)
         orientationUtils.isEnable = false
+
+        // playlist drawer
+        playlistDrawer = findViewById(R.id.playlist_drawer)
+        // key fix: drawer must not intercept touches when hidden
+        playlistDrawer.visibility = View.GONE
+
+        val rvPlaylist = findViewById<RecyclerView>(R.id.rv_playlist)
+        playlistAdapter = PlaylistAdapter(videos, index) { clickedIndex ->
+            if (clickedIndex != index) {
+                saveCurrentTime()
+                index = clickedIndex
+                currentTime = 0; totalTime = 0
+                startPlay(index, videos[index])
+                FlutterMethods.addFileViewingRecord(videos[index])
+                playlistAdapter.updateCurrentIndex(index)
+            }
+            togglePlaylist()
+        }
+        rvPlaylist.layoutManager = LinearLayoutManager(this)
+        rvPlaylist.adapter = playlistAdapter
+
+        gsyVideoPlayer.setOnPlaylistClickListener { togglePlaylist() }
+        gsyVideoPlayer.setOnDeleteClickListener { confirmDelete() }
 
         val gsyVideoOption = GSYVideoOptionBuilder()
         gsyVideoOption
@@ -187,7 +218,9 @@ class PlayerActivity : AppCompatActivity(), GSYVideoProgressListener {
         gsyVideoPlayer.fullscreenButton.setOnClickListener { //直接横屏
             orientationUtils.resolveByClick()
             gsyVideoPlayer.startWindowFullscreen(this@PlayerActivity, true, true)?.let {
-                PlayerWrapper(it as AlistClientVideoPlayer).initViews()
+                val fullPlayer = it as AlistClientVideoPlayer
+                val wrapper = PlayerWrapper(fullPlayer)
+                wrapper.initViews()
             }
         }
 
@@ -238,6 +271,7 @@ class PlayerActivity : AppCompatActivity(), GSYVideoProgressListener {
         val currentPlayer = playerWrapper.videoPlayer.currentPlayer as NormalGSYVideoPlayer
         playerWrapper.tvTitle.text = video.name.substringBeforeLast(".")
         currentPlayer.titleTextView.text = video.name.substringBeforeLast(".")
+        playlistAdapter.updateCurrentIndex(index)
 
         if (index == 0) {
             playerWrapper.btnPrevious.alpha = 0.5f
@@ -307,11 +341,71 @@ class PlayerActivity : AppCompatActivity(), GSYVideoProgressListener {
 
 
     override fun onBackPressed() {
+        if (isPlaylistVisible) {
+            togglePlaylist()
+            return
+        }
         orientationUtils.backToProtVideo()
         if (GSYVideoManager.backFromWindowFull(this)) {
             return
         }
         super.onBackPressed()
+    }
+
+    private fun confirmDelete() {
+        if (videos.isEmpty()) return
+        val video = videos[index]
+        val name = video.name.substringBeforeLast(".")
+        androidx.appcompat.app.AlertDialog.Builder(this)
+            .setTitle("删除视频")
+            .setMessage("确定删除「$name」？此操作不可撤销。")
+            .setPositiveButton("删除") { _, _ ->
+                gsyVideoPlayer.currentPlayer.release()
+                isPlay = false
+                SmartToast.show(this, "正在删除…")
+                FlutterMethods.deleteRemoteFile(video.remotePath) { success ->
+                    runOnUiThread {
+                        if (success) {
+                            FlutterMethods.deleteVideoRecord(video.remotePath)
+                            finish()
+                        } else {
+                            SmartToast.show(this, "删除失败")
+                            isPlay = true
+                        }
+                    }
+                }
+            }
+            .setNegativeButton("取消", null)
+            .show()
+    }
+
+    private object SmartToast {
+        fun show(context: android.content.Context, msg: String) {
+            android.widget.Toast.makeText(context, msg, android.widget.Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    private fun togglePlaylist() {
+        val drawerWidth = resources.displayMetrics.density * 260
+        if (isPlaylistVisible) {
+            ObjectAnimator.ofFloat(playlistDrawer, "translationX", 0f, drawerWidth).apply {
+                duration = 250
+                addListener(object : AnimatorListenerAdapter() {
+                    override fun onAnimationEnd(animation: Animator) {
+                        playlistDrawer.visibility = View.GONE
+                    }
+                })
+                start()
+            }
+        } else {
+            playlistDrawer.translationX = drawerWidth
+            playlistDrawer.visibility = View.VISIBLE
+            ObjectAnimator.ofFloat(playlistDrawer, "translationX", drawerWidth, 0f).apply {
+                duration = 250
+                start()
+            }
+        }
+        isPlaylistVisible = !isPlaylistVisible
     }
 
 
@@ -346,6 +440,8 @@ class PlayerActivity : AppCompatActivity(), GSYVideoProgressListener {
             videoPlayer.btnPrevious.alpha = if (index > 0) 1f else 0.5f
             videoPlayer.btnNext.alpha = if (index >= videos.lastIndex) 0.5f else 1f
 
+            btnBack.setOnClickListener { finish() }
+
             btnPrevious.setOnClickListener {
                 saveCurrentTime()
                 playPrevious()
@@ -355,7 +451,6 @@ class PlayerActivity : AppCompatActivity(), GSYVideoProgressListener {
                 playNext()
             }
             videoPlayer.setOnLongClickListener {
-
                 true
             }
         }
@@ -370,5 +465,42 @@ class PlayerActivity : AppCompatActivity(), GSYVideoProgressListener {
             btnNext = videoPlayer.findViewById(R.id.btn_next)
             btnPlayStart = videoPlayer.findViewById(R.id.start)
         }
+    }
+}
+
+class PlaylistAdapter(
+    private val videos: List<VideoItem>,
+    private var currentIndex: Int,
+    private val onItemClick: (Int) -> Unit
+) : RecyclerView.Adapter<PlaylistAdapter.VH>() {
+
+    inner class VH(view: View) : RecyclerView.ViewHolder(view) {
+        val tvIndex: TextView = view.findViewById(R.id.tv_index)
+        val tvName: TextView = view.findViewById(R.id.tv_name)
+    }
+
+    override fun onCreateViewHolder(parent: android.view.ViewGroup, viewType: Int): VH {
+        val view = android.view.LayoutInflater.from(parent.context)
+            .inflate(R.layout.item_playlist, parent, false)
+        return VH(view)
+    }
+
+    override fun onBindViewHolder(holder: VH, position: Int) {
+        val video = videos[position]
+        holder.tvIndex.text = "${position + 1}"
+        holder.tvName.text = video.name.substringBeforeLast(".")
+        val isPlaying = position == currentIndex
+        holder.tvName.alpha = if (isPlaying) 1f else 0.7f
+        holder.tvName.setTypeface(null, if (isPlaying) android.graphics.Typeface.BOLD else android.graphics.Typeface.NORMAL)
+        holder.itemView.setOnClickListener { onItemClick(position) }
+    }
+
+    override fun getItemCount() = videos.size
+
+    fun updateCurrentIndex(newIndex: Int) {
+        val old = currentIndex
+        currentIndex = newIndex
+        notifyItemChanged(old)
+        notifyItemChanged(newIndex)
     }
 }

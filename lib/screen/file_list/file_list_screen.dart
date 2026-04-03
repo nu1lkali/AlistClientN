@@ -226,6 +226,8 @@ class _FileListScreenState extends State<FileListScreen>
       if (_menuAnchorController.isGridView.value) {
         _loadFolderThumbs(fileItemVOs);
       }
+      // async load video watch progress
+      _loadVideoProgress(fileItemVOs);
     }, onError: (code, msg) {
       _refreshController.refreshFailed();
       _forceRefresh = false;
@@ -526,6 +528,9 @@ class _FileListScreenState extends State<FileListScreen>
           refreshController: _refreshController,
           hasWritePermission: _hasWritePermission,
           isGridView: _menuAnchorController.isGridView.value,
+          groupByDate: !_menuAnchorController.isGridView.value &&
+              _menuAnchorController.filterMode.value != FilterMode.none &&
+              _menuAnchorController.sortBy.value == MenuId.modifyTime,
           onFileItemClick: (context, index) {
             _onFileTap(context, index, false);
           },
@@ -784,6 +789,24 @@ class _FileListScreenState extends State<FileListScreen>
         .deleteByPath(user.serverUrl, user.username, path);
   }
 
+  void _loadVideoProgress(List<FileItemVO> files) async {
+    final user = _userController.user.value;
+    for (final file in files) {
+      if (!mounted) return;
+      if (file.isDir || file.type != FileType.video) continue;
+      final record = await _databaseController.videoViewingRecordDao
+          .findRecordByPath(user.baseUrl, user.username, file.path);
+      if (record != null && record.videoDuration > 0 && mounted) {
+        final progress = record.videoCurrentPosition / record.videoDuration;
+        if (progress > 0.01 && progress < 0.99) {
+          setState(() {
+            file.watchProgress = progress.clamp(0.0, 1.0);
+          });
+        }
+      }
+    }
+  }
+
   void _loadFolderThumbs(List<FileItemVO> files) async {
     final user = _userController.user.value;
     final serverUrl = user.serverUrl;
@@ -803,23 +826,37 @@ class _FileListScreenState extends State<FileListScreen>
           params: body,
           onSuccess: (data) {
             if (!mounted) return;
-            final firstImage = data?.content?.firstWhere(
-              (f) => !f.isDir && FileUtils.getFileType(false, f.name) == FileType.image,
+            final content = data?.content ?? [];
+
+            // 1. prefer video with server-provided thumb
+            FileListRespContent? candidate = content.firstWhere(
+              (f) => !f.isDir
+                  && FileUtils.getFileType(false, f.name) == FileType.video
+                  && f.thumb.isNotEmpty,
               orElse: () => FileListRespContent(),
             );
-            if (firstImage == null || firstImage.name.isEmpty) return;
+
+            // 2. fallback: any image ≤ 10MB
+            if (candidate.name.isEmpty) {
+              candidate = content.firstWhere(
+                (f) => !f.isDir
+                    && FileUtils.getFileType(false, f.name) == FileType.image
+                    && (f.size == null || f.size! <= 10 * 1024 * 1024),
+                orElse: () => FileListRespContent(),
+              );
+            }
+
+            if (candidate.name.isEmpty) return;
 
             String thumbUrl;
-            if (firstImage.thumb.isNotEmpty) {
-              // use server-provided thumbnail directly
-              thumbUrl = FileUtils.getCompleteThumbnail(firstImage.thumb)!;
+            if (candidate.thumb.isNotEmpty) {
+              thumbUrl = FileUtils.getCompleteThumbnail(candidate.thumb)!;
             } else {
-              // build /d/ download URL with sign
-              final imgPath = firstImage.getCompletePath(file.path);
-              final encoded = imgPath.split('/').map((s) => s.isEmpty ? s : Uri.encodeComponent(s)).join('/');
+              final itemPath = candidate.getCompletePath(file.path);
+              final encoded = itemPath.split('/').map((s) => s.isEmpty ? s : Uri.encodeComponent(s)).join('/');
               thumbUrl = "${serverUrl}p$encoded";
-              if (firstImage.sign.isNotEmpty) {
-                thumbUrl = "$thumbUrl?sign=${firstImage.sign}";
+              if (candidate.sign.isNotEmpty) {
+                thumbUrl = "$thumbUrl?sign=${candidate.sign}";
               }
             }
 
@@ -1034,7 +1071,7 @@ class _FileListScreenState extends State<FileListScreen>
                     title: Text(Intl.fileList_menu_details.tr),
                     onTap: () {
                       Navigator.pop(context);
-                      _showDetailsDialog(widgetContext, file);
+                      _showDetailsDialog(widgetContext, file, password: _password);
                     },
                   ),
                 ],
@@ -1395,6 +1432,7 @@ class _FileListView extends StatelessWidget {
     this.fileDeleteCallback,
     this.onFileLongPress,
     required this.refreshCallback,
+    this.groupByDate = false,
   }) : super(key: key);
   final String? path;
   final String? readme;
@@ -1409,6 +1447,7 @@ class _FileListView extends StatelessWidget {
   final FileItemClickCallback? onFileLongPress;
   final RefreshController refreshController;
   final VoidCallback refreshCallback;
+  final bool groupByDate;
 
   @override
   Widget build(BuildContext context) {
@@ -1439,6 +1478,11 @@ class _FileListView extends StatelessWidget {
           },
         ),
       );
+    }
+
+    // build grouped list when groupByDate is enabled
+    if (groupByDate && !isGridView) {
+      return _buildGroupedList(context);
     }
 
     return SmartRefresher(
@@ -1524,6 +1568,7 @@ class _FileListView extends StatelessWidget {
                       thumbnail: file.thumb,
                       time: file.modified,
                       sizeDesc: file.sizeDesc,
+                      watchProgress: file.watchProgress,
                       onTap: () => onFileItemClick(context, index),
                       onMoreIconButtonTap: () {
                         if (onFileMoreIconButtonTap != null) {
@@ -1559,6 +1604,113 @@ class _FileListView extends StatelessWidget {
     );
   }
 
+  Widget _buildGroupedList(BuildContext context) {
+    // group files by date (folders go first ungrouped)
+    final folders = files.where((f) => f.isDir).toList();
+    final mediaFiles = files.where((f) => !f.isDir).toList();
+
+    // build date → [original index] map
+    final groups = <String, List<int>>{};
+    for (int i = 0; i < mediaFiles.length; i++) {
+      final f = mediaFiles[i];
+      String dateKey;
+      if (f.modifiedMilliseconds > 0) {
+        final dt = DateTime.fromMillisecondsSinceEpoch(f.modifiedMilliseconds);
+        dateKey = "${dt.year}-${dt.month.toString().padLeft(2, '0')}-${dt.day.toString().padLeft(2, '0')}";
+      } else {
+        dateKey = "未知日期";
+      }
+      groups.putIfAbsent(dateKey, () => []).add(files.indexOf(f));
+    }
+
+    // build flat item list: folder items + date headers + media items
+    final items = <_GroupListItem>[];
+    for (int i = 0; i < folders.length; i++) {
+      items.add(_GroupListItem(fileIndex: files.indexOf(folders[i])));
+    }
+    for (final entry in groups.entries) {
+      items.add(_GroupListItem(dateHeader: entry.key));
+      for (final idx in entry.value) {
+        items.add(_GroupListItem(fileIndex: idx));
+      }
+    }
+
+    return SmartRefresher(
+      controller: refreshController,
+      onRefresh: refreshCallback,
+      child: ListView.builder(
+        itemCount: items.length,
+        itemBuilder: (context, i) {
+          final item = items[i];
+          if (item.dateHeader != null) {
+            return Padding(
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+              child: Text(
+                item.dateHeader!,
+                style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                  color: Theme.of(context).colorScheme.outline,
+                ),
+              ),
+            );
+          }
+          final idx = item.fileIndex!;
+          final file = files[idx];
+          return _buildListItem(context, file, idx);
+        },
+      ),
+    );
+  }
+
+  Widget _buildListItem(BuildContext context, FileItemVO file, int index) {
+    return GestureDetector(
+      onLongPress: onFileLongPress != null
+          ? () => onFileLongPress!(context, index)
+          : null,
+      child: Slidable(
+        key: Key(file.path),
+        endActionPane: ActionPane(
+          motion: const DrawerMotion(),
+          extentRatio: hasWritePermission ? 0.5 : 0.25,
+          children: [
+            SlidableAction(
+              onPressed: (context) => _showDetailsDialog(context, file),
+              backgroundColor: Get.theme.colorScheme.secondary,
+              foregroundColor: Colors.white,
+              label: Intl.recentsScreen_menu_details.tr,
+            ),
+            if (hasWritePermission)
+              SlidableAction(
+                onPressed: (context) {
+                  if (null != fileDeleteCallback) {
+                    fileDeleteCallback!(context, index);
+                  }
+                },
+                backgroundColor: const Color(0xFFFE4A49),
+                foregroundColor: Colors.white,
+                label: Intl.recentsScreen_menu_delete.tr,
+              ),
+          ],
+        ),
+        child: FileListItemView(
+          icon: file.icon,
+          fileName: file.name,
+          thumbnail: file.thumb,
+          time: file.modified,
+          sizeDesc: file.sizeDesc,
+          watchProgress: file.watchProgress,
+          onTap: () => onFileItemClick(context, index),
+          onMoreIconButtonTap: () {
+            if (onFileMoreIconButtonTap != null) {
+              onFileMoreIconButtonTap!(context, index);
+            }
+          },
+        ),
+      ),
+    );
+  }
+
   Widget _buildGridItem(BuildContext context, FileItemVO file, int index) {
     return GestureDetector(
       onTap: () => onFileItemClick(context, index),
@@ -1571,6 +1723,7 @@ class _FileListView extends StatelessWidget {
         icon: file.icon,
         name: file.name,
         thumb: file.thumb.isNotEmpty ? file.thumb : file.folderThumb,
+        watchProgress: file.watchProgress,
       ),
     );
   }
@@ -1592,7 +1745,7 @@ class _FileListView extends StatelessWidget {
   }
 }
 
-_showDetailsDialog(BuildContext context, FileItemVO file) {
+_showDetailsDialog(BuildContext context, FileItemVO file, {String? password}) {
   showModalBottomSheet(
     context: Get.context!,
     builder: (context) => FileDetailsDialog(
@@ -1602,6 +1755,8 @@ _showDetailsDialog(BuildContext context, FileItemVO file) {
       modified: file.modified,
       thumb: file.thumb,
       provider: file.provider,
+      isDir: file.isDir,
+      password: password,
     ),
   );
 }
@@ -1621,11 +1776,13 @@ class _GridItemWidget extends StatelessWidget {
     required this.icon,
     required this.name,
     this.thumb,
+    this.watchProgress,
   });
 
   final String icon;
   final String name;
   final String? thumb;
+  final double? watchProgress;
 
   @override
   Widget build(BuildContext context) {
@@ -1634,37 +1791,54 @@ class _GridItemWidget extends StatelessWidget {
       mainAxisAlignment: MainAxisAlignment.center,
       children: [
         Expanded(
-          child: completeThumbnail != null && completeThumbnail.isNotEmpty
-              ? ClipRRect(
-                  borderRadius: const BorderRadius.vertical(top: Radius.circular(6)),
-                  child: Image.network(
-                    completeThumbnail,
-                    fit: BoxFit.cover,
-                    width: double.infinity,
-                    height: double.infinity,
-                    // limit decode size to save memory, thumbnails don't need full resolution
-                    cacheWidth: 200,
-                    errorBuilder: (_, __, ___) =>
-                        Center(child: Image.asset(icon, width: 48, height: 48)),
-                    loadingBuilder: (_, child, progress) {
-                      if (progress == null) return child;
-                      return Center(
-                        child: SizedBox(
-                          width: 24,
-                          height: 24,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 2,
-                            value: progress.expectedTotalBytes != null
-                                ? progress.cumulativeBytesLoaded /
-                                    progress.expectedTotalBytes!
-                                : null,
-                          ),
-                        ),
-                      );
-                    },
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+              completeThumbnail != null && completeThumbnail.isNotEmpty
+                  ? ClipRRect(
+                      borderRadius: const BorderRadius.vertical(top: Radius.circular(6)),
+                      child: Image.network(
+                        completeThumbnail,
+                        fit: BoxFit.cover,
+                        width: double.infinity,
+                        height: double.infinity,
+                        cacheWidth: 200,
+                        errorBuilder: (_, __, ___) =>
+                            Center(child: Image.asset(icon, width: 48, height: 48)),
+                        loadingBuilder: (_, child, progress) {
+                          if (progress == null) return child;
+                          return Center(
+                            child: SizedBox(
+                              width: 24,
+                              height: 24,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                value: progress.expectedTotalBytes != null
+                                    ? progress.cumulativeBytesLoaded /
+                                        progress.expectedTotalBytes!
+                                    : null,
+                              ),
+                            ),
+                          );
+                        },
+                      ),
+                    )
+                  : Center(child: Image.asset(icon, width: 48, height: 48)),
+              // watch progress bar at bottom of thumbnail
+              if (watchProgress != null)
+                Positioned(
+                  left: 0,
+                  right: 0,
+                  bottom: 0,
+                  child: LinearProgressIndicator(
+                    value: watchProgress,
+                    minHeight: 3,
+                    backgroundColor: Colors.white24,
+                    valueColor: const AlwaysStoppedAnimation<Color>(Color(0xFFFF6B35)),
                   ),
-                )
-              : Center(child: Image.asset(icon, width: 48, height: 48)),
+                ),
+            ],
+          ),
         ),
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
@@ -1679,4 +1853,10 @@ class _GridItemWidget extends StatelessWidget {
       ],
     );
   }
+}
+
+class _GroupListItem {
+  final String? dateHeader;
+  final int? fileIndex;
+  _GroupListItem({this.dateHeader, this.fileIndex});
 }

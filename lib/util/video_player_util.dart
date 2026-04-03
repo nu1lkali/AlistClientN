@@ -44,6 +44,23 @@ class VideoPlayerUtil {
   static void _playUrlWithInternalPlayer(List<VideoItem> videos, int index,
       {String? playerType}) async {
     if (Platform.isAndroid) {
+      // auto-select ijkplayer for formats ExoPlayer handles poorly
+      if (playerType == null) {
+        playerType = SpUtil.getString(AlistConstant.playerType);
+        if (playerType == null || playerType.isEmpty) {
+          final ext = videos[index].name
+              .substringAfterLast(".")
+              ?.toLowerCase() ?? "";
+          const ijkFormats = {
+            "rmvb", "rm", "vob", "dat", "divx", "xvid",
+            "avi", "wmv", "asf", "asx", "m2ts", "mts",
+            "tp", "trp", "dv", "mxf", "wtv", "dvr-ms",
+          };
+          if (ijkFormats.contains(ext)) {
+            playerType = "ijkplayer";
+          }
+        }
+      }
       var videosParams = <Map<String, String?>>[];
       Map<String, String> headers = {};
 
@@ -69,7 +86,6 @@ class VideoPlayerUtil {
           headers["User-Agent"] = "pan.baidu.com";
         }
       }
-      playerType ??= SpUtil.getString(AlistConstant.playerType);
       AlistPlugin.playVideoWithInternalPlayer(
           videosParams, index, headers, playerType);
     } else {

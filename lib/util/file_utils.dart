@@ -61,7 +61,6 @@ class FileUtils {
       case "xz":
       case "lzh":
       case "cab":
-      case "iso":
         return FileType.compress;
       case "eml":
         return FileType.email;
@@ -137,6 +136,24 @@ class FileUtils {
       case "vob":
       case "flv":
       case "ts":
+      case "webm":
+      case "divx":
+      case "xvid":
+      case "hevc":
+      case "h265":
+      case "h264":
+      case "264":
+      case "265":
+      case "m2ts":
+      case "mts":
+      case "tp":
+      case "trp":
+      case "iso":
+      case "ogv":
+      case "dv":
+      case "mxf":
+      case "wtv":
+      case "dvr-ms":
         return FileType.video;
       case "doc":
       case "docx":

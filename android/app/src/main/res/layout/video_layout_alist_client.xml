@@ -69,9 +69,17 @@
             android:id="@+id/fullscreen"
             android:layout_width="wrap_content"
             android:layout_height="fill_parent"
-            android:paddingRight="16dp"
+            android:paddingRight="8dp"
             android:scaleType="center"
             android:src="@drawable/video_enlarge" />
+
+        <ImageView
+            android:id="@+id/btn_screenshot"
+            android:layout_width="wrap_content"
+            android:layout_height="fill_parent"
+            android:paddingRight="16dp"
+            android:scaleType="center"
+            android:src="@android:drawable/ic_menu_camera" />
     </LinearLayout>
 
     <ProgressBar
@@ -108,11 +116,32 @@
 
         <TextView
             android:id="@+id/title"
-            android:layout_width="wrap_content"
+            android:layout_width="0dp"
             android:layout_height="wrap_content"
+            android:layout_weight="1"
             android:paddingLeft="10dp"
             android:textColor="@android:color/white"
-            android:textSize="18sp" />
+            android:textSize="18sp"
+            android:ellipsize="end"
+            android:maxLines="1" />
+
+        <ImageView
+            android:id="@+id/btn_playlist"
+            android:layout_width="48dp"
+            android:layout_height="48dp"
+            android:paddingRight="4dp"
+            android:scaleType="centerInside"
+            android:src="@android:drawable/ic_menu_sort_by_size"
+            android:tint="@android:color/white" />
+
+        <ImageView
+            android:id="@+id/btn_delete"
+            android:layout_width="48dp"
+            android:layout_height="48dp"
+            android:paddingRight="10dp"
+            android:scaleType="centerInside"
+            android:src="@android:drawable/ic_menu_delete"
+            android:tint="@android:color/white" />
     </LinearLayout>
 
 

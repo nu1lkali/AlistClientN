@@ -3,7 +3,10 @@ import 'dart:convert';
 import 'package:alist/database/alist_database_controller.dart';
 import 'package:alist/database/table/file_viewing_record.dart';
 import 'package:alist/database/table/video_viewing_record.dart';
+import 'package:alist/entity/file_remove_req.dart';
+import 'package:alist/net/dio_utils.dart';
 import 'package:alist/util/proxy.dart';
+import 'package:alist/util/string_utils.dart';
 import 'package:alist/util/user_controller.dart';
 import 'package:flutter/services.dart';
 import 'package:get/get.dart';
@@ -74,6 +77,23 @@ class MethodCallHandler {
         ProxyServer proxyServer = Get.find();
         proxyServer.stop();
         return "";
+
+      case "deleteRemoteFile":
+        // called from PlayerActivity when user confirms delete
+        final String filePath = call.arguments["path"];
+        final String fileName = filePath.substringAfterLast("/") ?? "";
+        final String dir = filePath.substringBeforeLast("/$fileName") ?? "/";
+        FileRemoveReq req = FileRemoveReq();
+        req.dir = dir.isEmpty ? "/" : dir;
+        req.names = [fileName];
+        String deleteResult = "error";
+        await DioUtils.instance.requestNetwork<String?>(
+          Method.post, "fs/remove",
+          params: req.toJson(),
+          onSuccess: (_) { deleteResult = "ok"; },
+          onError: (_, msg) { deleteResult = msg; },
+        );
+        return deleteResult;
 
       case "addFileViewingRecord":
         String path = call.arguments["path"];

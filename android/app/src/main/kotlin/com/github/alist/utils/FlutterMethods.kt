@@ -55,6 +55,24 @@ object FlutterMethods {
         channel.invokeMethod("onPayerDestroyed", "")
     }
 
+    fun deleteRemoteFile(path: String, callback: (Boolean) -> Unit) {
+        channel.invokeMethod(
+            "deleteRemoteFile",
+            mutableMapOf("path" to path),
+            object : MethodChannel.Result {
+                override fun success(result: Any?) {
+                    callback(result == "ok")
+                }
+                override fun error(p0: String, p1: String?, p2: Any?) {
+                    callback(false)
+                }
+                override fun notImplemented() {
+                    callback(false)
+                }
+            }
+        )
+    }
+
     fun addFileViewingRecord(video: VideoItem) {
         channel.invokeMethod(
             "addFileViewingRecord",

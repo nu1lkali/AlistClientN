@@ -1,6 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
-    android:orientation="vertical"
     android:layout_width="match_parent"
     android:layout_height="match_parent">
 
@@ -8,4 +7,23 @@
         android:id="@+id/video_player"
         android:layout_width="match_parent"
         android:layout_height="match_parent" />
+
+    <!-- playlist drawer: slides in from right, hidden by default -->
+    <FrameLayout
+        android:id="@+id/playlist_drawer"
+        android:layout_width="260dp"
+        android:layout_height="match_parent"
+        android:layout_gravity="end"
+        android:background="#CC000000"
+        android:visibility="gone"
+        android:translationX="260dp">
+
+        <androidx.recyclerview.widget.RecyclerView
+            android:id="@+id/rv_playlist"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:paddingTop="48dp"
+            android:clipToPadding="false" />
+    </FrameLayout>
+
 </FrameLayout>

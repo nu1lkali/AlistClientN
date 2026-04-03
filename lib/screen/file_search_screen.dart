@@ -11,6 +11,7 @@ import 'package:alist/screen/file_reader_screen.dart';
 import 'package:alist/screen/gallery_screen.dart';
 import 'package:alist/screen/pdf_reader_screen.dart';
 import 'package:alist/screen/video_player_screen.dart';
+import 'package:alist/util/download/download_manager.dart';
 import 'package:alist/util/file_password_helper.dart';
 import 'package:alist/util/file_type.dart';
 import 'package:alist/util/file_utils.dart';
@@ -51,59 +52,85 @@ class FileSearchScreen extends StatelessWidget {
       showAppbar: false,
       body: Column(
         children: [
-          Padding(
-            padding: const EdgeInsets.only(left: 15),
-            child: Row(
-              children: [
-                Expanded(
-                  child: DecoratedBox(
-                    decoration: BoxDecoration(
-                        color: searchBoxBackground,
-                        borderRadius:
-                            const BorderRadius.all(Radius.circular(4))),
-                    child: Row(
-                      crossAxisAlignment: CrossAxisAlignment.center,
-                      children: [
-                        Padding(
-                          padding: const EdgeInsets.only(left: 10),
-                          child: Icon(
-                            Icons.search_rounded,
-                            color: searchIconColor,
+          Obx(() => controller.isMultiSelect.value
+              ? _buildMultiSelectBar(controller)
+              : Padding(
+                  padding: const EdgeInsets.only(left: 15),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: DecoratedBox(
+                          decoration: BoxDecoration(
+                              color: searchBoxBackground,
+                              borderRadius:
+                                  const BorderRadius.all(Radius.circular(4))),
+                          child: Row(
+                            crossAxisAlignment: CrossAxisAlignment.center,
+                            children: [
+                              Padding(
+                                padding: const EdgeInsets.only(left: 10),
+                                child: Icon(
+                                  Icons.search_rounded,
+                                  color: searchIconColor,
+                                ),
+                              ),
+                              Expanded(
+                                  child: TextField(
+                                focusNode: controller.focusNode,
+                                controller: controller.textEditingController,
+                                onChanged: (text) {
+                                  controller.onSearchTextChange(text);
+                                },
+                                style: TextStyle(color: searchTextColor),
+                                decoration: InputDecoration(
+                                  border: InputBorder.none,
+                                  isCollapsed: true,
+                                  hintText: Intl.fileSearchScreen_searchHint.tr,
+                                  hintStyle: TextStyle(color: searchIconColor),
+                                  contentPadding: const EdgeInsets.symmetric(
+                                      horizontal: 12, vertical: 8),
+                                ),
+                              )),
+                            ],
                           ),
                         ),
-                        Expanded(
-                            child: TextField(
-                          focusNode: controller.focusNode,
-                          controller: controller.textEditingController,
-                          onChanged: (text) {
-                            controller.onSearchTextChange(text);
-                          },
-                          style: TextStyle(color: searchTextColor),
-                          decoration: InputDecoration(
-                            border: InputBorder.none,
-                            isCollapsed: true,
-                            hintText: Intl.fileSearchScreen_searchHint.tr,
-                            hintStyle: TextStyle(color: searchIconColor),
-                            contentPadding: const EdgeInsets.symmetric(
-                                horizontal: 12, vertical: 8),
-                          ),
-                        )),
-                      ],
-                    ),
+                      ),
+                      GestureDetector(
+                        onTap: () => Get.back(),
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 15, vertical: 8),
+                          child: Text(Intl.fileSearchScreen_cancel.tr),
+                        ),
+                      )
+                    ],
                   ),
-                ),
-                GestureDetector(
-                  onTap: () => Get.back(),
-                  child: Padding(
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 15, vertical: 8),
-                    child: Text(Intl.fileSearchScreen_cancel.tr),
-                  ),
-                )
-              ],
-            ),
-          ),
+                )),
           Expanded(child: _buildList(controller)),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildMultiSelectBar(FileSearchController controller) {
+    return SafeArea(
+      bottom: false,
+      child: Row(
+        children: [
+          IconButton(
+            icon: const Icon(Icons.close),
+            onPressed: controller.exitMultiSelect,
+          ),
+          Obx(() => Text("已选 ${controller.selectedIndices.length} 项")),
+          const Spacer(),
+          IconButton(
+            icon: const Icon(Icons.select_all),
+            onPressed: controller.selectAll,
+          ),
+          Obx(() => IconButton(
+                icon: const Icon(Icons.download_rounded),
+                onPressed: controller.selectedIndices.isEmpty ? null : controller.batchDownload,
+              )),
         ],
       ),
     );
@@ -116,17 +143,32 @@ class FileSearchScreen extends StatelessWidget {
           var isDir = item.isDir ?? false;
           var sizeDesc = isDir ? null : FileUtils.formatBytes(item.size ?? 0);
           final keyword = controller.textEditingController.text.trim();
-          return FileListItemView(
-            icon: FileUtils.getFileIcon(isDir, item.name ?? ""),
-            fileName: item.name ?? "",
-            time: item.parent,
-            sizeDesc: sizeDesc,
-            thumbnail: null,
-            fileNameMaxLines: 100,
-            highlightKeyword: keyword,
-            onTap: () {
-              controller.onFileTap(context, index);
-            },
+          final isSelected = controller.selectedIndices.contains(index);
+          return GestureDetector(
+            onLongPress: () => controller.enterMultiSelect(index),
+            child: Obx(() => controller.isMultiSelect.value
+                ? CheckboxListTile(
+                    value: isSelected,
+                    onChanged: (_) => controller.toggleSelect(index),
+                    title: Text(item.name ?? ""),
+                    subtitle: Text(item.parent ?? ""),
+                    secondary: Image.asset(
+                      FileUtils.getFileIcon(isDir, item.name ?? ""),
+                      width: 36,
+                      height: 36,
+                    ),
+                    controlAffinity: ListTileControlAffinity.leading,
+                  )
+                : FileListItemView(
+                    icon: FileUtils.getFileIcon(isDir, item.name ?? ""),
+                    fileName: item.name ?? "",
+                    time: item.parent,
+                    sizeDesc: sizeDesc,
+                    thumbnail: null,
+                    fileNameMaxLines: 100,
+                    highlightKeyword: keyword,
+                    onTap: () => controller.onFileTap(context, index),
+                  )),
           );
         },
         separatorBuilder: (context, index) => const Divider(),
@@ -142,7 +184,66 @@ class FileSearchController extends GetxController {
   var list = <FileSearchRespContent>[].obs;
   Timer? _searchDelayTimer;
 
+  // multi-select
+  final isMultiSelect = false.obs;
+  final selectedIndices = <int>{}.obs;
+
   FileSearchController(this.folder);
+
+  void enterMultiSelect(int index) {
+    isMultiSelect.value = true;
+    selectedIndices.clear();
+    selectedIndices.add(index);
+  }
+
+  void exitMultiSelect() {
+    isMultiSelect.value = false;
+    selectedIndices.clear();
+  }
+
+  void toggleSelect(int index) {
+    if (selectedIndices.contains(index)) {
+      selectedIndices.remove(index);
+    } else {
+      selectedIndices.add(index);
+    }
+  }
+
+  void selectAll() {
+    if (selectedIndices.length == list.length) {
+      selectedIndices.clear();
+    } else {
+      selectedIndices.assignAll(List.generate(list.length, (i) => i));
+    }
+  }
+
+  void batchDownload() async {
+    final selected = selectedIndices.map((i) => list[i]).toList();
+    var hasAdded = false;
+    for (final file in selected) {
+      if (file.isDir == true) continue;
+      final path = "${file.parent}/${file.name}";
+      final vo = FileItemVO(
+        name: file.name ?? "",
+        path: path,
+        size: file.size,
+        sizeDesc: FileUtils.formatBytes(file.size ?? 0),
+        isDir: false,
+        modified: "",
+        typeInt: file.type ?? 0,
+        type: FileUtils.getFileType(false, file.name ?? ""),
+        thumb: "",
+        sign: "",
+        icon: FileUtils.getFileIcon(false, file.name ?? ""),
+        modifiedMilliseconds: -1,
+        provider: null,
+      );
+      final task = await DownloadManager.instance.enqueueFile(vo, ignoreDuplicates: true);
+      if (task != null) hasAdded = true;
+    }
+    exitMultiSelect();
+    if (hasAdded) SmartDialog.showToast("已加入下载队列");
+  }
 
   @override
   void onInit() {

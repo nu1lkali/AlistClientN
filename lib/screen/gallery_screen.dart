@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'dart:math';
 import 'dart:ui' as ui;
@@ -86,7 +87,23 @@ class GalleryScreen extends StatelessWidget {
         statusBarColor: Colors.transparent,
         statusBarIconBrightness: Brightness.light,
       ),
-      actions: [_menuMoreIcon(controller)],
+      actions: [
+        Obx(() => IconButton(
+              icon: Icon(
+                controller.slideshowActive.value
+                    ? Icons.pause_circle_outline
+                    : Icons.slideshow_rounded,
+              ),
+              tooltip: controller.slideshowActive.value ? '停止幻灯片' : '幻灯片播放',
+              onPressed: controller.toggleSlideshow,
+            )),
+        IconButton(
+          icon: const Icon(Icons.rotate_right_rounded),
+          tooltip: '旋转',
+          onPressed: controller.rotate,
+        ),
+        _menuMoreIcon(controller),
+      ],
     );
   }
 
@@ -103,10 +120,13 @@ class GalleryScreen extends StatelessWidget {
                 }
                 return GestureDetector(
                   onLongPress: () => controller.saveToAlbum(index),
-                  child: _ImageContainer(
-                    url: controller.urls[index],
-                    localPath: localPath,
-                  ),
+                  child: Obx(() => RotatedBox(
+                        quarterTurns: controller.rotation.value ~/ 90,
+                        child: _ImageContainer(
+                          url: controller.urls[index],
+                          localPath: localPath,
+                        ),
+                      )),
                 );
               },
               controller: controller.pageController,
@@ -148,6 +168,10 @@ class GalleryController extends GetxController {
   final isMenuOpen = false.obs;
   final menuController = MenuController();
   var menuWidth = 120.0;
+  final rotation = 0.obs; // 0, 90, 180, 270
+  final slideshowActive = false.obs;
+  Timer? _slideshowTimer;
+  static const slideshowInterval = Duration(seconds: 3);
 
   GalleryController(
       {required List<String>? urls, required this.files, required int index})
@@ -198,7 +222,45 @@ class GalleryController extends GetxController {
 
   void updateIndex(int index) {
     this.index.value = index;
+    rotation.value = 0; // reset rotation on page change
     LogUtil.d("update index=$index");
+  }
+
+  void rotate() {
+    rotation.value = (rotation.value + 90) % 360;
+  }
+
+  void toggleSlideshow() {
+    if (slideshowActive.value) {
+      _stopSlideshow();
+    } else {
+      _startSlideshow();
+    }
+  }
+
+  void _startSlideshow() {
+    slideshowActive.value = true;
+    _slideshowTimer = Timer.periodic(slideshowInterval, (_) {
+      if (urls.isEmpty) return;
+      final next = (index.value + 1) % urls.length;
+      pageController.animateToPage(
+        next,
+        duration: const Duration(milliseconds: 400),
+        curve: Curves.easeInOut,
+      );
+    });
+  }
+
+  void _stopSlideshow() {
+    slideshowActive.value = false;
+    _slideshowTimer?.cancel();
+    _slideshowTimer = null;
+  }
+
+  @override
+  void onClose() {
+    _stopSlideshow();
+    super.onClose();
   }
 
   Future<void> saveToAlbum(int index) async {
