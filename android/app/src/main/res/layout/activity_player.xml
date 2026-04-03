@@ -8,6 +8,16 @@
         android:layout_width="match_parent"
         android:layout_height="match_parent" />
 
+    <!-- transparent scrim: covers video area when playlist is open, tap to close -->
+    <View
+        android:id="@+id/playlist_scrim"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="#00000000"
+        android:visibility="gone"
+        android:clickable="true"
+        android:focusable="true" />
+
     <!-- playlist drawer: slides in from right, hidden by default -->
     <FrameLayout
         android:id="@+id/playlist_drawer"

@@ -59,6 +59,7 @@ class PlayerActivity : AppCompatActivity(), GSYVideoProgressListener {
     private var isPlay = true
     private var isPlaylistVisible = false
     private lateinit var playlistDrawer: View
+    private lateinit var playlistScrim: View
     private lateinit var playlistAdapter: PlaylistAdapter
 
     private val messageRecordWatchTime = 1
@@ -127,8 +128,10 @@ class PlayerActivity : AppCompatActivity(), GSYVideoProgressListener {
 
         // playlist drawer
         playlistDrawer = findViewById(R.id.playlist_drawer)
-        // key fix: drawer must not intercept touches when hidden
+        playlistScrim = findViewById(R.id.playlist_scrim)
         playlistDrawer.visibility = View.GONE
+        playlistScrim.visibility = View.GONE
+        playlistScrim.setOnClickListener { togglePlaylist() }
 
         val rvPlaylist = findViewById<RecyclerView>(R.id.rv_playlist)
         playlistAdapter = PlaylistAdapter(videos, index) { clickedIndex ->
@@ -323,12 +326,20 @@ class PlayerActivity : AppCompatActivity(), GSYVideoProgressListener {
         }
     }
 
+    private var pendingDeletePath: String? = null
+
     override fun onDestroy() {
         super.onDestroy()
         if (isPlay) {
             gsyVideoPlayer.currentPlayer.release()
         }
         orientationUtils.releaseListener()
+        // fire delete after player is fully released
+        pendingDeletePath?.let { path ->
+            FlutterMethods.deleteRemoteFile(path) { success ->
+                if (success) FlutterMethods.deleteVideoRecord(path)
+            }
+        }
     }
 
     override fun onConfigurationChanged(newConfig: Configuration) {
@@ -360,20 +371,10 @@ class PlayerActivity : AppCompatActivity(), GSYVideoProgressListener {
             .setTitle("删除视频")
             .setMessage("确定删除「$name」？此操作不可撤销。")
             .setPositiveButton("删除") { _, _ ->
-                gsyVideoPlayer.currentPlayer.release()
+                // mark for deletion, then exit immediately so player releases the file
+                pendingDeletePath = video.remotePath
                 isPlay = false
-                SmartToast.show(this, "正在删除…")
-                FlutterMethods.deleteRemoteFile(video.remotePath) { success ->
-                    runOnUiThread {
-                        if (success) {
-                            FlutterMethods.deleteVideoRecord(video.remotePath)
-                            finish()
-                        } else {
-                            SmartToast.show(this, "删除失败")
-                            isPlay = true
-                        }
-                    }
-                }
+                finish()
             }
             .setNegativeButton("取消", null)
             .show()
@@ -388,6 +389,7 @@ class PlayerActivity : AppCompatActivity(), GSYVideoProgressListener {
     private fun togglePlaylist() {
         val drawerWidth = resources.displayMetrics.density * 260
         if (isPlaylistVisible) {
+            playlistScrim.visibility = View.GONE
             ObjectAnimator.ofFloat(playlistDrawer, "translationX", 0f, drawerWidth).apply {
                 duration = 250
                 addListener(object : AnimatorListenerAdapter() {
@@ -400,6 +402,7 @@ class PlayerActivity : AppCompatActivity(), GSYVideoProgressListener {
         } else {
             playlistDrawer.translationX = drawerWidth
             playlistDrawer.visibility = View.VISIBLE
+            playlistScrim.visibility = View.VISIBLE
             ObjectAnimator.ofFloat(playlistDrawer, "translationX", drawerWidth, 0f).apply {
                 duration = 250
                 start()

@@ -809,7 +809,9 @@ class _FileListScreenState extends State<FileListScreen>
 
   void _loadFolderThumbs(List<FileItemVO> files) async {
     final user = _userController.user.value;
-    final serverUrl = user.serverUrl;
+    final serverUrl = user.serverUrl.endsWith('/')
+        ? user.serverUrl
+        : '${user.serverUrl}/';
 
     for (var file in files) {
       if (!file.isDir || !mounted) continue;
@@ -828,35 +830,48 @@ class _FileListScreenState extends State<FileListScreen>
             if (!mounted) return;
             final content = data?.content ?? [];
 
-            // 1. prefer video with server-provided thumb
-            FileListRespContent? candidate = content.firstWhere(
-              (f) => !f.isDir
-                  && FileUtils.getFileType(false, f.name) == FileType.video
-                  && f.thumb.isNotEmpty,
-              orElse: () => FileListRespContent(),
-            );
+            FileListRespContent? candidate;
 
-            // 2. fallback: any image ≤ 10MB
-            if (candidate.name.isEmpty) {
-              candidate = content.firstWhere(
-                (f) => !f.isDir
-                    && FileUtils.getFileType(false, f.name) == FileType.image
-                    && (f.size == null || f.size! <= 10 * 1024 * 1024),
-                orElse: () => FileListRespContent(),
-              );
+            // 1. prefer video with server-provided thumb
+            for (final f in content) {
+              if (!f.isDir &&
+                  FileUtils.getFileType(false, f.name) == FileType.video &&
+                  f.thumb.isNotEmpty) {
+                candidate = f;
+                break;
+              }
             }
 
-            if (candidate.name.isEmpty) return;
+            // 2. fallback: first image ≤ 10MB
+            if (candidate == null) {
+              for (final f in content) {
+                if (!f.isDir &&
+                    FileUtils.getFileType(false, f.name) == FileType.image) {
+                  final sz = f.size;
+                  if (sz == null || sz <= 10 * 1024 * 1024) {
+                    candidate = f;
+                    break;
+                  }
+                }
+              }
+            }
+
+            if (candidate == null) return;
 
             String thumbUrl;
             if (candidate.thumb.isNotEmpty) {
               thumbUrl = FileUtils.getCompleteThumbnail(candidate.thumb)!;
             } else {
               final itemPath = candidate.getCompletePath(file.path);
-              final encoded = itemPath.split('/').map((s) => s.isEmpty ? s : Uri.encodeComponent(s)).join('/');
-              thumbUrl = "${serverUrl}p$encoded";
+              final encoded = itemPath
+                  .split('/')
+                  .map((s) => s.isEmpty ? s : Uri.encodeComponent(s))
+                  .join('/');
+              // encoded starts with '/', serverUrl already ends with '/'
+              final path = encoded.startsWith('/') ? encoded.substring(1) : encoded;
+              thumbUrl = '${serverUrl}p/$path';
               if (candidate.sign.isNotEmpty) {
-                thumbUrl = "$thumbUrl?sign=${candidate.sign}";
+                thumbUrl = '$thumbUrl?sign=${candidate.sign}';
               }
             }
 
