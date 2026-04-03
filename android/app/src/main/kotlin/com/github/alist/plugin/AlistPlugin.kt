@@ -282,7 +282,7 @@ class AlistPlugin(private val activity: Activity, private val scope: CoroutineSc
 
     fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         if (requestCode == requestCodeLaunchExternalPlayer) {
-            FlutterMethods.onPayerDestroyed()
+            FlutterMethods.onPayerDestroyed(null)
         }
     }
 }

@@ -334,12 +334,7 @@ class PlayerActivity : AppCompatActivity(), GSYVideoProgressListener {
             gsyVideoPlayer.currentPlayer.release()
         }
         orientationUtils.releaseListener()
-        // fire delete after player is fully released
-        pendingDeletePath?.let { path ->
-            FlutterMethods.deleteRemoteFile(path) { success ->
-                if (success) FlutterMethods.deleteVideoRecord(path)
-            }
-        }
+        FlutterMethods.onPayerDestroyed(pendingDeletePath)
     }
 
     override fun onConfigurationChanged(newConfig: Configuration) {
@@ -371,10 +366,9 @@ class PlayerActivity : AppCompatActivity(), GSYVideoProgressListener {
             .setTitle("删除视频")
             .setMessage("确定删除「$name」？此操作不可撤销。")
             .setPositiveButton("删除") { _, _ ->
-                // mark for deletion, then exit immediately so player releases the file
                 pendingDeletePath = video.remotePath
-                isPlay = false
-                finish()
+                // simulate back button: lets the player disconnect normally before onDestroy fires
+                playerWrapper.btnBack.performClick()
             }
             .setNegativeButton("取消", null)
             .show()

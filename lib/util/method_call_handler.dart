@@ -9,6 +9,7 @@ import 'package:alist/util/proxy.dart';
 import 'package:alist/util/string_utils.dart';
 import 'package:alist/util/user_controller.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_smart_dialog/flutter_smart_dialog.dart';
 import 'package:get/get.dart';
 
 class MethodCallHandler {
@@ -74,8 +75,41 @@ class MethodCallHandler {
         }
         return "";
       case "onPayerDestroyed":
+        final String pendingDelete = call.arguments as String? ?? "";
         ProxyServer proxyServer = Get.find();
         proxyServer.stop();
+        if (pendingDelete.isNotEmpty) {
+          // wait for server-side connection to fully close before deleting
+          await Future.delayed(const Duration(seconds: 2));
+          final String fileName = pendingDelete.substringAfterLast("/") ?? "";
+          final String dir = pendingDelete.substringBeforeLast("/$fileName") ?? "/";
+          FileRemoveReq req = FileRemoveReq();
+          req.dir = dir.isEmpty ? "/" : dir;
+          req.names = [fileName];
+
+          bool deleted = false;
+          // retry up to 3 times with increasing delay
+          for (int attempt = 0; attempt < 3 && !deleted; attempt++) {
+            if (attempt > 0) await Future.delayed(Duration(seconds: attempt * 2));
+            await DioUtils.instance.requestNetwork<String?>(
+              Method.post, "fs/remove",
+              params: req.toJson(),
+              onSuccess: (_) async {
+                deleted = true;
+                final AlistDatabaseController db = Get.find();
+                final UserController uc = Get.find();
+                final user = uc.user.value;
+                final record = await db.videoViewingRecordDao
+                    .findRecordByPath(user.baseUrl, user.username, pendingDelete);
+                if (record != null) db.videoViewingRecordDao.deleteRecord(record);
+                SmartDialog.showToast("删除成功");
+              },
+              onError: (_, msg) {
+                if (attempt == 2) SmartDialog.showToast("删除失败：$msg");
+              },
+            );
+          }
+        }
         return "";
 
       case "deleteRemoteFile":

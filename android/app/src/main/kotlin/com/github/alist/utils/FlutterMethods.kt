@@ -51,8 +51,8 @@ object FlutterMethods {
         )
     }
 
-    fun onPayerDestroyed() {
-        channel.invokeMethod("onPayerDestroyed", "")
+    fun onPayerDestroyed(pendingDeletePath: String?) {
+        channel.invokeMethod("onPayerDestroyed", pendingDeletePath ?: "")
     }
 
     fun deleteRemoteFile(path: String, callback: (Boolean) -> Unit) {

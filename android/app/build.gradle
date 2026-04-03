@@ -21,11 +21,11 @@ if (flutterVersionName == null) {
     flutterVersionName = '1.0'
 }
 
-def keyAlias = localProperties.getProperty('keyAlias')
-def keyPassword = localProperties.getProperty('keyPassword')
-def storeFile = localProperties.getProperty('storeFile')
-def storePassword = localProperties.getProperty('storePassword')
-def hasStoreFile = storeFile != null && storeFile != ''
+def signingKeyAlias = localProperties.getProperty('keyAlias')
+def signingKeyPassword = localProperties.getProperty('keyPassword')
+def signingStoreFile = localProperties.getProperty('storeFile')
+def signingStorePassword = localProperties.getProperty('storePassword')
+def hasStoreFile = signingStoreFile != null && signingStoreFile != ''
 
 apply plugin: 'com.android.application'
 apply plugin: 'kotlin-android'
@@ -73,10 +73,10 @@ android {
     signingConfigs {
         if (hasStoreFile) {
             release {
-                keyAlias rootProject.ext.keyAlias
-                keyPassword rootProject.ext.keyPassword
-                storeFile file(storeFile)
-                storePassword rootProject.ext.storePassword
+                keyAlias = signingKeyAlias
+                keyPassword = signingKeyPassword
+                storeFile = file(signingStoreFile)
+                storePassword = signingStorePassword
             }
         }
     }
