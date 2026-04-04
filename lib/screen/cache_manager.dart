@@ -93,10 +93,8 @@ class _CacheTile extends StatelessWidget {
     return ListTile(
       title: Text(title),
       subtitle: Obx(() => Text(sizeStr.value)),
-      trailing: IconButton(
-        icon: const Icon(Icons.delete_outline),
-        onPressed: onClear,
-      ),
+      trailing: const Icon(Icons.delete_outline),
+      onTap: onClear,
     );
   }
 }

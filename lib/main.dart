@@ -1,6 +1,7 @@
 import 'package:alist/l10n/alist_translations.dart';
 import 'package:alist/l10n/intl_keys.dart';
 import 'package:alist/router.dart';
+import 'package:alist/util/constant.dart';
 import 'package:alist/util/log_utils.dart';
 import 'package:alist/util/named_router.dart';
 import 'package:alist/util/proxy.dart';
@@ -14,14 +15,63 @@ import 'package:get/get.dart';
 import 'package:pull_to_refresh/pull_to_refresh.dart';
 
 import 'database/alist_database_controller.dart';
-import 'generated/color_schemes.g.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
-  // sp初始化
   SpUtil.getInstance();
   Log.init();
   runApp(const MyApp());
+}
+
+// Global reactive theme color — screens can call ThemeController.instance.setColor()
+class ThemeController extends GetxController {
+  static ThemeController get instance => Get.find();
+
+  static const int _defaultColor = 0xFF0060A9;
+
+  final seedColor = const Color(_defaultColor).obs;
+
+  @override
+  void onInit() {
+    super.onInit();
+    final saved = SpUtil.getInt(AlistConstant.themeColorValue, defValue: _defaultColor);
+    seedColor.value = Color(saved ?? _defaultColor);
+  }
+
+  void setColor(Color color) {
+    seedColor.value = color;
+    SpUtil.putInt(AlistConstant.themeColorValue, color.value);
+  }
+
+  static ThemeData _buildLight(Color seed) => ThemeData(
+        useMaterial3: true,
+        colorScheme: ColorScheme.fromSeed(seedColor: seed, brightness: Brightness.light),
+        dividerTheme: const DividerThemeData(thickness: 0, space: 0),
+        appBarTheme: const AppBarTheme(
+          titleTextStyle: TextStyle(color: Colors.black, fontSize: 18, fontWeight: FontWeight.w500),
+          systemOverlayStyle: SystemUiOverlayStyle(
+            statusBarColor: Colors.transparent,
+            statusBarIconBrightness: Brightness.dark,
+            systemNavigationBarColor: Colors.white,
+            systemNavigationBarIconBrightness: Brightness.dark,
+          ),
+        ),
+      );
+
+  static ThemeData _buildDark(Color seed) => ThemeData(
+        useMaterial3: true,
+        colorScheme: ColorScheme.fromSeed(seedColor: seed, brightness: Brightness.dark),
+        dividerTheme: const DividerThemeData(thickness: 0, space: 0),
+        appBarTheme: const AppBarTheme(
+          titleTextStyle: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w500),
+          systemOverlayStyle: SystemUiOverlayStyle(
+            statusBarColor: Colors.transparent,
+            statusBarIconBrightness: Brightness.light,
+            systemNavigationBarColor: Color(0xFF1A1C1E),
+            systemNavigationBarIconBrightness: Brightness.light,
+          ),
+        ),
+      );
 }
 
 class MyApp extends StatelessWidget {
@@ -29,19 +79,23 @@ class MyApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return GetMaterialApp(
-      initialRoute: NamedRouter.root,
-      translations: AlistTranslations(),
-      fallbackLocale: const Locale('en', 'US'),
-      locale: PlatformDispatcher.instance.locale,
-      getPages: AlistRouter.screens,
-      builder: _routerBuilder,
-      navigatorObservers: [FlutterSmartDialog.observer],
-      defaultTransition: Transition.cupertino,
-      title: "ALClient",
-      theme: _lightTheme(context),
-      darkTheme: _dartTheme(context),
-    );
+    final tc = Get.put(ThemeController());
+    return Obx(() {
+      final seed = tc.seedColor.value;
+      return GetMaterialApp(
+        initialRoute: NamedRouter.root,
+        translations: AlistTranslations(),
+        fallbackLocale: const Locale('en', 'US'),
+        locale: PlatformDispatcher.instance.locale,
+        getPages: AlistRouter.screens,
+        builder: _routerBuilder,
+        navigatorObservers: [FlutterSmartDialog.observer],
+        defaultTransition: Transition.cupertino,
+        title: "ALClient",
+        theme: ThemeController._buildLight(seed),
+        darkTheme: ThemeController._buildDark(seed),
+      );
+    });
   }
 
   Widget _routerBuilder(BuildContext context, Widget? widget) {
@@ -63,54 +117,6 @@ class MyApp extends StatelessWidget {
             );
           },
           child: smartDialogInit(context, widget)),
-    );
-  }
-
-  ThemeData _dartTheme(BuildContext context) {
-    return ThemeData(
-        useMaterial3: true,
-        colorScheme: darkColorScheme,
-        dividerTheme: DividerTheme.of(context).copyWith(
-          thickness: 0,
-          space: 0,
-        ),
-        appBarTheme: AppBarTheme.of(context).copyWith(
-          titleTextStyle: const TextStyle(
-            color: Colors.white,
-            fontSize: 18,
-            fontWeight: FontWeight.w500,
-          ),
-          systemOverlayStyle: const SystemUiOverlayStyle(
-            statusBarColor: Colors.transparent,
-            statusBarIconBrightness: Brightness.light,
-            systemNavigationBarColor: Color(0xFF1A1C1E),
-            systemNavigationBarIconBrightness: Brightness.light,
-          ),
-        ));
-  }
-
-  ThemeData _lightTheme(BuildContext context) {
-    return ThemeData(
-      useMaterial3: true,
-      hintColor: const Color(0xFFBBBBBB),
-      colorScheme: lightColorScheme,
-      dividerTheme: DividerTheme.of(context).copyWith(
-        thickness: 0,
-        space: 0,
-      ),
-      appBarTheme: AppBarTheme.of(context).copyWith(
-        titleTextStyle: const TextStyle(
-          color: Colors.black,
-          fontSize: 18,
-          fontWeight: FontWeight.w500,
-        ),
-        systemOverlayStyle: const SystemUiOverlayStyle(
-          statusBarColor: Colors.transparent,
-          statusBarIconBrightness: Brightness.dark,
-          systemNavigationBarColor: Colors.white,
-          systemNavigationBarIconBrightness: Brightness.dark,
-        ),
-      ),
     );
   }
 }

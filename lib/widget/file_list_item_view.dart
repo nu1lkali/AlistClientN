@@ -72,28 +72,38 @@ class FileListItemView extends StatelessWidget {
                     overflow: TextOverflow.ellipsis,
                   );
           }),
-          subtitle: subtitle.isNotEmpty
-              ? Text(
+          subtitle: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (subtitle.isNotEmpty)
+                Text(
                   subtitle,
                   style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                       color: Theme.of(context).colorScheme.onSurfaceVariant),
-                )
-              : null,
+                ),
+              if (watchProgress != null) ...[
+                const SizedBox(height: 4),
+                FractionallySizedBox(
+                  widthFactor: 0.55,
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(2),
+                    child: LinearProgressIndicator(
+                      value: watchProgress,
+                      minHeight: 3,
+                      backgroundColor: Theme.of(context).colorScheme.surfaceVariant,
+                      valueColor: AlwaysStoppedAnimation<Color>(
+                        Theme.of(context).colorScheme.primary.withOpacity(0.8),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ],
+          ),
           onTap: onTap,
           onLongPress: null,
         ),
-        if (watchProgress != null)
-          Positioned(
-            left: 0,
-            right: 0,
-            bottom: 0,
-            child: LinearProgressIndicator(
-              value: watchProgress,
-              minHeight: 2,
-              backgroundColor: Colors.transparent,
-              valueColor: const AlwaysStoppedAnimation<Color>(Color(0xFFFF6B35)),
-            ),
-          ),
       ],
     );
   }

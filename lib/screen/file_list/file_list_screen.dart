@@ -1625,6 +1625,45 @@ class _FileListView extends StatelessWidget {
       itemCount++;
     }
 
+    // empty state
+    if (files.isEmpty && (readme == null || readme!.isEmpty)) {
+      return SmartRefresher(
+        controller: refreshController,
+        onRefresh: refreshCallback,
+        child: ListView(
+          children: [
+            SizedBox(
+              height: MediaQuery.of(context).size.height * 0.5,
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(
+                    Icons.folder_open_rounded,
+                    size: 72,
+                    color: Theme.of(context).colorScheme.outlineVariant,
+                  ),
+                  const SizedBox(height: 16),
+                  Text(
+                    '这里什么都没有',
+                    style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                          color: Theme.of(context).colorScheme.outline,
+                        ),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    '下拉刷新试试',
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: Theme.of(context).colorScheme.outlineVariant,
+                        ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
     if (isGridView) {
       return SmartRefresher(
         controller: refreshController,
@@ -1956,30 +1995,37 @@ class _GridItemWidget extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final completeThumbnail = FileUtils.getCompleteThumbnail(thumb);
-    return Column(
-      mainAxisAlignment: MainAxisAlignment.center,
-      children: [
-        Expanded(
-          child: Stack(
-            fit: StackFit.expand,
-            children: [
-              completeThumbnail != null && completeThumbnail.isNotEmpty
-                  ? ClipRRect(
-                      borderRadius: const BorderRadius.vertical(top: Radius.circular(6)),
-                      child: Image.network(
+    final scheme = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    return Card(
+      elevation: isDark ? 0 : 1.5,
+      shadowColor: scheme.shadow.withOpacity(0.15),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+      clipBehavior: Clip.antiAlias,
+      color: isDark ? scheme.surfaceVariant.withOpacity(0.5) : scheme.surface,
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Expanded(
+            child: Stack(
+              fit: StackFit.expand,
+              children: [
+                completeThumbnail != null && completeThumbnail.isNotEmpty
+                    ? Image.network(
                         completeThumbnail,
                         fit: BoxFit.cover,
                         width: double.infinity,
                         height: double.infinity,
                         cacheWidth: 200,
                         errorBuilder: (_, __, ___) =>
-                            Center(child: Image.asset(icon, width: 48, height: 48)),
+                            Center(child: Image.asset(icon, width: 44, height: 44)),
                         loadingBuilder: (_, child, progress) {
                           if (progress == null) return child;
                           return Center(
                             child: SizedBox(
-                              width: 24,
-                              height: 24,
+                              width: 22,
+                              height: 22,
                               child: CircularProgressIndicator(
                                 strokeWidth: 2,
                                 value: progress.expectedTotalBytes != null
@@ -1990,36 +2036,43 @@ class _GridItemWidget extends StatelessWidget {
                             ),
                           );
                         },
+                      )
+                    : Container(
+                        color: isDark
+                            ? scheme.surfaceVariant.withOpacity(0.3)
+                            : scheme.primaryContainer.withOpacity(0.25),
+                        child: Center(child: Image.asset(icon, width: 44, height: 44)),
                       ),
-                    )
-                  : Center(child: Image.asset(icon, width: 48, height: 48)),
-              // watch progress bar at bottom of thumbnail
-              if (watchProgress != null)
-                Positioned(
-                  left: 0,
-                  right: 0,
-                  bottom: 0,
-                  child: LinearProgressIndicator(
-                    value: watchProgress,
-                    minHeight: 3,
-                    backgroundColor: Colors.white24,
-                    valueColor: const AlwaysStoppedAnimation<Color>(Color(0xFFFF6B35)),
+                if (watchProgress != null)
+                  Positioned(
+                    left: 8,
+                    right: 8,
+                    bottom: 4,
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(2),
+                      child: LinearProgressIndicator(
+                        value: watchProgress,
+                        minHeight: 3,
+                        backgroundColor: Colors.black26,
+                        valueColor: AlwaysStoppedAnimation<Color>(scheme.primary),
+                      ),
+                    ),
                   ),
-                ),
-            ],
+              ],
+            ),
           ),
-        ),
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
-          child: Text(
-            name,
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
-            textAlign: TextAlign.center,
-            style: const TextStyle(fontSize: 12),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(6, 5, 6, 6),
+            child: Text(
+              name,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              textAlign: TextAlign.center,
+              style: TextStyle(fontSize: 12, color: scheme.onSurface),
+            ),
           ),
-        ),
-      ],
+        ],
+      ),
     );
   }
 }

@@ -67,18 +67,18 @@
 
         <ImageView
             android:id="@+id/fullscreen"
-            android:layout_width="wrap_content"
-            android:layout_height="fill_parent"
-            android:paddingRight="8dp"
-            android:scaleType="center"
+            android:layout_width="40dp"
+            android:layout_height="40dp"
+            android:padding="8dp"
+            android:scaleType="centerInside"
             android:src="@drawable/video_enlarge" />
 
         <ImageView
             android:id="@+id/btn_screenshot"
-            android:layout_width="wrap_content"
-            android:layout_height="fill_parent"
-            android:paddingRight="16dp"
-            android:scaleType="center"
+            android:layout_width="40dp"
+            android:layout_height="40dp"
+            android:padding="8dp"
+            android:scaleType="centerInside"
             android:src="@android:drawable/ic_menu_camera" />
     </LinearLayout>
 

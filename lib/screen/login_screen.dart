@@ -109,82 +109,150 @@ class LoginScreenContainer extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    InputDecoration usernameDecoration = LoginInputDecoration(
-      hintText: "guest",
-      labelText: Intl.loginScreen_label_username.tr,
-    );
-    InputDecoration passwordDecoration = LoginInputDecoration(
-      hintText: "password",
-      labelText: Intl.loginScreen_label_password.tr,
-    );
-    InputDecoration addressDecoration = LoginInputDecoration(
-      hintText: "http://example.com:5244",
-      labelText: Intl.loginScreen_label_serverUrl.tr,
-    );
+    final scheme = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    InputDecoration fieldDecoration(String label, String hint, IconData icon) =>
+        InputDecoration(
+          labelText: label,
+          hintText: hint,
+          prefixIcon: Icon(icon, size: 20),
+          filled: true,
+          fillColor: isDark
+              ? scheme.surfaceVariant.withOpacity(0.5)
+              : scheme.surfaceVariant.withOpacity(0.4),
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(12),
+            borderSide: BorderSide.none,
+          ),
+          enabledBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(12),
+            borderSide: BorderSide.none,
+          ),
+          focusedBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(12),
+            borderSide: BorderSide(color: scheme.primary, width: 1.5),
+          ),
+          contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+          isDense: true,
+        );
 
     return Padding(
-      padding: const EdgeInsets.fromLTRB(25, 50, 25, 0),
+      padding: const EdgeInsets.fromLTRB(24, 40, 24, 24),
       child: Column(
         children: [
-          Image.asset(Images.logo),
-          LoginTextField(
-            padding: const EdgeInsets.only(top: 30),
-            icon: Image.asset(Images.loginScreenServerUrl),
-            decoration: addressDecoration,
+          // logo + title
+          Image.asset(Images.logo, width: 72, height: 72),
+          const SizedBox(height: 12),
+          Text(
+            'AList Client',
+            style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                  fontWeight: FontWeight.bold,
+                  color: scheme.primary,
+                ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            '连接你的 AList 服务器',
+            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                  color: scheme.onSurfaceVariant,
+                ),
+          ),
+          const SizedBox(height: 32),
+
+          // server url
+          TextField(
+            decoration: fieldDecoration(
+              Intl.loginScreen_label_serverUrl.tr,
+              'http://example.com:5244',
+              Icons.dns_rounded,
+            ),
             controller: loginScreenController.addressController,
             focusNode: loginScreenController.addressFocusNode,
             keyboardType: TextInputType.url,
           ),
-          LoginTextField(
-            padding: const EdgeInsets.only(top: 20),
-            icon: Image.asset(Images.loginScreenAccount),
-            decoration: usernameDecoration,
+          const SizedBox(height: 14),
+
+          // username
+          TextField(
+            decoration: fieldDecoration(
+              Intl.loginScreen_label_username.tr,
+              'guest',
+              Icons.person_rounded,
+            ),
             controller: loginScreenController.usernameController,
           ),
-          LoginTextField(
-            padding: const EdgeInsets.only(top: 20),
-            obscureText: true,
-            icon: Image.asset(Images.loginScreenPassword),
-            decoration: passwordDecoration,
+          const SizedBox(height: 14),
+
+          // password
+          TextField(
+            decoration: fieldDecoration(
+              Intl.loginScreen_label_password.tr,
+              'password',
+              Icons.lock_rounded,
+            ),
             controller: loginScreenController.passwordController,
+            obscureText: true,
           ),
+          const SizedBox(height: 8),
+
+          // SSL checkbox
           Obx(() => buildSSLErrorIgnoreCheckbox(context)),
-          const SizedBox(
-            height: 20,
-          ),
-          FilledButton(
-            onPressed: () {
-              // clear the last 2fa code typed.
-              loginScreenController.twofaController.text = "";
-              KeyboardUtil.hideKeyboard(context);
-              loginScreenController._onLoginButtonClick(context);
-            },
-            child: Center(
-              child: Text(Intl.loginScreen_button_login.tr),
+          const SizedBox(height: 24),
+
+          // login button
+          SizedBox(
+            width: double.infinity,
+            height: 48,
+            child: FilledButton(
+              onPressed: () {
+                loginScreenController.twofaController.text = "";
+                KeyboardUtil.hideKeyboard(context);
+                loginScreenController._onLoginButtonClick(context);
+              },
+              style: FilledButton.styleFrom(
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+              ),
+              child: Text(
+                Intl.loginScreen_button_login.tr,
+                style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+              ),
             ),
           ),
-          const SizedBox(
-            height: 15,
+          const SizedBox(height: 12),
+
+          // guest mode button
+          SizedBox(
+            width: double.infinity,
+            height: 48,
+            child: OutlinedButton(
+              onPressed: () {
+                var address = loginScreenController.addressController.text.trim();
+                if (address.isEmpty) {
+                  loginScreenController._tryEntryDefaultServer(context);
+                } else {
+                  loginScreenController._enterVisitorMode(address);
+                }
+              },
+              style: OutlinedButton.styleFrom(
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                side: BorderSide(color: scheme.primary),
+              ),
+              child: Text(
+                Intl.loginScreen_button_guestMode.tr,
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w600,
+                  color: scheme.primary,
+                ),
+              ),
+            ),
           ),
-          FilledButton(
-            style: FilledButton.styleFrom(
-              backgroundColor: Theme
-                  .of(context)
-                  .colorScheme
-                  .secondary,
-            ),
-            onPressed: () {
-              var address = loginScreenController.addressController.text.trim();
-              if (address.isEmpty) {
-                loginScreenController._tryEntryDefaultServer(context);
-              } else {
-                loginScreenController._enterVisitorMode(address);
-              }
-            },
-            child: Center(
-              child: Text(Intl.loginScreen_button_guestMode.tr),
-            ),
-          )
+          const SizedBox(height: 24),
         ],
       ),
     );
@@ -193,18 +261,25 @@ class LoginScreenContainer extends StatelessWidget {
   Row buildSSLErrorIgnoreCheckbox(BuildContext context) {
     return Row(
       children: [
-        Checkbox(
-          value: loginScreenController.ignoreSSLError.value,
-          onChanged: (checked) {
-            loginScreenController.ignoreSSLError.value = checked ?? false;
-          },
+        SizedBox(
+          width: 36,
+          height: 36,
+          child: Checkbox(
+            value: loginScreenController.ignoreSSLError.value,
+            onChanged: (checked) {
+              loginScreenController.ignoreSSLError.value = checked ?? false;
+            },
+          ),
         ),
         GestureDetector(
           onTap: () {
             loginScreenController.ignoreSSLError.value =
-            !loginScreenController.ignoreSSLError.value;
+                !loginScreenController.ignoreSSLError.value;
           },
-          child: Text(Intl.loginScreen_checkbox_ignoreSSLError.tr),
+          child: Text(
+            Intl.loginScreen_checkbox_ignoreSSLError.tr,
+            style: Theme.of(context).textTheme.bodyMedium,
+          ),
         ),
       ],
     );

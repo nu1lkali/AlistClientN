@@ -43,6 +43,24 @@ class GalleryScreen extends StatelessWidget {
     Widget widget = Stack(
       children: [
         _buildImageViewPager(controller),
+        // gradient scrim so AppBar title is readable over bright images
+        Positioned(
+          top: 0,
+          left: 0,
+          right: 0,
+          height: 100,
+          child: IgnorePointer(
+            child: Container(
+              decoration: const BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  colors: [Colors.black54, Colors.transparent],
+                ),
+              ),
+            ),
+          ),
+        ),
         Positioned(
           left: 0,
           top: 0,
