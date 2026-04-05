@@ -592,67 +592,84 @@ class _FileListScreenState extends State<FileListScreen>
         return;
       }
 
-      // Step 2: Get current directory file names to check for conflicts
-      final existingFileNames = _files.where((f) => !f.isDir).map((f) => f.name).toSet();
+      // Step 2: Group files by source directory for batch moving
+      final Map<String, List<FileItemVO>> filesBySourceDir = {};
+      for (final file in allFiles) {
+        final srcDir = file.path.substring(0, file.path.lastIndexOf('/'));
+        if (srcDir == path) continue; // already in current dir
+        filesBySourceDir.putIfAbsent(srcDir, () => []).add(file);
+      }
 
-      // Step 3: Move all files to current directory with rename if needed
+      // Step 3: Get current directory file names to check for conflicts
+      final existingFileNames = _files.where((f) => !f.isDir).map((f) => f.name).toSet();
+      
+      // Step 4: Handle file name conflicts and rename if needed
+      int renamedCount = 0;
+      final filesToMove = <FileItemVO>[];
+      
+      for (final files in filesBySourceDir.values) {
+        for (final file in files) {
+          String targetFileName = file.name;
+          if (existingFileNames.contains(file.name)) {
+            targetFileName = _generateUniqueFileName(file.name, existingFileNames);
+            renamedCount++;
+            
+            // Rename file first
+            final renameReq = FileRenameReq();
+            renameReq.path = file.path;
+            renameReq.name = targetFileName;
+            
+            bool renamed = false;
+            await DioUtils.instance.requestNetwork<String?>(
+              Method.post, 'fs/rename',
+              params: renameReq.toJson(),
+              onSuccess: (_) { renamed = true; },
+              onError: (_, __) {},
+            );
+            
+            if (!renamed) continue; // Skip this file if rename failed
+            
+            // Update file name in the object
+            file.name = targetFileName;
+          }
+          existingFileNames.add(targetFileName);
+          filesToMove.add(file);
+        }
+      }
+
+      // Step 5: Batch move files by source directory
       int extractedCount = 0;
       int extractFailCount = 0;
-      int renamedCount = 0;
       
-      for (final file in allFiles) {
-        final fileName = file.name;
+      // Re-group by source directory after renaming
+      final Map<String, List<String>> fileNamesBySourceDir = {};
+      for (final file in filesToMove) {
         final srcDir = file.path.substring(0, file.path.lastIndexOf('/'));
+        fileNamesBySourceDir.putIfAbsent(srcDir, () => []).add(file.name);
+      }
+      
+      for (final entry in fileNamesBySourceDir.entries) {
+        final srcDir = entry.key;
+        final fileNames = entry.value;
         
-        if (srcDir == path) continue; // already in current dir
-        
-        // Check for name conflict and generate new name if needed
-        String targetFileName = fileName;
-        if (existingFileNames.contains(fileName)) {
-          targetFileName = _generateUniqueFileName(fileName, existingFileNames);
-          renamedCount++;
-        }
-        existingFileNames.add(targetFileName);
-
-        // Rename file if needed
-        if (targetFileName != fileName) {
-          final renameReq = FileRenameReq();
-          renameReq.path = file.path;
-          renameReq.name = targetFileName;
-          
-          bool renamed = false;
-          await DioUtils.instance.requestNetwork<String?>(
-            Method.post, 'fs/rename',
-            params: renameReq.toJson(),
-            onSuccess: (_) { renamed = true; },
-            onError: (_, __) {},
-          );
-          
-          if (!renamed) {
-            extractFailCount++;
-            continue;
-          }
-        }
-
-        // Move file
+        // Batch move all files from this directory
         final req = CopyMoveReq();
         req.srcDir = srcDir;
         req.dstDir = path;
-        req.names = [targetFileName];
+        req.names = fileNames;
         
         await DioUtils.instance.requestNetwork<String?>(
           Method.post, 'fs/move',
           params: req.toJson(),
-          onSuccess: (_) { extractedCount++; },
-          onError: (_, __) { extractFailCount++; },
+          onSuccess: (_) { extractedCount += fileNames.length; },
+          onError: (_, __) { extractFailCount += fileNames.length; },
         );
       }
 
-      // Step 4: Refresh file list to get updated files
+      // Step 6: Refresh file list to get updated files
       await _loadFilesInner();
-      await Future.delayed(const Duration(milliseconds: 500));
 
-      // Step 5: Organize by type
+      // Step 7: Organize by type (reuse existing logic)
       final Map<String, List<FileItemVO>> groups = {};
       for (final file in _files) {
         if (file.isDir) continue;
@@ -696,7 +713,7 @@ class _FileListScreenState extends State<FileListScreen>
             continue; 
           }
 
-          // move files
+          // batch move files
           final req = CopyMoveReq();
           req.srcDir = path;
           req.dstDir = targetPath;
@@ -710,24 +727,46 @@ class _FileListScreenState extends State<FileListScreen>
         }
       }
 
-      // Step 6: Delete empty folders (in reverse order, deepest first)
+      // Step 8: Delete empty folders (in reverse order, deepest first)
       int deletedFolders = 0;
       for (final folderPath in allSubFolders.reversed) {
-        final folderName = folderPath.substring(folderPath.lastIndexOf('/') + 1);
-        final parentPath = folderPath.substring(0, folderPath.lastIndexOf('/'));
+        // Check if folder is empty before deleting
+        final checkBody = {
+          "path": folderPath,
+          "password": _password ?? "",
+          "page": 1,
+          "per_page": 0,
+          "refresh": false
+        };
         
-        final req = FileRemoveReq();
-        req.dir = parentPath.isEmpty ? '/' : parentPath;
-        req.names = [folderName];
-        
-        await DioUtils.instance.requestNetwork<String?>(
-          Method.post, 'fs/remove',
-          params: req.toJson(),
-          onSuccess: (_) { deletedFolders++; },
+        bool isEmpty = false;
+        await DioUtils.instance.requestNetwork<FileListRespEntity>(
+          Method.post, "fs/list",
+          params: checkBody,
+          onSuccess: (data) {
+            final files = data?.content ?? [];
+            isEmpty = files.isEmpty;
+          },
           onError: (_, __) {
-            // Folder might not be empty or already deleted, that's ok
+            isEmpty = false;
           },
         );
+        
+        if (isEmpty) {
+          final folderName = folderPath.substring(folderPath.lastIndexOf('/') + 1);
+          final parentPath = folderPath.substring(0, folderPath.lastIndexOf('/'));
+          
+          final req = FileRemoveReq();
+          req.dir = parentPath.isEmpty ? '/' : parentPath;
+          req.names = [folderName];
+          
+          await DioUtils.instance.requestNetwork<String?>(
+            Method.post, 'fs/remove',
+            params: req.toJson(),
+            onSuccess: (_) { deletedFolders++; },
+            onError: (_, __) {},
+          );
+        }
       }
 
       SmartDialog.dismiss();
