@@ -63,6 +63,8 @@ class PlayerActivity : AppCompatActivity(), GSYVideoProgressListener {
     private lateinit var playlistAdapter: PlaylistAdapter
     private var sortedVideos: MutableList<VideoItem> = mutableListOf()
     private var videoIndexMap: MutableMap<Int, Int> = mutableMapOf() // sortedIndex -> originalIndex
+    private var isNameSortAscending = true
+    private var isDurationSortAscending = false
 
     private val messageRecordWatchTime = 1
     private val handler = object : Handler(Looper.getMainLooper()) {
@@ -509,12 +511,21 @@ class PlayerActivity : AppCompatActivity(), GSYVideoProgressListener {
     }
 
     private fun sortByName() {
+        // Toggle sort order
+        isNameSortAscending = !isNameSortAscending
+        
         // Use natural sort to handle numbers correctly (1, 2, 3, ..., 10 instead of 1, 10, 2, 3)
-        sortedVideos.sortWith(compareBy { naturalSortKey(it.name) })
+        if (isNameSortAscending) {
+            sortedVideos.sortWith(compareBy { naturalSortKey(it.name) })
+            SmartToast.show(this, "按文件名升序排序")
+        } else {
+            sortedVideos.sortWith(compareByDescending { naturalSortKey(it.name) })
+            SmartToast.show(this, "按文件名降序排序")
+        }
+        
         updateVideoIndexMap()
         playlistAdapter.updateVideos(sortedVideos)
         playlistAdapter.updateCurrentIndex(getCurrentSortedIndex())
-        SmartToast.show(this, "已按文件名排序")
     }
     
     private fun naturalSortKey(name: String): String {
@@ -525,13 +536,21 @@ class PlayerActivity : AppCompatActivity(), GSYVideoProgressListener {
     }
 
     private fun sortByDuration() {
-        // Sort by duration (requires getting duration from player or metadata)
-        // For now, sort by file size as a proxy
-        sortedVideos.sortByDescending { it.size?.toLongOrNull() ?: 0L }
+        // Toggle sort order
+        isDurationSortAscending = !isDurationSortAscending
+        
+        // Sort by file size as a proxy for duration
+        if (isDurationSortAscending) {
+            sortedVideos.sortBy { it.size?.toLongOrNull() ?: 0L }
+            SmartToast.show(this, "按文件大小升序排序")
+        } else {
+            sortedVideos.sortByDescending { it.size?.toLongOrNull() ?: 0L }
+            SmartToast.show(this, "按文件大小降序排序")
+        }
+        
         updateVideoIndexMap()
         playlistAdapter.updateVideos(sortedVideos)
         playlistAdapter.updateCurrentIndex(getCurrentSortedIndex())
-        SmartToast.show(this, "已按文件大小排序")
     }
 
     private fun shufflePlaylist() {
