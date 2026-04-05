@@ -605,9 +605,14 @@ class _FileListScreenState extends State<FileListScreen>
       return;
     }
     
+    // 如果开启了随机排序，对播放列表也进行随机排序
+    if (_menuAnchorController.sortBy.value == MenuId.random) {
+      videos.shuffle();
+    }
+    
     final random = Random();
     final randomVideo = videos[random.nextInt(videos.length)];
-    _goVideoPlayerScreen(context, randomVideo, _files, false);
+    _goVideoPlayerScreen(context, randomVideo, videos, false);
   }
 
   void _randomPlayVideoRecursive() async {
@@ -624,11 +629,17 @@ class _FileListScreenState extends State<FileListScreen>
         return;
       }
       
+      // 如果开启了随机排序，对播放列表也进行随机排序
+      final videoFiles = result.videoFiles;
+      if (_menuAnchorController.sortBy.value == MenuId.random) {
+        videoFiles.shuffle();
+      }
+      
       // Pick a random video from the found directory
       final random = Random();
-      final randomVideo = result.videoFiles[random.nextInt(result.videoFiles.length)];
+      final randomVideo = videoFiles[random.nextInt(videoFiles.length)];
       
-      _goVideoPlayerScreen(context, randomVideo, result.videoFiles, false);
+      _goVideoPlayerScreen(context, randomVideo, videoFiles, false);
     } catch (e) {
       SmartDialog.dismiss();
       SmartDialog.showToast('操作失败：$e');
