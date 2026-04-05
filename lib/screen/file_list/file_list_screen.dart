@@ -1298,6 +1298,14 @@ class _FileListScreenState extends State<FileListScreen>
           },
         )),
       ),
+      floatingActionButton: _isMultiSelectMode
+          ? null
+          : FloatingActionButton(
+              onPressed: () {
+                _menuAnchorController.menuController.open();
+              },
+              child: const Icon(Icons.menu_rounded),
+            ),
     );
   }
 
