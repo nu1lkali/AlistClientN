@@ -642,7 +642,7 @@ class PlaylistAdapter(
     override fun onBindViewHolder(holder: VH, position: Int) {
         val video = videos[position]
         holder.tvIndex.text = "${position + 1}"
-        holder.tvName.text = video.name.substringBeforeLast(".")
+        holder.tvName.text = video.name
         val isPlaying = position == currentIndex
         holder.tvName.alpha = if (isPlaying) 1f else 0.7f
         holder.tvName.setTypeface(null, if (isPlaying) android.graphics.Typeface.BOLD else android.graphics.Typeface.NORMAL)
