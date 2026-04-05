@@ -18,6 +18,7 @@ import 'package:alist/util/file_utils.dart';
 import 'package:alist/util/markdown_utils.dart';
 import 'package:alist/util/named_router.dart';
 import 'package:alist/util/nature_sort.dart';
+import 'package:alist/util/search_history_manager.dart';
 import 'package:alist/util/string_utils.dart';
 import 'package:alist/util/user_controller.dart';
 import 'package:alist/util/video_player_util.dart';
@@ -89,6 +90,16 @@ class FileSearchScreen extends StatelessWidget {
                                   hintStyle: TextStyle(color: searchIconColor),
                                   contentPadding: const EdgeInsets.symmetric(
                                       horizontal: 12, vertical: 8),
+                                  suffixIcon: Obx(() => controller.searchText.value.isNotEmpty
+                                      ? IconButton(
+                                          icon: Icon(Icons.clear, color: searchIconColor, size: 20),
+                                          onPressed: () {
+                                            controller.textEditingController.clear();
+                                            controller.searchText.value = '';
+                                            controller.list.clear();
+                                          },
+                                        )
+                                      : const SizedBox.shrink()),
                                 ),
                               )),
                             ],
@@ -137,7 +148,13 @@ class FileSearchScreen extends StatelessWidget {
   }
 
   Obx _buildList(FileSearchController controller) {
-    return Obx(() => ListView.separated(
+    return Obx(() {
+      // 显示搜索历史
+      if (controller.list.isEmpty && controller.textEditingController.text.trim().isEmpty) {
+        return _buildSearchHistory(controller);
+      }
+      
+      return ListView.separated(
         itemBuilder: (context, index) {
           var item = controller.list[index];
           var isDir = item.isDir ?? false;
@@ -174,7 +191,88 @@ class FileSearchScreen extends StatelessWidget {
           );
         },
         separatorBuilder: (context, index) => const Divider(),
-        itemCount: controller.list.length));
+        itemCount: controller.list.length,
+      );
+    });
+  }
+
+  Widget _buildSearchHistory(FileSearchController controller) {
+    return Obx(() {
+      final scheme = Theme.of(Get.context!).colorScheme;
+      final isDark = WidgetUtils.isDarkMode(Get.context!);
+      
+      if (controller.searchHistory.isEmpty) {
+        return Center(
+          child: Text(
+            '输入关键词开始搜索',
+            style: TextStyle(color: Colors.grey[600]),
+          ),
+        );
+      }
+      
+      return SingleChildScrollView(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                const Text(
+                  '搜索历史',
+                  style: TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                IconButton(
+                  onPressed: controller.clearSearchHistory,
+                  icon: const Icon(Icons.delete_outline),
+                  tooltip: '清空',
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: controller.searchHistory.map((keyword) {
+                return InkWell(
+                  onTap: () => controller.onHistoryTap(keyword),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 8,
+                    ),
+                    decoration: BoxDecoration(
+                      color: isDark
+                          ? const Color(0xff2a2a2a)
+                          : const Color(0xfff0f0f0),
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(keyword),
+                        const SizedBox(width: 4),
+                        GestureDetector(
+                          onTap: () => controller.deleteHistory(keyword),
+                          child: Icon(
+                            Icons.close,
+                            size: 16,
+                            color: Colors.grey[600],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                );
+              }).toList(),
+            ),
+          ],
+        ),
+      );
+    });
   }
 }
 
@@ -185,6 +283,11 @@ class FileSearchController extends GetxController {
   CancelToken? _cancelToken;
   var list = <FileSearchRespContent>[].obs;
   Timer? _searchDelayTimer;
+  Timer? _saveHistoryTimer;
+  String? _lastSavedKeyword;
+  final searchHistory = <String>[].obs;
+  final SearchHistoryManager _historyManager = SearchHistoryManager();
+  final searchText = ''.obs;
 
   // multi-select
   final isMultiSelect = false.obs;
@@ -250,6 +353,7 @@ class FileSearchController extends GetxController {
   @override
   void onInit() {
     super.onInit();
+    _loadSearchHistory();
     Future.delayed(const Duration(milliseconds: 300))
         .then((value) => focusNode.requestFocus());
   }
@@ -258,14 +362,57 @@ class FileSearchController extends GetxController {
   void onClose() {
     _cancelToken?.cancel();
     _searchDelayTimer?.cancel();
+    _saveHistoryTimer?.cancel();
     super.onClose();
   }
 
+  Future<void> _loadSearchHistory() async {
+    searchHistory.value = await _historyManager.loadSearchHistory();
+  }
+
+  Future<void> _saveSearchHistory(String keyword) async {
+    await _historyManager.saveSearchHistory(keyword);
+    await _loadSearchHistory();
+  }
+
+  void onHistoryTap(String keyword) {
+    textEditingController.text = keyword;
+    _doSearch(keyword);
+    // 点击历史记录时也更新时间戳（LRU）
+    _lastSavedKeyword = keyword;
+    _saveSearchHistory(keyword);
+  }
+
+  Future<void> deleteHistory(String keyword) async {
+    await _historyManager.deleteHistory(keyword);
+    await _loadSearchHistory();
+  }
+
+  Future<void> clearSearchHistory() async {
+    await _historyManager.clearAllHistory();
+    searchHistory.clear();
+  }
+
   void onSearchTextChange(String text) {
+    searchText.value = text;
     _searchDelayTimer?.cancel();
-    _searchDelayTimer = Timer(const Duration(microseconds: 300), () {
+    _saveHistoryTimer?.cancel();
+    
+    _searchDelayTimer = Timer(const Duration(milliseconds: 300), () {
       if (!text.isBlank!) {
         _doSearch(text.trim());
+        
+        // 延迟保存历史，避免输入过程中频繁保存
+        _saveHistoryTimer = Timer(const Duration(seconds: 2), () {
+          final keyword = text.trim();
+          // 只要有搜索结果且不是刚保存过的关键词，就保存
+          if (keyword.isNotEmpty && keyword != _lastSavedKeyword) {
+            _saveSearchHistory(keyword);
+            _lastSavedKeyword = keyword;
+          }
+        });
+      } else {
+        list.clear();
       }
     });
   }

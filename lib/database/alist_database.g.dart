@@ -73,13 +73,15 @@ class _$AlistDatabase extends AlistDatabase {
 
   FavoriteDao? _favoriteDaoInstance;
 
+  SearchHistoryDao? _searchHistoryDaoInstance;
+
   Future<sqflite.Database> open(
     String path,
     List<Migration> migrations, [
     Callback? callback,
   ]) async {
     final databaseOptions = sqflite.OpenDatabaseOptions(
-      version: 5,
+      version: 6,
       onConfigure: (database) async {
         await database.execute('PRAGMA foreign_keys = ON');
         await callback?.onConfigure?.call(database);
@@ -106,6 +108,8 @@ class _$AlistDatabase extends AlistDatabase {
             'CREATE TABLE IF NOT EXISTS `file_viewing_record` (`id` INTEGER PRIMARY KEY AUTOINCREMENT, `server_url` TEXT NOT NULL, `user_id` TEXT NOT NULL, `remote_path` TEXT NOT NULL, `name` TEXT NOT NULL, `size` INTEGER NOT NULL, `sign` TEXT, `thumb` TEXT, `modified` INTEGER NOT NULL, `provider` TEXT NOT NULL, `create_time` INTEGER NOT NULL, `path` TEXT NOT NULL)');
         await database.execute(
             'CREATE TABLE IF NOT EXISTS `favorite` (`id` INTEGER PRIMARY KEY AUTOINCREMENT, `is_dir` INTEGER NOT NULL, `server_url` TEXT NOT NULL, `user_id` TEXT NOT NULL, `remote_path` TEXT NOT NULL, `name` TEXT NOT NULL, `size` INTEGER NOT NULL, `sign` TEXT, `thumb` TEXT, `modified` INTEGER NOT NULL, `provider` TEXT NOT NULL, `create_time` INTEGER NOT NULL, `path` TEXT NOT NULL)');
+        await database.execute(
+            'CREATE TABLE IF NOT EXISTS `search_history` (`id` INTEGER PRIMARY KEY AUTOINCREMENT, `server_url` TEXT NOT NULL, `user_id` TEXT NOT NULL, `keyword` TEXT NOT NULL, `timestamp` INTEGER NOT NULL)');
 
         await callback?.onCreate?.call(database, version);
       },
@@ -145,6 +149,12 @@ class _$AlistDatabase extends AlistDatabase {
   @override
   FavoriteDao get favoriteDao {
     return _favoriteDaoInstance ??= _$FavoriteDao(database, changeListener);
+  }
+
+  @override
+  SearchHistoryDao get searchHistoryDao {
+    return _searchHistoryDaoInstance ??=
+        _$SearchHistoryDao(database, changeListener);
   }
 }
 
@@ -891,5 +901,87 @@ class _$FavoriteDao extends FavoriteDao {
   @override
   Future<int> deleteRecord(Favorite favorite) {
     return _favoriteDeletionAdapter.deleteAndReturnChangedRows(favorite);
+  }
+}
+
+class _$SearchHistoryDao extends SearchHistoryDao {
+  _$SearchHistoryDao(
+    this.database,
+    this.changeListener,
+  )   : _queryAdapter = QueryAdapter(database),
+        _searchHistoryInsertionAdapter = InsertionAdapter(
+            database,
+            'search_history',
+            (SearchHistory item) => <String, Object?>{
+                  'id': item.id,
+                  'server_url': item.serverUrl,
+                  'user_id': item.userId,
+                  'keyword': item.keyword,
+                  'timestamp': item.timestamp
+                });
+
+  final sqflite.DatabaseExecutor database;
+
+  final StreamController<String> changeListener;
+
+  final QueryAdapter _queryAdapter;
+
+  final InsertionAdapter<SearchHistory> _searchHistoryInsertionAdapter;
+
+  @override
+  Future<void> deleteById(int id) async {
+    await _queryAdapter.queryNoReturn(
+        'DELETE FROM search_history WHERE id = ?1',
+        arguments: [id]);
+  }
+
+  @override
+  Future<void> deleteByKeyword(
+    String serverUrl,
+    String userId,
+    String keyword,
+  ) async {
+    await _queryAdapter.queryNoReturn(
+        'DELETE FROM search_history WHERE server_url = ?1 AND user_id = ?2 AND keyword = ?3',
+        arguments: [serverUrl, userId, keyword]);
+  }
+
+  @override
+  Future<void> clearAll(
+    String serverUrl,
+    String userId,
+  ) async {
+    await _queryAdapter.queryNoReturn(
+        'DELETE FROM search_history WHERE server_url = ?1 AND user_id = ?2',
+        arguments: [serverUrl, userId]);
+  }
+
+  @override
+  Future<SearchHistory?> findByKeyword(
+    String serverUrl,
+    String userId,
+    String keyword,
+  ) async {
+    return _queryAdapter.query(
+        'SELECT * FROM search_history WHERE server_url = ?1 AND user_id = ?2 AND keyword = ?3 LIMIT 1',
+        mapper: (Map<String, Object?> row) => SearchHistory(id: row['id'] as int?, serverUrl: row['server_url'] as String, userId: row['user_id'] as String, keyword: row['keyword'] as String, timestamp: row['timestamp'] as int),
+        arguments: [serverUrl, userId, keyword]);
+  }
+
+  @override
+  Future<List<SearchHistory>> getRecentSearches(
+    String serverUrl,
+    String userId,
+  ) async {
+    return _queryAdapter.queryList(
+        'SELECT * FROM search_history WHERE server_url = ?1 AND user_id = ?2 ORDER BY timestamp DESC LIMIT 20',
+        mapper: (Map<String, Object?> row) => SearchHistory(id: row['id'] as int?, serverUrl: row['server_url'] as String, userId: row['user_id'] as String, keyword: row['keyword'] as String, timestamp: row['timestamp'] as int),
+        arguments: [serverUrl, userId]);
+  }
+
+  @override
+  Future<int> insertHistory(SearchHistory history) {
+    return _searchHistoryInsertionAdapter.insertAndReturnId(
+        history, OnConflictStrategy.abort);
   }
 }

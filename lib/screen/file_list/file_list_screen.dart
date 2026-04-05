@@ -153,7 +153,7 @@ class _FileListScreenState extends State<FileListScreen>
     }
 
     if (_isRootPath(path)) {
-      _pageName == null;
+      _pageName = Intl.appName.tr;
     } else {
       _pageName = path.substring(path.lastIndexOf('/') + 1);
     }

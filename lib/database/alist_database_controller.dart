@@ -6,6 +6,7 @@ import 'package:alist/database/dao/favorite_dao.dart';
 import 'package:alist/database/dao/file_download_record_dao.dart';
 import 'package:alist/database/dao/file_password_dao.dart';
 import 'package:alist/database/dao/file_viewing_record_dao.dart';
+import 'package:alist/database/dao/search_history_dao.dart';
 import 'package:alist/database/dao/server_dao.dart';
 import 'package:alist/database/dao/video_viewing_record_dao.dart';
 import 'package:floor/floor.dart';
@@ -21,6 +22,7 @@ class AlistDatabaseController extends GetxController {
   late final ServerDao serverDao;
   late final FileViewingRecordDao fileViewingRecordDao;
   late final FavoriteDao favoriteDao;
+  late final SearchHistoryDao searchHistoryDao;
 
   // create migration
   final _migration1to2 = Migration(1, 2, (database) async {
@@ -62,6 +64,12 @@ class AlistDatabaseController extends GetxController {
         'CREATE TABLE IF NOT EXISTS `favorite` (`id` INTEGER PRIMARY KEY AUTOINCREMENT, `is_dir` INTEGER NOT NULL, `server_url` TEXT NOT NULL, `user_id` TEXT NOT NULL, `remote_path` TEXT NOT NULL, `name` TEXT NOT NULL, `size` INTEGER NOT NULL, `sign` TEXT, `thumb` TEXT, `modified` INTEGER NOT NULL, `provider` TEXT NOT NULL, `create_time` INTEGER NOT NULL, `path` TEXT NOT NULL)');
   });
 
+  // create migration
+  final _migration5to6 = Migration(5, 6, (database) async {
+    await database.execute(
+        'CREATE TABLE IF NOT EXISTS `search_history` (`id` INTEGER PRIMARY KEY AUTOINCREMENT, `server_url` TEXT NOT NULL, `user_id` TEXT NOT NULL, `keyword` TEXT NOT NULL, `timestamp` INTEGER NOT NULL)');
+  });
+
   Future<void> init() async {
     var dbName = "alist.db";
     if (Platform.isIOS) {
@@ -82,6 +90,7 @@ class AlistDatabaseController extends GetxController {
       _migration2to3,
       _migration3to4,
       _migration4to5,
+      _migration5to6,
     ]).build();
     videoViewingRecordDao = database.videoViewingRecordDao;
     downloadRecordRecordDao = database.downloadRecordRecordDao;
@@ -89,5 +98,6 @@ class AlistDatabaseController extends GetxController {
     serverDao = database.serverDao;
     fileViewingRecordDao = database.fileViewingRecordDao;
     favoriteDao = database.favoriteDao;
+    searchHistoryDao = database.searchHistoryDao;
   }
 }

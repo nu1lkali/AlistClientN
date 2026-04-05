@@ -17,6 +17,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_smart_dialog/flutter_smart_dialog.dart';
 import 'package:get/get.dart';
 import 'package:image_gallery_saver/image_gallery_saver.dart';
+import 'package:native_exif/native_exif.dart';
 import 'package:path/path.dart' as p;
 import 'package:permission_handler/permission_handler.dart';
 import 'package:uuid/uuid.dart';
@@ -369,35 +370,114 @@ class GalleryController extends GetxController {
     final name = file?.name ?? Uri.parse(url).path.substringAfterLast("/") ?? "";
     final size = file?.size;
 
-    // try to get image dimensions from cache
+    // try to get image dimensions and EXIF from cache
     int? width, height;
     String? dateStr;
+    Map<String, dynamic> exifData = {};
+    
     try {
       File? cacheFile = await getCachedImageFile(url);
       if (cacheFile != null) {
+        // 获取图片尺寸
         final bytes = await cacheFile.readAsBytes();
         final codec = await ui.instantiateImageCodec(bytes);
         final frame = await codec.getNextFrame();
         width = frame.image.width;
         height = frame.image.height;
+        
+        // 获取文件修改时间
         final stat = await cacheFile.stat();
         dateStr = stat.modified.toString().substring(0, 19);
+        
+        // 读取 EXIF 信息
+        try {
+          final exif = await Exif.fromPath(cacheFile.path);
+          final attributes = await exif.getAttributes();
+          
+          // 提取常用 EXIF 信息
+          if (attributes != null) {
+            // 相机信息
+            if (attributes.containsKey('Make')) {
+              exifData['相机品牌'] = attributes['Make'];
+            }
+            if (attributes.containsKey('Model')) {
+              exifData['相机型号'] = attributes['Model'];
+            }
+            
+            // 拍摄参数
+            if (attributes.containsKey('FNumber')) {
+              exifData['光圈'] = 'f/${attributes['FNumber']}';
+            }
+            if (attributes.containsKey('ExposureTime')) {
+              exifData['快门速度'] = '${attributes['ExposureTime']}s';
+            }
+            if (attributes.containsKey('ISOSpeedRatings')) {
+              exifData['ISO'] = attributes['ISOSpeedRatings'];
+            }
+            if (attributes.containsKey('FocalLength')) {
+              exifData['焦距'] = '${attributes['FocalLength']}mm';
+            }
+            
+            // 拍摄时间
+            if (attributes.containsKey('DateTime')) {
+              exifData['拍摄时间'] = attributes['DateTime'];
+            } else if (attributes.containsKey('DateTimeOriginal')) {
+              exifData['拍摄时间'] = attributes['DateTimeOriginal'];
+            }
+            
+            // GPS 信息
+            if (attributes.containsKey('GPSLatitude') && attributes.containsKey('GPSLongitude')) {
+              exifData['GPS'] = '${attributes['GPSLatitude']}, ${attributes['GPSLongitude']}';
+            }
+            
+            // 软件信息
+            if (attributes.containsKey('Software')) {
+              exifData['软件'] = attributes['Software'];
+            }
+          }
+          
+          await exif.close();
+        } catch (e) {
+          debugPrint('读取 EXIF 失败: $e');
+        }
       }
-    } catch (_) {}
+    } catch (e) {
+      debugPrint('获取图片信息失败: $e');
+    }
 
     SmartDialog.show(builder: (context) {
       return AlertDialog(
         title: const Text("图片信息"),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            _infoRow("文件名", name),
-            if (size != null) _infoRow("大小", _formatBytes(size)),
-            if (width != null && height != null)
-              _infoRow("分辨率", "${width}x${height}"),
-            if (dateStr != null) _infoRow("修改时间", dateStr),
-          ],
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _infoRow("文件名", name),
+              if (size != null) _infoRow("大小", _formatBytes(size)),
+              if (width != null && height != null)
+                _infoRow("分辨率", "${width}x${height}"),
+              if (dateStr != null) _infoRow("修改时间", dateStr),
+              
+              // 显示 EXIF 信息
+              if (exifData.isNotEmpty) ...[
+                const SizedBox(height: 12),
+                const Divider(),
+                const SizedBox(height: 8),
+                const Text(
+                  "EXIF 信息",
+                  style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                ...exifData.entries.map((entry) => 
+                  _infoRow(entry.key, entry.value.toString())
+                ).toList(),
+              ],
+            ],
+          ),
         ),
         actions: [
           TextButton(
