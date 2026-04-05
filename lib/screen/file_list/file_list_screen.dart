@@ -638,6 +638,7 @@ class _FileListScreenState extends State<FileListScreen>
 
   // Random walk algorithm to find a directory with videos
   // Uses random path exploration instead of exhaustive traversal
+  // Improved: tries multiple folders if first choice is a dead end
   Future<_RandomVideoResult?> _randomWalkToFindVideos(String startPath, {int maxDepth = 10, int currentDepth = 0}) async {
     if (currentDepth >= maxDepth) {
       LogUtil.d('Max depth reached at $startPath');
@@ -698,17 +699,23 @@ class _FileListScreenState extends State<FileListScreen>
         
         LogUtil.d('Found ${videoFiles.length} videos and ${subDirs.length} folders in $startPath');
         
-        // Create pool of all items (folders + videos)
-        final totalItems = subDirs.length + videoFiles.length;
+        // If current directory has videos, there's a chance to use them directly
+        if (videoFiles.isNotEmpty && subDirs.isEmpty) {
+          // No subdirectories, use current videos
+          LogUtil.d('Leaf directory with ${videoFiles.length} videos, using them');
+          completer.complete(_RandomVideoResult(dirPath: startPath, videoFiles: videoFiles));
+          return;
+        }
         
-        if (totalItems == 0) {
+        if (videoFiles.isEmpty && subDirs.isEmpty) {
           // Dead end - empty folder
           LogUtil.d('Empty folder: $startPath');
           completer.complete(null);
           return;
         }
         
-        // Randomly select one item from the pool
+        // Create pool of all items (folders + videos)
+        final totalItems = subDirs.length + videoFiles.length;
         final random = Random();
         final randomIndex = random.nextInt(totalItems);
         
@@ -717,28 +724,44 @@ class _FileListScreenState extends State<FileListScreen>
           LogUtil.d('Hit video! Using ${videoFiles.length} videos from $startPath');
           completer.complete(_RandomVideoResult(dirPath: startPath, videoFiles: videoFiles));
         } else {
-          // Hit a folder - recursively enter it
+          // Hit a folder - try to explore it
           final folderIndex = randomIndex - videoFiles.length;
-          final selectedFolder = subDirs[folderIndex];
           
-          LogUtil.d('Hit folder: $selectedFolder, exploring...');
+          // Shuffle subdirectories to try them in random order
+          subDirs.shuffle(random);
           
-          // Try the selected folder
-          final subResult = await _randomWalkToFindVideos(
-            selectedFolder, 
-            maxDepth: maxDepth, 
-            currentDepth: currentDepth + 1
-          );
+          LogUtil.d('Hit folder, will try ${subDirs.length} folders in random order');
           
-          if (subResult != null) {
-            LogUtil.d('Found videos in subfolder');
-            completer.complete(subResult);
+          // Try folders one by one until we find videos
+          _RandomVideoResult? result;
+          for (final subDir in subDirs) {
+            LogUtil.d('Trying folder: $subDir');
+            
+            final subResult = await _randomWalkToFindVideos(
+              subDir, 
+              maxDepth: maxDepth, 
+              currentDepth: currentDepth + 1
+            );
+            
+            if (subResult != null) {
+              LogUtil.d('Found videos in $subDir');
+              result = subResult;
+              break; // Found videos, stop searching
+            } else {
+              LogUtil.d('$subDir was a dead end, trying next folder...');
+            }
+          }
+          
+          // After trying all folders
+          if (result != null) {
+            completer.complete(result);
           } else if (videoFiles.isNotEmpty) {
-            // Backtrack: if subfolder was a dead end but current dir has videos, use them
-            LogUtil.d('Subfolder was dead end, backtracking to use ${videoFiles.length} videos from $startPath');
+            // All subfolders were dead ends, but current dir has videos
+            LogUtil.d('All subfolders were dead ends, backtracking to use ${videoFiles.length} videos from $startPath');
             completer.complete(_RandomVideoResult(dirPath: startPath, videoFiles: videoFiles));
           } else {
-            LogUtil.d('No videos found, returning null');
+            // No videos found anywhere
+            LogUtil.d('No videos found in $startPath or any subfolders');
             completer.complete(null);
           }
         }
