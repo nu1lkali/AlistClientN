@@ -42,11 +42,15 @@ class _SettingsContainerState extends State<_SettingsContainer>
   final UserController _userController = Get.find();
   StreamSubscription? _serverStreamSubscription;
   final _userCnt = 0.obs;
+  late final RxBool _aggressiveCacheEnabled;
 
   @override
   void initState() {
     super.initState();
     _initPackageInfo();
+    
+    // Initialize aggressive cache setting
+    _aggressiveCacheEnabled = (SpUtil.getBool(AlistConstant.enableAggressiveCache, defValue: true) ?? true).obs;
 
     _serverStreamSubscription =
         _databaseController.serverDao.serverList().listen((event) {
@@ -72,6 +76,7 @@ class _SettingsContainerState extends State<_SettingsContainer>
     final toolMenus = menus.where((m) =>
         m.menuId == MenuId.downloads ||
         m.menuId == MenuId.cacheManager ||
+        m.menuId == MenuId.aggressiveCache ||
         m.menuId == MenuId.playerSettings ||
         m.menuId == MenuId.themeColor).toList();
     final aboutMenus = menus.where((m) =>
@@ -121,6 +126,63 @@ class _SettingsContainerState extends State<_SettingsContainer>
 
   Widget _buildCardItem(SettingsMenu settingsMenu, BuildContext context, bool isDark) {
     final scheme = Theme.of(context).colorScheme;
+    
+    // Special handling for aggressive cache toggle
+    if (settingsMenu.menuId == MenuId.aggressiveCache) {
+      return ListTile(
+        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+        leading: Container(
+          width: 44,
+          height: 44,
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              colors: [
+                scheme.primaryContainer.withOpacity(0.8),
+                scheme.primaryContainer.withOpacity(0.5),
+              ],
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+            ),
+            borderRadius: BorderRadius.circular(12),
+            boxShadow: [
+              BoxShadow(
+                color: scheme.primary.withOpacity(0.1),
+                blurRadius: 8,
+                offset: const Offset(0, 2),
+              ),
+            ],
+          ),
+          child: settingsMenu.iconData != null
+              ? Icon(settingsMenu.iconData, size: 22,
+                  color: isDark ? Colors.white.withOpacity(0.9) : scheme.primary)
+              : Padding(
+                  padding: const EdgeInsets.all(8),
+                  child: Image.asset(settingsMenu.icon,
+                      color: isDark ? Colors.white.withOpacity(0.9) : scheme.primary),
+                ),
+        ),
+        title: Text(
+          settingsMenu.name,
+          style: TextStyle(
+            fontSize: 15,
+            fontWeight: FontWeight.w500,
+            letterSpacing: -0.2,
+          ),
+        ),
+        subtitle: Text(
+          '适合局域网环境，提前加载子文件夹',
+          style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
+        ),
+        trailing: Obx(() => Switch(
+          value: _aggressiveCacheEnabled.value,
+          onChanged: (value) {
+            SpUtil.putBool(AlistConstant.enableAggressiveCache, value);
+            _aggressiveCacheEnabled.value = value;
+          },
+        )),
+      );
+    }
+    
     return ListTile(
       onTap: () => _handleMenuTap(settingsMenu, context),
       contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
@@ -306,6 +368,11 @@ class _SettingsContainerState extends State<_SettingsContainer>
           icon: Images.settingsScreenCacheManager,
           route: NamedRouter.cacheManager),
       SettingsMenu(
+          menuId: MenuId.aggressiveCache,
+          name: "智能预加载",
+          icon: Images.settingsScreenCacheManager,
+          iconData: Icons.speed_rounded),
+      SettingsMenu(
           menuId: MenuId.themeColor,
           name: "主题颜色",
           icon: Images.settingsScreenPlayer,
@@ -388,6 +455,7 @@ enum MenuId {
   privacyPolicy,
   about,
   cacheManager,
+  aggressiveCache,
   playerSettings,
   themeColor,
 }

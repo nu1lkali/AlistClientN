@@ -292,8 +292,24 @@ public class AlistClientVideoPlayer extends NormalGSYVideoPlayer {
             }
             videoPlayer.btnScreenshot.setOnClickListener(v -> videoPlayer.takeScreenshot());
             // propagate delete listener to fullscreen instance
-            videoPlayer.setOnDeleteClickListener(this.deleteClickListener);
-            videoPlayer.setOnPlaylistClickListener(this.playlistClickListener);
+            videoPlayer.deleteClickListener = this.deleteClickListener;
+            videoPlayer.playlistClickListener = this.playlistClickListener;
+            
+            // Re-attach click listeners to the fullscreen buttons
+            if (videoPlayer.btnDelete != null && this.deleteClickListener != null) {
+                videoPlayer.btnDelete.setOnClickListener(v -> {
+                    if (videoPlayer.deleteClickListener != null) {
+                        videoPlayer.deleteClickListener.onDeleteClick();
+                    }
+                });
+            }
+            if (videoPlayer.btnPlaylist != null && this.playlistClickListener != null) {
+                videoPlayer.btnPlaylist.setOnClickListener(v -> {
+                    if (videoPlayer.playlistClickListener != null) {
+                        videoPlayer.playlistClickListener.onPlaylistClick();
+                    }
+                });
+            }
         }
         return videoPlayer;
     }

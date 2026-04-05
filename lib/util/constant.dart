@@ -36,6 +36,7 @@ class AlistConstant {
   static const String lastPlaybackRate = 'lastPlaybackRate';
   static const String fileViewMode = 'fileViewMode'; // 0=list, 1=grid
   static const String themeColorValue = 'themeColorValue'; // int color value
+  static const String enableAggressiveCache = 'enableAggressiveCache'; // aggressive preload cache
 
   static const String locale = 'locale';
 }

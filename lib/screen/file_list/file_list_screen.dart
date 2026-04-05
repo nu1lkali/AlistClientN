@@ -204,6 +204,14 @@ class _FileListScreenState extends State<FileListScreen>
       setState(() {
         _files = cached;
       });
+    } else if (_files.isEmpty) {
+      // If no cache and no files, trigger loading state by requesting refresh
+      // This ensures the SmartRefresher shows loading indicator
+      Future.microtask(() {
+        if (mounted) {
+          _refreshController.requestRefresh();
+        }
+      });
     }
 
     return _loadFilesInner();
@@ -249,8 +257,16 @@ class _FileListScreenState extends State<FileListScreen>
       _loadVideoProgress(fileItemVOs);
       // cache this result and preload subdirectories
       _preloadCache[path] = fileItemVOs;
-      if (_isRootPath(path)) {
-        _preloadSubdirectories(fileItemVOs);
+      
+      // Check if aggressive cache is enabled
+      final enableAggressiveCache = SpUtil.getBool(AlistConstant.enableAggressiveCache, defValue: true) ?? true;
+      if (enableAggressiveCache) {
+        // Aggressively preload subdirectories for LAN environments
+        // Preload from any directory, not just root
+        final hasFolders = fileItemVOs.any((f) => f.isDir);
+        if (hasFolders) {
+          _preloadSubdirectories(fileItemVOs);
+        }
       }
     }, onError: (code, msg) {
       _refreshController.refreshFailed();
@@ -1343,20 +1359,44 @@ class _FileListScreenState extends State<FileListScreen>
   }
 
   void _preloadSubdirectories(List<FileItemVO> files) async {
-    // only preload top-level folders, limit to 10 to avoid hammering the server
-    final dirs = files.where((f) => f.isDir).take(10).toList();
-    for (final dir in dirs) {
-      if (_preloadCache.containsKey(dir.path)) continue;
-      await Future.delayed(const Duration(milliseconds: 200));
+    // For LAN environments, aggressively preload subdirectories
+    // Preload all folders (not just 10) but with shorter delay
+    final dirs = files.where((f) => f.isDir).toList();
+    
+    // Preload in batches to avoid overwhelming the server
+    const batchSize = 5;
+    for (var i = 0; i < dirs.length; i += batchSize) {
+      final batch = dirs.skip(i).take(batchSize).toList();
+      
+      // Process batch in parallel
+      await Future.wait(
+        batch.map((dir) => _preloadDirectory(dir.path)),
+        eagerError: false,
+      );
+      
+      // Short delay between batches
+      if (i + batchSize < dirs.length) {
+        await Future.delayed(const Duration(milliseconds: 100));
+      }
+      
       if (!mounted) return;
-      final body = {
-        "path": dir.path,
-        "password": _password ?? "",
-        "page": 1,
-        "per_page": 0,
-        "refresh": false,
-      };
-      DioUtils.instance.requestNetwork<FileListRespEntity>(
+    }
+  }
+
+  Future<void> _preloadDirectory(String dirPath) async {
+    // Skip if already cached
+    if (_preloadCache.containsKey(dirPath)) return;
+    
+    final body = {
+      "path": dirPath,
+      "password": _password ?? "",
+      "page": 1,
+      "per_page": 0,
+      "refresh": false,
+    };
+    
+    try {
+      await DioUtils.instance.requestNetwork<FileListRespEntity>(
         Method.post, "fs/list",
         params: body,
         onSuccess: (data) {
@@ -1365,10 +1405,26 @@ class _FileListScreenState extends State<FileListScreen>
               .map((f) => _fileResp2VO(data.provider, f))
               .toList();
           _sort(vos);
-          _preloadCache[dir.path] = vos;
+          _preloadCache[dirPath] = vos;
+          
+          // For LAN: also preload subdirectories of this directory (one level deep)
+          // This makes navigation feel instant for 2 levels
+          final subDirs = vos.where((f) => f.isDir).take(5).toList();
+          if (subDirs.isNotEmpty) {
+            Future.delayed(const Duration(milliseconds: 200), () {
+              if (!mounted) return;
+              for (final subDir in subDirs) {
+                _preloadDirectory(subDir.path);
+              }
+            });
+          }
         },
-        onError: (_, __) {},
+        onError: (_, __) {
+          // Silently fail for preloading
+        },
       );
+    } catch (e) {
+      // Silently fail for preloading
     }
   }
 
