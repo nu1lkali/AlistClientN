@@ -261,6 +261,7 @@ class GalleryController extends GetxController {
       final next = index + i;
       final prev = index - i;
       if (next < urls.length && !_preloadedIndices.contains(next)) {
+        _preloadImage(next);
         _preloadedIndices.add(next);
       }
       if (prev >= 0 && !_preloadedIndices.contains(prev)) {
