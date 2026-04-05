@@ -354,7 +354,7 @@ class FileSearchController extends GetxController {
         try {
           // 需要先加载文件信息以获取sign
           final folderPath = path.substringBeforeLast("/")!;
-          final files = await _loadFiles(folderPath, path, null);
+          final files = await _loadFiles(folderPath, path, null, null);
           
           if (files == null || files.isEmpty) {
             debugPrint("无法加载文件信息: ${file.name}");
