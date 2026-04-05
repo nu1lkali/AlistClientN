@@ -150,6 +150,7 @@ class PlayerActivity : AppCompatActivity(), GSYVideoProgressListener {
 
         gsyVideoPlayer.setOnPlaylistClickListener { togglePlaylist() }
         gsyVideoPlayer.setOnDeleteClickListener { confirmDelete() }
+        gsyVideoPlayer.setOnInfoClickListener { showVideoInfo() }
 
         val gsyVideoOption = GSYVideoOptionBuilder()
         gsyVideoOption
@@ -224,6 +225,14 @@ class PlayerActivity : AppCompatActivity(), GSYVideoProgressListener {
                 val fullPlayer = it as AlistClientVideoPlayer
                 val wrapper = PlayerWrapper(fullPlayer)
                 wrapper.initViews()
+                // Re-attach listeners for fullscreen instance
+                fullPlayer.setOnPlaylistClickListener { 
+                    // Exit fullscreen first, then show playlist
+                    gsyVideoPlayer.fullscreenButton.performClick()
+                    gsyVideoPlayer.postDelayed({ togglePlaylist() }, 300)
+                }
+                fullPlayer.setOnDeleteClickListener { confirmDelete() }
+                fullPlayer.setOnInfoClickListener { showVideoInfo() }
             }
         }
 
@@ -371,6 +380,66 @@ class PlayerActivity : AppCompatActivity(), GSYVideoProgressListener {
                 playerWrapper.btnBack.performClick()
             }
             .setNegativeButton("取消", null)
+            .show()
+    }
+
+    private fun showVideoInfo() {
+        if (videos.isEmpty()) return
+        val video = videos[index]
+        
+        // Format file size
+        val sizeStr = try {
+            val sizeBytes = video.size?.toLongOrNull() ?: 0L
+            when {
+                sizeBytes == 0L -> "未知"
+                sizeBytes < 1024 -> "$sizeBytes B"
+                sizeBytes < 1024 * 1024 -> String.format("%.2f KB", sizeBytes / 1024.0)
+                sizeBytes < 1024 * 1024 * 1024 -> String.format("%.2f MB", sizeBytes / (1024.0 * 1024))
+                else -> String.format("%.2f GB", sizeBytes / (1024.0 * 1024 * 1024))
+            }
+        } catch (e: Exception) {
+            "未知"
+        }
+        
+        // Get video duration
+        val duration = gsyVideoPlayer.duration
+        val durationStr = if (duration > 0) {
+            val hours = duration / 3600000
+            val minutes = (duration % 3600000) / 60000
+            val seconds = (duration % 60000) / 1000
+            if (hours > 0) {
+                String.format("%d:%02d:%02d", hours, minutes, seconds)
+            } else {
+                String.format("%d:%02d", minutes, seconds)
+            }
+        } else {
+            "未知"
+        }
+        
+        // Get video resolution
+        val width = gsyVideoPlayer.currentPlayer.currentVideoWidth
+        val height = gsyVideoPlayer.currentPlayer.currentVideoHeight
+        val resolutionStr = if (width > 0 && height > 0) {
+            "${width} × ${height}"
+        } else {
+            "未知"
+        }
+        
+        // Get directory path
+        val dirPath = video.remotePath.substringBeforeLast("/")
+        
+        // Build info message
+        val infoMessage = StringBuilder()
+        infoMessage.append("文件名：${video.name}\n\n")
+        infoMessage.append("文件大小：$sizeStr\n\n")
+        infoMessage.append("时长：$durationStr\n\n")
+        infoMessage.append("分辨率：$resolutionStr\n\n")
+        infoMessage.append("目录：$dirPath")
+        
+        androidx.appcompat.app.AlertDialog.Builder(this)
+            .setTitle("视频信息")
+            .setMessage(infoMessage.toString())
+            .setPositiveButton("确定", null)
             .show()
     }
 

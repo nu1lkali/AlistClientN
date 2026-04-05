@@ -135,6 +135,15 @@
             android:tint="@android:color/white" />
 
         <ImageView
+            android:id="@+id/btn_info"
+            android:layout_width="48dp"
+            android:layout_height="48dp"
+            android:paddingRight="4dp"
+            android:scaleType="centerInside"
+            android:src="@android:drawable/ic_menu_info_details"
+            android:tint="@android:color/white" />
+
+        <ImageView
             android:id="@+id/btn_delete"
             android:layout_width="48dp"
             android:layout_height="48dp"

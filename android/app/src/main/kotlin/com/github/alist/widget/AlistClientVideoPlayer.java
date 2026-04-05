@@ -45,6 +45,7 @@ public class AlistClientVideoPlayer extends NormalGSYVideoPlayer {
     protected View btnScreenshot;
     protected View btnDelete;
     protected View btnPlaylist;
+    protected View btnInfo;
     private View llPlayingAtDoubleSpeed;
     protected boolean isEnableSeek;
     private boolean isLongPressing;
@@ -58,8 +59,13 @@ public class AlistClientVideoPlayer extends NormalGSYVideoPlayer {
         void onPlaylistClick();
     }
 
+    public interface OnInfoClickListener {
+        void onInfoClick();
+    }
+
     private OnDeleteClickListener deleteClickListener;
     private OnPlaylistClickListener playlistClickListener;
+    private OnInfoClickListener infoClickListener;
 
     public void setOnDeleteClickListener(OnDeleteClickListener listener) {
         this.deleteClickListener = listener;
@@ -75,6 +81,15 @@ public class AlistClientVideoPlayer extends NormalGSYVideoPlayer {
         if (btnPlaylist != null) {
             btnPlaylist.setOnClickListener(v -> {
                 if (playlistClickListener != null) playlistClickListener.onPlaylistClick();
+            });
+        }
+    }
+
+    public void setOnInfoClickListener(OnInfoClickListener listener) {
+        this.infoClickListener = listener;
+        if (btnInfo != null) {
+            btnInfo.setOnClickListener(v -> {
+                if (infoClickListener != null) infoClickListener.onInfoClick();
             });
         }
     }
@@ -105,6 +120,7 @@ public class AlistClientVideoPlayer extends NormalGSYVideoPlayer {
         btnScreenshot = findViewById(R.id.btn_screenshot);
         btnDelete = findViewById(R.id.btn_delete);
         btnPlaylist = findViewById(R.id.btn_playlist);
+        btnInfo = findViewById(R.id.btn_info);
         btnRewind.setVisibility(View.INVISIBLE);
         btnFfwd.setVisibility(View.INVISIBLE);
         btnScreenshot.setOnClickListener(v -> takeScreenshot());
