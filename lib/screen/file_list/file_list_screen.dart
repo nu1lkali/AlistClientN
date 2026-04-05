@@ -581,23 +581,24 @@ class _FileListScreenState extends State<FileListScreen>
     SmartDialog.showLoading(msg: '处理中，请稍候…', backDismiss: false, clickMaskDismiss: false);
     
     try {
-      // Step 1: Collect all files from subdirectories recursively
-      final allFiles = <FileItemVO>[];
-      final allSubFolders = <String>[];
-      await _collectFilesRecursively(path, allFiles, allSubFolders);
+      // Step 1: Get all subdirectories in current path
+      final subDirs = _files.where((f) => f.isDir).toList();
       
-      if (allFiles.isEmpty) {
-        SmartDialog.dismiss();
-        SmartDialog.showToast('没有找到需要提取的文件');
-        return;
+      // Step 2: Collect all files from subdirectories recursively (NOT including current directory files)
+      final filesFromSubdirs = <FileItemVO>[];
+      final allSubFolders = <String>[];
+      
+      // Recursively collect files from subdirectories
+      for (final dir in subDirs) {
+        final dirPath = dir.path;
+        allSubFolders.add(dirPath);
+        await _collectFilesRecursively(dirPath, filesFromSubdirs, allSubFolders);
       }
-
-      // Step 2: Group files by source directory for batch moving
-      final Map<String, List<FileItemVO>> filesBySourceDir = {};
-      for (final file in allFiles) {
-        final srcDir = file.path.substring(0, file.path.lastIndexOf('/'));
-        if (srcDir == path) continue; // already in current dir
-        filesBySourceDir.putIfAbsent(srcDir, () => []).add(file);
+      
+      if (filesFromSubdirs.isEmpty && subDirs.isEmpty) {
+        SmartDialog.dismiss();
+        SmartDialog.showToast('没有找到文件');
+        return;
       }
 
       // Step 3: Get current directory file names to check for conflicts
@@ -607,69 +608,69 @@ class _FileListScreenState extends State<FileListScreen>
       int renamedCount = 0;
       final filesToMove = <FileItemVO>[];
       
-      for (final files in filesBySourceDir.values) {
-        for (final file in files) {
-          String targetFileName = file.name;
-          if (existingFileNames.contains(file.name)) {
-            targetFileName = _generateUniqueFileName(file.name, existingFileNames);
-            renamedCount++;
-            
-            // Rename file first
-            final renameReq = FileRenameReq();
-            renameReq.path = file.path;
-            renameReq.name = targetFileName;
-            
-            bool renamed = false;
-            await DioUtils.instance.requestNetwork<String?>(
-              Method.post, 'fs/rename',
-              params: renameReq.toJson(),
-              onSuccess: (_) { renamed = true; },
-              onError: (_, __) {},
-            );
-            
-            if (!renamed) continue; // Skip this file if rename failed
-            
-            // Update file name in the object
-            file.name = targetFileName;
-          }
-          existingFileNames.add(targetFileName);
-          filesToMove.add(file);
+      for (final file in filesFromSubdirs) {
+        String targetFileName = file.name;
+        if (existingFileNames.contains(file.name)) {
+          targetFileName = _generateUniqueFileName(file.name, existingFileNames);
+          renamedCount++;
+          
+          // Rename file first
+          final renameReq = FileRenameReq();
+          renameReq.path = file.path;
+          renameReq.name = targetFileName;
+          
+          bool renamed = false;
+          await DioUtils.instance.requestNetwork<String?>(
+            Method.post, 'fs/rename',
+            params: renameReq.toJson(),
+            onSuccess: (_) { renamed = true; },
+            onError: (_, __) {},
+          );
+          
+          if (!renamed) continue; // Skip this file if rename failed
+          
+          // Update file name in the object
+          file.name = targetFileName;
         }
+        existingFileNames.add(targetFileName);
+        filesToMove.add(file);
       }
 
       // Step 5: Batch move files by source directory
       int extractedCount = 0;
       int extractFailCount = 0;
       
-      // Re-group by source directory after renaming
-      final Map<String, List<String>> fileNamesBySourceDir = {};
-      for (final file in filesToMove) {
-        final srcDir = file.path.substring(0, file.path.lastIndexOf('/'));
-        fileNamesBySourceDir.putIfAbsent(srcDir, () => []).add(file.name);
-      }
-      
-      for (final entry in fileNamesBySourceDir.entries) {
-        final srcDir = entry.key;
-        final fileNames = entry.value;
+      if (filesToMove.isNotEmpty) {
+        // Group by source directory after renaming
+        final Map<String, List<String>> fileNamesBySourceDir = {};
+        for (final file in filesToMove) {
+          final srcDir = file.path.substring(0, file.path.lastIndexOf('/'));
+          fileNamesBySourceDir.putIfAbsent(srcDir, () => []).add(file.name);
+        }
         
-        // Batch move all files from this directory
-        final req = CopyMoveReq();
-        req.srcDir = srcDir;
-        req.dstDir = path;
-        req.names = fileNames;
-        
-        await DioUtils.instance.requestNetwork<String?>(
-          Method.post, 'fs/move',
-          params: req.toJson(),
-          onSuccess: (_) { extractedCount += fileNames.length; },
-          onError: (_, __) { extractFailCount += fileNames.length; },
-        );
+        for (final entry in fileNamesBySourceDir.entries) {
+          final srcDir = entry.key;
+          final fileNames = entry.value;
+          
+          // Batch move all files from this directory
+          final req = CopyMoveReq();
+          req.srcDir = srcDir;
+          req.dstDir = path;
+          req.names = fileNames;
+          
+          await DioUtils.instance.requestNetwork<String?>(
+            Method.post, 'fs/move',
+            params: req.toJson(),
+            onSuccess: (_) { extractedCount += fileNames.length; },
+            onError: (_, __) { extractFailCount += fileNames.length; },
+          );
+        }
       }
 
       // Step 6: Refresh file list to get updated files
       await _loadFilesInner();
 
-      // Step 7: Organize by type (reuse existing logic)
+      // Step 7: Organize by type (all files in current directory)
       final Map<String, List<FileItemVO>> groups = {};
       for (final file in _files) {
         if (file.isDir) continue;
@@ -773,12 +774,17 @@ class _FileListScreenState extends State<FileListScreen>
       _refreshController.requestRefresh();
       
       final summary = StringBuffer();
-      summary.write('提取文件：$extractedCount 个');
-      if (renamedCount > 0) summary.write('（重命名 $renamedCount 个）');
-      if (extractFailCount > 0) summary.write('（失败 $extractFailCount 个）');
-      summary.write('\n归类整理：$organizedCount 个');
+      if (extractedCount > 0 || renamedCount > 0) {
+        summary.write('提取文件：$extractedCount 个');
+        if (renamedCount > 0) summary.write('（重命名 $renamedCount 个）');
+        if (extractFailCount > 0) summary.write('（失败 $extractFailCount 个）');
+        summary.write('\n');
+      }
+      summary.write('归类整理：$organizedCount 个');
       if (organizeFailCount > 0) summary.write('（失败 $organizeFailCount 个）');
-      summary.write('\n删除空文件夹：$deletedFolders 个');
+      if (deletedFolders > 0) {
+        summary.write('\n删除空文件夹：$deletedFolders 个');
+      }
       
       SmartDialog.showToast(summary.toString(), displayTime: const Duration(seconds: 3));
     } catch (e) {
