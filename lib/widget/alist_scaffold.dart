@@ -24,9 +24,10 @@ class AlistScaffold extends StatelessWidget {
     bool isDarkMode = WidgetUtils.isDarkMode(context);
 
     if (!isDarkMode) {
-      Color startColor = Theme.of(context).colorScheme.primaryContainer;
+      Color startColor = Theme.of(context).colorScheme.primaryContainer.withOpacity(0.15);
+      Color midColor = Theme.of(context).colorScheme.primaryContainer.withOpacity(0.05);
       const Color endColor = Colors.white;
-      colors = [startColor, endColor];
+      colors = [startColor, midColor, endColor];
     }
     final ModalRoute<dynamic>? parentRoute = ModalRoute.of(context);
     var canPop = null != parentRoute && parentRoute.canPop;
@@ -39,6 +40,7 @@ class AlistScaffold extends StatelessWidget {
                   colors: colors,
                   begin: Alignment.topCenter,
                   end: Alignment.bottomCenter,
+                  stops: const [0.0, 0.3, 1.0],
                 ),
               ),
         child: Scaffold(

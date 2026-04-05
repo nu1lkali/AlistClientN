@@ -82,17 +82,18 @@ class _SettingsContainerState extends State<_SettingsContainer>
     Widget card(List<SettingsMenu> items) {
       if (items.isEmpty) return const SizedBox();
       return Card(
-        margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-        elevation: isDark ? 0 : 1,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-        color: isDark ? scheme.surfaceVariant.withOpacity(0.4) : scheme.surface,
+        margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        elevation: isDark ? 0 : 2,
+        shadowColor: scheme.shadow.withOpacity(0.1),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        color: isDark ? scheme.surfaceVariant.withOpacity(0.3) : scheme.surface,
         child: Column(
           children: [
             for (int i = 0; i < items.length; i++) ...[
               _buildCardItem(items[i], context, isDark),
               if (i < items.length - 1)
-                Divider(height: 1, indent: 56, endIndent: 16,
-                    color: scheme.outlineVariant.withOpacity(0.5)),
+                Divider(height: 1, indent: 68, endIndent: 16,
+                    color: scheme.outlineVariant.withOpacity(0.3)),
             ]
           ],
         ),
@@ -122,23 +123,47 @@ class _SettingsContainerState extends State<_SettingsContainer>
     final scheme = Theme.of(context).colorScheme;
     return ListTile(
       onTap: () => _handleMenuTap(settingsMenu, context),
-      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 2),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
       leading: Container(
-        width: 36,
-        height: 36,
+        width: 44,
+        height: 44,
         decoration: BoxDecoration(
-          color: scheme.primaryContainer.withOpacity(0.6),
-          borderRadius: BorderRadius.circular(8),
+          gradient: LinearGradient(
+            colors: [
+              scheme.primaryContainer.withOpacity(0.8),
+              scheme.primaryContainer.withOpacity(0.5),
+            ],
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+          ),
+          borderRadius: BorderRadius.circular(12),
+          boxShadow: [
+            BoxShadow(
+              color: scheme.primary.withOpacity(0.1),
+              blurRadius: 8,
+              offset: const Offset(0, 2),
+            ),
+          ],
         ),
-        child: Padding(
-          padding: const EdgeInsets.all(6),
-          child: Image.asset(settingsMenu.icon,
-              color: isDark ? Colors.white70 : null),
+        child: settingsMenu.iconData != null
+            ? Icon(settingsMenu.iconData, size: 22,
+                color: isDark ? Colors.white.withOpacity(0.9) : scheme.primary)
+            : Padding(
+                padding: const EdgeInsets.all(8),
+                child: Image.asset(settingsMenu.icon,
+                    color: isDark ? Colors.white.withOpacity(0.9) : scheme.primary),
+              ),
+      ),
+      title: Text(
+        settingsMenu.name,
+        style: TextStyle(
+          fontSize: 15,
+          fontWeight: FontWeight.w500,
+          letterSpacing: -0.2,
         ),
       ),
-      title: Text(settingsMenu.name),
       trailing: Icon(Icons.chevron_right_rounded,
-          color: scheme.outlineVariant, size: 20),
+          color: scheme.outlineVariant, size: 22),
     );
   }
 
@@ -189,7 +214,7 @@ class _SettingsContainerState extends State<_SettingsContainer>
 
   void _showThemeColorPicker(BuildContext context) {
     const colors = [
-      Color(0xFF0060A9), // 默认蓝
+      Color(0xFF0060A9), // 蓝
       Color(0xFF006E1C), // 绿
       Color(0xFF9A4521), // 橙
       Color(0xFF7B1FA2), // 紫
@@ -200,47 +225,60 @@ class _SettingsContainerState extends State<_SettingsContainer>
       Color(0xFF880E4F), // 玫红
       Color(0xFF37474F), // 蓝灰
       Color(0xFF4E342E), // 棕
-      Color(0xFF000000), // 黑
+      Color(0xFF546E7A), // 灰蓝
     ];
 
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text("选择主题颜色"),
-        content: Wrap(
-          spacing: 12,
-          runSpacing: 12,
-          children: colors.map((color) {
-            final isSelected = ThemeController.instance.seedColor.value == color;
-            return GestureDetector(
-              onTap: () {
-                ThemeController.instance.setColor(color);
-                Navigator.pop(ctx);
-              },
-              child: Container(
-                width: 44,
-                height: 44,
-                decoration: BoxDecoration(
-                  color: color,
-                  shape: BoxShape.circle,
-                  border: isSelected
-                      ? Border.all(color: Colors.white, width: 3)
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Text("选择主题颜色", style: TextStyle(fontWeight: FontWeight.w600)),
+        content: Obx(() {
+          final currentColor = ThemeController.instance.seedColor.value.value;
+          return Wrap(
+            spacing: 16,
+            runSpacing: 16,
+            children: colors.map((color) {
+              final isSelected = currentColor == color.value;
+              return GestureDetector(
+                onTap: () {
+                  ThemeController.instance.setColor(color);
+                  Navigator.pop(ctx);
+                },
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 200),
+                  width: 52,
+                  height: 52,
+                  decoration: BoxDecoration(
+                    color: color,
+                    shape: BoxShape.circle,
+                    border: isSelected
+                        ? Border.all(
+                            color: Theme.of(context).brightness == Brightness.dark 
+                                ? Colors.white 
+                                : Colors.black, 
+                            width: 3)
+                        : null,
+                    boxShadow: [
+                      BoxShadow(
+                        color: color.withOpacity(isSelected ? 0.5 : 0.3),
+                        blurRadius: isSelected ? 12 : 8,
+                        offset: const Offset(0, 4),
+                      )
+                    ],
+                  ),
+                  child: isSelected
+                      ? Icon(Icons.check_rounded, 
+                          color: Theme.of(context).brightness == Brightness.dark 
+                              ? Colors.white 
+                              : Colors.black, 
+                          size: 24)
                       : null,
-                  boxShadow: [
-                    BoxShadow(
-                      color: color.withOpacity(0.4),
-                      blurRadius: 6,
-                      offset: const Offset(0, 2),
-                    )
-                  ],
                 ),
-                child: isSelected
-                    ? const Icon(Icons.check, color: Colors.white, size: 20)
-                    : null,
-              ),
-            );
-          }).toList(),
-        ),
+              );
+            }).toList(),
+          );
+        }),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx),
@@ -270,7 +308,8 @@ class _SettingsContainerState extends State<_SettingsContainer>
       SettingsMenu(
           menuId: MenuId.themeColor,
           name: "主题颜色",
-          icon: Images.settingsScreenPlayer),
+          icon: Images.settingsScreenPlayer,
+          iconData: Icons.palette_rounded),
       SettingsMenu(
           menuId: MenuId.playerSettings,
           name: Intl.settingsScreen_item_videoPlayer.tr,
@@ -328,12 +367,14 @@ class _SettingsContainerState extends State<_SettingsContainer>
 class SettingsMenu {
   final String name;
   final String icon;
+  final IconData? iconData; // optional Material icon override
   final String? route;
   final MenuId menuId;
 
   SettingsMenu({
     required this.name,
     required this.icon,
+    this.iconData,
     this.route,
     required this.menuId,
   });

@@ -16,41 +16,90 @@ class CacheManagerScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     var controller = Get.put(CacheManagerController());
+    final scheme = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    
     return AlistScaffold(
       appbarTitle: Text(Intl.screenName_cacheManagement.tr),
       body: SingleChildScrollView(
+        padding: const EdgeInsets.symmetric(vertical: 12),
         child: Column(
           children: [
-            _CacheTile(
-              title: Intl.cacheManagement_imageCache.tr,
-              sizeStr: controller.imageCacheSizeStr,
-              onClear: () => _confirm(context, "清除图片缓存？", controller.clearImageCache),
+            Card(
+              margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              elevation: isDark ? 0 : 2,
+              shadowColor: scheme.shadow.withOpacity(0.1),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+              child: Column(
+                children: [
+                  _CacheTile(
+                    title: Intl.cacheManagement_imageCache.tr,
+                    icon: Icons.image_rounded,
+                    sizeStr: controller.imageCacheSizeStr,
+                    onClear: () => _confirm(context, "清除图片缓存？", controller.clearImageCache),
+                  ),
+                  Divider(height: 1, indent: 68, endIndent: 16, color: scheme.outlineVariant.withOpacity(0.3)),
+                  _CacheTile(
+                    title: "视频缓存",
+                    icon: Icons.videocam_rounded,
+                    sizeStr: controller.videoCacheSizeStr,
+                    onClear: () => _confirm(context, "清除视频缓存？", controller.clearVideoCache),
+                  ),
+                  Divider(height: 1, indent: 68, endIndent: 16, color: scheme.outlineVariant.withOpacity(0.3)),
+                  _CacheTile(
+                    title: Intl.cacheManagement_audioCache.tr,
+                    icon: Icons.audiotrack_rounded,
+                    sizeStr: controller.audioCacheSizeStr,
+                    onClear: () => _confirm(context, "清除音频缓存？", controller.clearAudioCache),
+                  ),
+                  Divider(height: 1, indent: 68, endIndent: 16, color: scheme.outlineVariant.withOpacity(0.3)),
+                  _CacheTile(
+                    title: Intl.cacheManagement_otherCache.tr,
+                    icon: Icons.folder_rounded,
+                    sizeStr: controller.otherCacheSizeStr,
+                    onClear: () => _confirm(context, "清除其他缓存？", controller.clearOtherCache),
+                  ),
+                ],
+              ),
             ),
-            const Divider(),
-            _CacheTile(
-              title: "视频缓存",
-              sizeStr: controller.videoCacheSizeStr,
-              onClear: () => _confirm(context, "清除视频缓存？", controller.clearVideoCache),
+            const SizedBox(height: 8),
+            Card(
+              margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              elevation: isDark ? 0 : 2,
+              shadowColor: scheme.shadow.withOpacity(0.1),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+              child: Obx(() => ListTile(
+                contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+                leading: Container(
+                  width: 44,
+                  height: 44,
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      colors: [
+                        scheme.errorContainer.withOpacity(0.8),
+                        scheme.errorContainer.withOpacity(0.5),
+                      ],
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                    ),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Icon(Icons.delete_sweep_rounded, 
+                    size: 22, 
+                    color: isDark ? Colors.white.withOpacity(0.9) : scheme.error),
+                ),
+                title: const Text("清除全部缓存", 
+                  style: TextStyle(fontSize: 15, fontWeight: FontWeight.w500)),
+                subtitle: Padding(
+                  padding: const EdgeInsets.only(top: 4),
+                  child: Text("共 ${controller.totalCacheSizeStr.value}",
+                    style: TextStyle(fontSize: 13, color: scheme.onSurfaceVariant)),
+                ),
+                trailing: Icon(Icons.chevron_right_rounded,
+                    color: scheme.outlineVariant, size: 22),
+                onTap: () => _confirm(context, "清除全部缓存？", controller.clearAllCache),
+              )),
             ),
-            const Divider(),
-            _CacheTile(
-              title: Intl.cacheManagement_audioCache.tr,
-              sizeStr: controller.audioCacheSizeStr,
-              onClear: () => _confirm(context, "清除音频缓存？", controller.clearAudioCache),
-            ),
-            const Divider(),
-            _CacheTile(
-              title: Intl.cacheManagement_otherCache.tr,
-              sizeStr: controller.otherCacheSizeStr,
-              onClear: () => _confirm(context, "清除其他缓存？", controller.clearOtherCache),
-            ),
-            const Divider(),
-            Obx(() => ListTile(
-              title: const Text("清除全部缓存"),
-              subtitle: Text("共 ${controller.totalCacheSizeStr.value}"),
-              trailing: const Icon(Icons.delete_sweep_outlined),
-              onTap: () => _confirm(context, "清除全部缓存？", controller.clearAllCache),
-            )),
           ],
         ),
       ),
@@ -58,18 +107,26 @@ class CacheManagerScreen extends StatelessWidget {
   }
 
   void _confirm(BuildContext context, String message, VoidCallback onConfirm) {
+    final scheme = Theme.of(context).colorScheme;
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text("确认"),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Text("确认", style: TextStyle(fontWeight: FontWeight.w600)),
         content: Text(message),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("取消")),
           TextButton(
+            onPressed: () => Navigator.pop(ctx), 
+            child: Text("取消", style: TextStyle(color: scheme.onSurfaceVariant)),
+          ),
+          FilledButton(
             onPressed: () {
               Navigator.pop(ctx);
               onConfirm();
             },
+            style: FilledButton.styleFrom(
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+            ),
             child: const Text("确定"),
           ),
         ],
@@ -81,19 +138,49 @@ class CacheManagerScreen extends StatelessWidget {
 class _CacheTile extends StatelessWidget {
   const _CacheTile({
     required this.title,
+    required this.icon,
     required this.sizeStr,
     required this.onClear,
   });
   final String title;
+  final IconData icon;
   final RxString sizeStr;
   final VoidCallback onClear;
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    
     return ListTile(
-      title: Text(title),
-      subtitle: Obx(() => Text(sizeStr.value)),
-      trailing: const Icon(Icons.delete_outline),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+      leading: Container(
+        width: 44,
+        height: 44,
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            colors: [
+              scheme.primaryContainer.withOpacity(0.8),
+              scheme.primaryContainer.withOpacity(0.5),
+            ],
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+          ),
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Icon(icon, 
+          size: 22, 
+          color: isDark ? Colors.white.withOpacity(0.9) : scheme.primary),
+      ),
+      title: Text(title, 
+        style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w500)),
+      subtitle: Obx(() => Padding(
+        padding: const EdgeInsets.only(top: 4),
+        child: Text(sizeStr.value,
+          style: TextStyle(fontSize: 13, color: scheme.onSurfaceVariant)),
+      )),
+      trailing: Icon(Icons.delete_outline_rounded,
+          color: scheme.outlineVariant, size: 22),
       onTap: onClear,
     );
   }

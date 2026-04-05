@@ -37,6 +37,7 @@ class FileListItemView extends StatelessWidget {
   Widget build(BuildContext context) {
     String? thumbnail = FileUtils.getCompleteThumbnail(this.thumbnail);
     bool isDarkMode = WidgetUtils.isDarkMode(context);
+    final scheme = Theme.of(context).colorScheme;
     String subtitle = time ?? "";
     if (sizeDesc != null) {
       subtitle = "$subtitle - $sizeDesc";
@@ -45,18 +46,28 @@ class FileListItemView extends StatelessWidget {
     return Stack(
       children: [
         ListTile(
-          horizontalTitleGap: 6,
-          minVerticalPadding: 12,
+          horizontalTitleGap: 10,
+          minVerticalPadding: 14,
+          contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 2),
           leading: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
               if (thumbnail != null && thumbnail.isNotEmpty)
                 _buildThumbnailView(icon, thumbnail)
               else
-                Image.asset(icon)
+                Container(
+                  width: 40,
+                  height: 40,
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: scheme.surfaceVariant.withOpacity(0.5),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Image.asset(icon),
+                )
             ],
           ),
-          trailing: _moreIconButton(isDarkMode),
+          trailing: _moreIconButton(isDarkMode, scheme),
           title: Obx(() {
             int globalFileNameMaxLines = Global.fileNameMaxLines.value;
             int fileNameMaxLines = this.fileNameMaxLines ?? globalFileNameMaxLines;
@@ -70,6 +81,11 @@ class FileListItemView extends StatelessWidget {
                     fileName,
                     maxLines: fileNameMaxLines > 2 ? 1000 : 2,
                     overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w500,
+                      letterSpacing: -0.2,
+                    ),
                   );
           }),
           subtitle: Column(
@@ -77,23 +93,27 @@ class FileListItemView extends StatelessWidget {
             mainAxisSize: MainAxisSize.min,
             children: [
               if (subtitle.isNotEmpty)
-                Text(
-                  subtitle,
-                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                      color: Theme.of(context).colorScheme.onSurfaceVariant),
+                Padding(
+                  padding: const EdgeInsets.only(top: 2),
+                  child: Text(
+                    subtitle,
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: scheme.onSurfaceVariant,
+                        fontSize: 13),
+                  ),
                 ),
               if (watchProgress != null) ...[
-                const SizedBox(height: 4),
+                const SizedBox(height: 6),
                 FractionallySizedBox(
                   widthFactor: 0.55,
                   child: ClipRRect(
-                    borderRadius: BorderRadius.circular(2),
+                    borderRadius: BorderRadius.circular(3),
                     child: LinearProgressIndicator(
                       value: watchProgress,
-                      minHeight: 3,
-                      backgroundColor: Theme.of(context).colorScheme.surfaceVariant,
+                      minHeight: 4,
+                      backgroundColor: scheme.surfaceVariant.withOpacity(0.5),
                       valueColor: AlwaysStoppedAnimation<Color>(
-                        Theme.of(context).colorScheme.primary.withOpacity(0.8),
+                        scheme.primary,
                       ),
                     ),
                   ),
@@ -140,33 +160,33 @@ class FileListItemView extends StatelessWidget {
     );
   }
 
-  Widget _moreIconButton(bool isDarkMode) {
+  Widget _moreIconButton(bool isDarkMode, ColorScheme scheme) {
     if (onMoreIconButtonTap == null) {
       return Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Image.asset(
-            Images.iconArrowRight,
-            color: isDarkMode ? Colors.white : null,
+          Icon(
+            Icons.chevron_right_rounded,
+            color: scheme.outlineVariant,
+            size: 20,
           )
         ],
       );
     } else {
       return IconButton(
         onPressed: onMoreIconButtonTap,
-        icon: Stack(
-          alignment: Alignment.center,
-          children: [
-            Container(
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(6),
-                color: Get.theme.colorScheme.primaryContainer,
-              ),
-              width: 24,
-              height: 12,
-            ),
-            const Icon(Icons.more_horiz_rounded),
-          ],
+        icon: Container(
+          width: 32,
+          height: 32,
+          decoration: BoxDecoration(
+            color: scheme.primaryContainer.withOpacity(0.6),
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Icon(
+            Icons.more_horiz_rounded,
+            size: 18,
+            color: scheme.primary,
+          ),
         ),
       );
     }
@@ -174,15 +194,24 @@ class FileListItemView extends StatelessWidget {
 
   ClipRRect _buildThumbnailView(String icon, String thumbnail) {
     return ClipRRect(
-      borderRadius: const BorderRadius.all(Radius.circular(4)),
+      borderRadius: const BorderRadius.all(Radius.circular(8)),
       child: ExtendedImage.network(
         thumbnail,
         fit: BoxFit.cover,
-        width: 35,
-        height: 35,
+        width: 40,
+        height: 40,
         loadStateChanged: (state) {
           if (state.extendedImageLoadState == LoadState.failed) {
-            return Image.asset(icon);
+            return Container(
+              width: 40,
+              height: 40,
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: Get.theme.colorScheme.surfaceVariant.withOpacity(0.5),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Image.asset(icon),
+            );
           }
           return null;
         },

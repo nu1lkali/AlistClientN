@@ -102,11 +102,43 @@ class _FileDetailsDialogState extends State<FileDetailsDialog> {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     return SafeArea(
         top: false,
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(15, 30, 15, 10),
-          child: _buildInfoColumn(),
+        child: Container(
+          decoration: BoxDecoration(
+            color: scheme.surface,
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(20, 24, 20, 20),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Center(
+                  child: Container(
+                    width: 40,
+                    height: 4,
+                    decoration: BoxDecoration(
+                      color: scheme.outlineVariant.withOpacity(0.4),
+                      borderRadius: BorderRadius.circular(2),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 20),
+                Text(
+                  "文件详情",
+                  style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                    fontWeight: FontWeight.w600,
+                    letterSpacing: -0.5,
+                  ),
+                ),
+                const SizedBox(height: 20),
+                _buildInfoColumn(),
+              ],
+            ),
+          ),
         ));
   }
 
@@ -133,27 +165,43 @@ class _FileDetailsDialogState extends State<FileDetailsDialog> {
   }
 
   Widget _buildSizeRow() {
+    final scheme = Get.theme.colorScheme;
     if (_calculatedSize != null) {
       return _buildInfoRow("${Intl.fileDetailsDialog_size.tr}:", FileUtils.formatBytes(_calculatedSize!) ?? "");
     }
     return Row(
+      crossAxisAlignment: CrossAxisAlignment.center,
       children: [
         Container(
-          alignment: Alignment.bottomRight,
-          width: 80,
+          alignment: Alignment.centerRight,
+          width: 90,
+          padding: const EdgeInsets.only(top: 12, bottom: 12),
           child: Text(
             "${Intl.fileDetailsDialog_size.tr}:",
-            style: Get.textTheme.bodyMedium?.copyWith(color: Get.theme.colorScheme.outline),
+            style: Get.textTheme.bodyMedium?.copyWith(
+              color: scheme.onSurfaceVariant,
+              fontWeight: FontWeight.w500,
+            ),
           ),
         ),
         Padding(
-          padding: const EdgeInsets.only(left: 8.0),
+          padding: const EdgeInsets.only(left: 12),
           child: _calculating
-              ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
-              : TextButton(
+              ? SizedBox(
+                  width: 18, 
+                  height: 18, 
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2.5,
+                    color: scheme.primary,
+                  ))
+              : FilledButton.tonal(
                   onPressed: _calculateSize,
-                  style: TextButton.styleFrom(minimumSize: Size.zero, padding: EdgeInsets.zero, tapTargetSize: MaterialTapTargetSize.shrinkWrap),
-                  child: const Text("计算大小"),
+                  style: FilledButton.styleFrom(
+                    minimumSize: Size.zero, 
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                  ),
+                  child: const Text("计算大小", style: TextStyle(fontSize: 13)),
                 ),
         ),
       ],
@@ -161,22 +209,33 @@ class _FileDetailsDialogState extends State<FileDetailsDialog> {
   }
 
   Row _buildInfoRow(String text1, String text2) {
+    final scheme = Get.theme.colorScheme;
     return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Container(
-          alignment: Alignment.bottomRight,
-          width: 80,
+          alignment: Alignment.centerRight,
+          width: 90,
+          padding: const EdgeInsets.only(top: 12, bottom: 12),
           child: Text(
             text1,
-            style: Get.textTheme.bodyMedium
-                ?.copyWith(color: Get.theme.colorScheme.outline),
+            style: Get.textTheme.bodyMedium?.copyWith(
+              color: scheme.onSurfaceVariant,
+              fontWeight: FontWeight.w500,
+            ),
           ),
         ),
         Expanded(
-            child: Padding(
-          padding: const EdgeInsets.only(left: 8.0),
-          child: Text(text2),
-        )),
+          child: Container(
+            padding: const EdgeInsets.only(left: 12, top: 12, bottom: 12),
+            child: Text(
+              text2,
+              style: Get.textTheme.bodyMedium?.copyWith(
+                color: scheme.onSurface,
+              ),
+            ),
+          ),
+        ),
       ],
     );
   }

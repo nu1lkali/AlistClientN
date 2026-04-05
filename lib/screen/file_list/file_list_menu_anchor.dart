@@ -53,6 +53,12 @@ final menuGroupOperations = MenuGroupEntity(
       name: "按类型归类",
       iconData: Icons.folder_special_rounded,
     ),
+    MenuItemEntity(
+      menuGroupId: MenuGroupId.operations,
+      menuId: MenuId.extractAndOrganize,
+      name: "提取并整理",
+      iconData: Icons.auto_awesome_rounded,
+    ),
   ],
 );
 
@@ -307,6 +313,7 @@ enum MenuId {
   uploadFiles,
   configFileNameLines,
   organizeByType,
+  extractAndOrganize,
 }
 
 class MenuGroupEntity {

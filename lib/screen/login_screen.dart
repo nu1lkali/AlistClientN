@@ -116,11 +116,11 @@ class LoginScreenContainer extends StatelessWidget {
         InputDecoration(
           labelText: label,
           hintText: hint,
-          prefixIcon: Icon(icon, size: 20),
+          prefixIcon: Icon(icon, size: 22),
           filled: true,
           fillColor: isDark
               ? scheme.surfaceVariant.withOpacity(0.5)
-              : scheme.surfaceVariant.withOpacity(0.4),
+              : scheme.surfaceVariant.withOpacity(0.3),
           border: OutlineInputBorder(
             borderRadius: BorderRadius.circular(12),
             borderSide: BorderSide.none,
@@ -131,10 +131,9 @@ class LoginScreenContainer extends StatelessWidget {
           ),
           focusedBorder: OutlineInputBorder(
             borderRadius: BorderRadius.circular(12),
-            borderSide: BorderSide(color: scheme.primary, width: 1.5),
+            borderSide: BorderSide(color: scheme.primary, width: 2),
           ),
-          contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-          isDense: true,
+          contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
         );
 
     return Padding(
@@ -142,23 +141,31 @@ class LoginScreenContainer extends StatelessWidget {
       child: Column(
         children: [
           // logo + title
-          Image.asset(Images.logo, width: 72, height: 72),
-          const SizedBox(height: 12),
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: scheme.primaryContainer.withOpacity(0.3),
+              shape: BoxShape.circle,
+            ),
+            child: Image.asset(Images.logo, width: 64, height: 64),
+          ),
+          const SizedBox(height: 20),
           Text(
             'AList Client',
-            style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+            style: Theme.of(context).textTheme.headlineMedium?.copyWith(
                   fontWeight: FontWeight.bold,
                   color: scheme.primary,
+                  letterSpacing: -0.5,
                 ),
           ),
           const SizedBox(height: 8),
           Text(
             '连接你的 AList 服务器',
-            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+            style: Theme.of(context).textTheme.bodyLarge?.copyWith(
                   color: scheme.onSurfaceVariant,
                 ),
           ),
-          const SizedBox(height: 32),
+          const SizedBox(height: 40),
 
           // server url
           TextField(
@@ -171,7 +178,7 @@ class LoginScreenContainer extends StatelessWidget {
             focusNode: loginScreenController.addressFocusNode,
             keyboardType: TextInputType.url,
           ),
-          const SizedBox(height: 14),
+          const SizedBox(height: 16),
 
           // username
           TextField(
@@ -182,7 +189,7 @@ class LoginScreenContainer extends StatelessWidget {
             ),
             controller: loginScreenController.usernameController,
           ),
-          const SizedBox(height: 14),
+          const SizedBox(height: 16),
 
           // password
           TextField(
@@ -194,16 +201,16 @@ class LoginScreenContainer extends StatelessWidget {
             controller: loginScreenController.passwordController,
             obscureText: true,
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: 12),
 
           // SSL checkbox
           Obx(() => buildSSLErrorIgnoreCheckbox(context)),
-          const SizedBox(height: 24),
+          const SizedBox(height: 32),
 
           // login button
           SizedBox(
             width: double.infinity,
-            height: 48,
+            height: 52,
             child: FilledButton(
               onPressed: () {
                 loginScreenController.twofaController.text = "";
@@ -214,19 +221,21 @@ class LoginScreenContainer extends StatelessWidget {
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(12),
                 ),
+                elevation: 2,
+                shadowColor: scheme.primary.withOpacity(0.3),
               ),
               child: Text(
                 Intl.loginScreen_button_login.tr,
-                style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+                style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600, letterSpacing: 0.5),
               ),
             ),
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: 14),
 
           // guest mode button
           SizedBox(
             width: double.infinity,
-            height: 48,
+            height: 52,
             child: OutlinedButton(
               onPressed: () {
                 var address = loginScreenController.addressController.text.trim();
@@ -240,7 +249,7 @@ class LoginScreenContainer extends StatelessWidget {
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(12),
                 ),
-                side: BorderSide(color: scheme.primary),
+                side: BorderSide(color: scheme.primary, width: 1.5),
               ),
               child: Text(
                 Intl.loginScreen_button_guestMode.tr,
@@ -248,6 +257,7 @@ class LoginScreenContainer extends StatelessWidget {
                   fontSize: 16,
                   fontWeight: FontWeight.w600,
                   color: scheme.primary,
+                  letterSpacing: 0.5,
                 ),
               ),
             ),

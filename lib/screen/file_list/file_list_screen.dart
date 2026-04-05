@@ -329,6 +329,8 @@ class _FileListScreenState extends State<FileListScreen>
               });
             } else if (menu.menuId == MenuId.organizeByType) {
               _organizeByType();
+            } else if (menu.menuId == MenuId.extractAndOrganize) {
+              _extractAndOrganize();
             }
             break;
           case MenuGroupId.sort:
@@ -471,18 +473,22 @@ class _FileListScreenState extends State<FileListScreen>
     SmartDialog.show(
       clickMaskDismiss: false,
       builder: (context) => AlertDialog(
-        title: const Text('按类型归类'),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Text('按类型归类', style: TextStyle(fontWeight: FontWeight.w600)),
         content: Text('将把以下文件移动到对应子文件夹：\n$summary\n\n确认继续？'),
         actions: [
           TextButton(
             onPressed: () => SmartDialog.dismiss(),
-            child: const Text('取消'),
+            child: Text('取消', style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant)),
           ),
-          TextButton(
+          FilledButton(
             onPressed: () {
               SmartDialog.dismiss();
               _doOrganizeByType(groups);
             },
+            style: FilledButton.styleFrom(
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+            ),
             child: const Text('确认'),
           ),
         ],
@@ -536,6 +542,222 @@ class _FileListScreenState extends State<FileListScreen>
     } else {
       SmartDialog.showToast('完成：$successCount 个成功，$failCount 个失败');
     }
+  }
+
+  void _extractAndOrganize() {
+    SmartDialog.show(
+      clickMaskDismiss: false,
+      builder: (context) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Text('提取并整理', style: TextStyle(fontWeight: FontWeight.w600)),
+        content: const Text(
+          '此操作将：\n'
+          '1. 递归提取所有子文件夹中的文件到当前目录\n'
+          '2. 按类型自动归类整理\n'
+          '3. 删除空文件夹\n\n'
+          '此操作不可撤销，确认继续？',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => SmartDialog.dismiss(),
+            child: Text('取消', style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant)),
+          ),
+          FilledButton(
+            onPressed: () {
+              SmartDialog.dismiss();
+              _doExtractAndOrganize();
+            },
+            style: FilledButton.styleFrom(
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+            ),
+            child: const Text('确认'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _doExtractAndOrganize() async {
+    SmartDialog.showLoading(msg: '处理中，请稍候…', backDismiss: false, clickMaskDismiss: false);
+    
+    try {
+      // Step 1: Collect all files from subdirectories recursively
+      final allFiles = <FileItemVO>[];
+      final foldersToDelete = <String>[];
+      await _collectFilesRecursively(path, allFiles, foldersToDelete);
+      
+      if (allFiles.isEmpty) {
+        SmartDialog.dismiss();
+        SmartDialog.showToast('没有找到需要提取的文件');
+        return;
+      }
+
+      // Step 2: Move all files to current directory
+      int extractedCount = 0;
+      int extractFailCount = 0;
+      
+      for (final file in allFiles) {
+        final fileName = file.name;
+        final srcDir = file.path.substring(0, file.path.lastIndexOf('/'));
+        
+        if (srcDir == path) continue; // already in current dir
+        
+        final req = CopyMoveReq();
+        req.srcDir = srcDir;
+        req.dstDir = path;
+        req.names = [fileName];
+        
+        await DioUtils.instance.requestNetwork<String?>(
+          Method.post, 'fs/move',
+          params: req.toJson(),
+          onSuccess: (_) { extractedCount++; },
+          onError: (_, __) { extractFailCount++; },
+        );
+      }
+
+      // Step 3: Refresh file list to get updated files
+      await _loadFilesInner();
+      await Future.delayed(const Duration(milliseconds: 500));
+
+      // Step 4: Organize by type
+      final Map<String, List<FileItemVO>> groups = {};
+      for (final file in _files) {
+        if (file.isDir) continue;
+        String? targetFolder;
+        if (file.type == FileType.image) targetFolder = '图片';
+        else if (file.type == FileType.video) targetFolder = '视频';
+        else if (file.type == FileType.audio) targetFolder = '音频';
+        else if (file.type == FileType.word ||
+                 file.type == FileType.excel ||
+                 file.type == FileType.ppt ||
+                 file.type == FileType.pdf ||
+                 file.type == FileType.txt) targetFolder = '文档';
+        if (targetFolder == null) continue;
+        groups.putIfAbsent(targetFolder, () => []).add(file);
+      }
+
+      int organizedCount = 0;
+      int organizeFailCount = 0;
+
+      if (groups.isNotEmpty) {
+        for (final entry in groups.entries) {
+          final folderName = entry.key;
+          final files = entry.value;
+          final targetPath = path == '/' ? '/$folderName' : '$path/$folderName';
+
+          // create target folder
+          final mkdirReq = MkdirReq();
+          mkdirReq.path = targetPath;
+          bool folderReady = false;
+          await DioUtils.instance.requestNetwork<String?>(
+            Method.post, 'fs/mkdir',
+            params: mkdirReq.toJson(),
+            onSuccess: (_) { folderReady = true; },
+            onError: (code, _) {
+              if (code == 409 || code == 200) folderReady = true;
+            },
+          );
+
+          if (!folderReady) { 
+            organizeFailCount += files.length; 
+            continue; 
+          }
+
+          // move files
+          final req = CopyMoveReq();
+          req.srcDir = path;
+          req.dstDir = targetPath;
+          req.names = files.map((f) => f.name).toList();
+          await DioUtils.instance.requestNetwork<String?>(
+            Method.post, 'fs/move',
+            params: req.toJson(),
+            onSuccess: (_) { organizedCount += files.length; },
+            onError: (_, __) { organizeFailCount += files.length; },
+          );
+        }
+      }
+
+      // Step 5: Delete empty folders
+      int deletedFolders = 0;
+      for (final folderPath in foldersToDelete.reversed) {
+        final req = FileRemoveReq();
+        req.dir = folderPath.substring(0, folderPath.lastIndexOf('/'));
+        req.names = [folderPath.substring(folderPath.lastIndexOf('/') + 1)];
+        
+        await DioUtils.instance.requestNetwork<String?>(
+          Method.post, 'fs/remove',
+          params: req.toJson(),
+          onSuccess: (_) { deletedFolders++; },
+          onError: (_, __) {},
+        );
+      }
+
+      SmartDialog.dismiss();
+      _refreshController.requestRefresh();
+      
+      final summary = StringBuffer();
+      summary.write('提取文件：$extractedCount 个');
+      if (extractFailCount > 0) summary.write('（失败 $extractFailCount 个）');
+      summary.write('\n归类整理：$organizedCount 个');
+      if (organizeFailCount > 0) summary.write('（失败 $organizeFailCount 个）');
+      summary.write('\n删除空文件夹：$deletedFolders 个');
+      
+      SmartDialog.showToast(summary.toString(), displayTime: const Duration(seconds: 3));
+    } catch (e) {
+      SmartDialog.dismiss();
+      SmartDialog.showToast('操作失败：$e');
+      LogUtil.e('Extract and organize error: $e');
+    }
+  }
+
+  Future<void> _collectFilesRecursively(
+    String dirPath, 
+    List<FileItemVO> allFiles, 
+    List<String> foldersToDelete,
+  ) async {
+    final body = {
+      "path": dirPath,
+      "password": _password ?? "",
+      "page": 1,
+      "per_page": 0,
+      "refresh": false
+    };
+
+    final completer = Completer<void>();
+    
+    await DioUtils.instance.requestNetwork<FileListRespEntity>(
+      Method.post, "fs/list",
+      params: body,
+      onSuccess: (data) async {
+        final files = data?.content ?? [];
+        bool hasFiles = false;
+        
+        for (var file in files) {
+          if (file.isDir) {
+            final subPath = dirPath == '/' ? '/${file.name}' : '$dirPath/${file.name}';
+            foldersToDelete.add(subPath);
+            await _collectFilesRecursively(subPath, allFiles, foldersToDelete);
+          } else {
+            hasFiles = true;
+            final fileItemVO = _fileResp2VO(data?.provider ?? "", file);
+            allFiles.add(fileItemVO);
+          }
+        }
+        
+        // If this folder has files, don't delete it (remove from list)
+        if (hasFiles && foldersToDelete.isNotEmpty && foldersToDelete.last == dirPath) {
+          foldersToDelete.removeLast();
+        }
+        
+        completer.complete();
+      },
+      onError: (code, msg) {
+        LogUtil.e('Failed to list directory $dirPath: $msg');
+        completer.complete();
+      },
+    );
+
+    return completer.future;
   }
 
   AlistScaffold _buildScaffold(BuildContext context) {
