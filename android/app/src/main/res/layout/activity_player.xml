@@ -28,12 +28,59 @@
         android:visibility="gone"
         android:translationX="260dp">
 
-        <androidx.recyclerview.widget.RecyclerView
-            android:id="@+id/rv_playlist"
+        <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="match_parent"
-            android:paddingTop="48dp"
-            android:clipToPadding="false" />
+            android:orientation="vertical">
+
+            <androidx.recyclerview.widget.RecyclerView
+                android:id="@+id/rv_playlist"
+                android:layout_width="match_parent"
+                android:layout_height="0dp"
+                android:layout_weight="1"
+                android:paddingTop="48dp"
+                android:paddingBottom="8dp"
+                android:clipToPadding="false" />
+
+            <!-- Sort buttons at bottom -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:padding="8dp"
+                android:background="#DD000000">
+
+                <ImageButton
+                    android:id="@+id/btn_sort_by_name"
+                    android:layout_width="0dp"
+                    android:layout_height="40dp"
+                    android:layout_weight="1"
+                    android:background="?attr/selectableItemBackgroundBorderless"
+                    android:src="@drawable/ic_sort_by_name"
+                    android:contentDescription="按文件名排序" />
+
+                <ImageButton
+                    android:id="@+id/btn_sort_by_duration"
+                    android:layout_width="0dp"
+                    android:layout_height="40dp"
+                    android:layout_weight="1"
+                    android:background="?attr/selectableItemBackgroundBorderless"
+                    android:src="@drawable/ic_sort_by_duration"
+                    android:contentDescription="按时长排序" />
+
+                <ImageButton
+                    android:id="@+id/btn_shuffle"
+                    android:layout_width="0dp"
+                    android:layout_height="40dp"
+                    android:layout_weight="1"
+                    android:background="?attr/selectableItemBackgroundBorderless"
+                    android:src="@drawable/ic_shuffle"
+                    android:contentDescription="打乱顺序" />
+
+            </LinearLayout>
+
+        </LinearLayout>
+
     </FrameLayout>
 
 </FrameLayout>

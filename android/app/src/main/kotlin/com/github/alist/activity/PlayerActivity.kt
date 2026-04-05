@@ -61,6 +61,8 @@ class PlayerActivity : AppCompatActivity(), GSYVideoProgressListener {
     private lateinit var playlistDrawer: View
     private lateinit var playlistScrim: View
     private lateinit var playlistAdapter: PlaylistAdapter
+    private var sortedVideos: MutableList<VideoItem> = mutableListOf()
+    private var videoIndexMap: MutableMap<Int, Int> = mutableMapOf() // sortedIndex -> originalIndex
 
     private val messageRecordWatchTime = 1
     private val handler = object : Handler(Looper.getMainLooper()) {
@@ -126,6 +128,10 @@ class PlayerActivity : AppCompatActivity(), GSYVideoProgressListener {
         orientationUtils = OrientationUtils(this, gsyVideoPlayer)
         orientationUtils.isEnable = false
 
+        // Initialize sorted videos list
+        sortedVideos = videos.toMutableList()
+        updateVideoIndexMap()
+
         // playlist drawer
         playlistDrawer = findViewById(R.id.playlist_drawer)
         playlistScrim = findViewById(R.id.playlist_scrim)
@@ -134,19 +140,25 @@ class PlayerActivity : AppCompatActivity(), GSYVideoProgressListener {
         playlistScrim.setOnClickListener { togglePlaylist() }
 
         val rvPlaylist = findViewById<RecyclerView>(R.id.rv_playlist)
-        playlistAdapter = PlaylistAdapter(videos, index) { clickedIndex ->
-            if (clickedIndex != index) {
+        playlistAdapter = PlaylistAdapter(sortedVideos, getCurrentSortedIndex()) { clickedSortedIndex ->
+            val originalIndex = videoIndexMap[clickedSortedIndex] ?: clickedSortedIndex
+            if (originalIndex != index) {
                 saveCurrentTime()
-                index = clickedIndex
+                index = originalIndex
                 currentTime = 0; totalTime = 0
                 startPlay(index, videos[index])
                 FlutterMethods.addFileViewingRecord(videos[index])
-                playlistAdapter.updateCurrentIndex(index)
+                playlistAdapter.updateCurrentIndex(getCurrentSortedIndex())
             }
             togglePlaylist()
         }
         rvPlaylist.layoutManager = LinearLayoutManager(this)
         rvPlaylist.adapter = playlistAdapter
+
+        // Sort buttons
+        findViewById<View>(R.id.btn_sort_by_name).setOnClickListener { sortByName() }
+        findViewById<View>(R.id.btn_sort_by_duration).setOnClickListener { sortByDuration() }
+        findViewById<View>(R.id.btn_shuffle).setOnClickListener { shufflePlaylist() }
 
         gsyVideoPlayer.setOnPlaylistClickListener { togglePlaylist() }
         gsyVideoPlayer.setOnDeleteClickListener { confirmDelete() }
@@ -182,7 +194,8 @@ class PlayerActivity : AppCompatActivity(), GSYVideoProgressListener {
 
                 override fun onAutoComplete(url: String?, vararg objects: Any?) {
                     super.onAutoComplete(url, *objects)
-                    if (!isFinishing && index < videos.lastIndex) {
+                    val currentSortedIndex = getCurrentSortedIndex()
+                    if (!isFinishing && currentSortedIndex < sortedVideos.lastIndex) {
                         FlutterMethods.deleteVideoRecord(videos[index].remotePath)
                         playNext()
                     }
@@ -253,8 +266,11 @@ class PlayerActivity : AppCompatActivity(), GSYVideoProgressListener {
     }
 
     private fun playPrevious() {
-        if (index > 0) {
-            index -= 1
+        val currentSortedIndex = getCurrentSortedIndex()
+        if (currentSortedIndex > 0) {
+            val newSortedIndex = currentSortedIndex - 1
+            val newOriginalIndex = videoIndexMap[newSortedIndex] ?: return
+            index = newOriginalIndex
             currentTime = 0
             totalTime = 0
             startPlay(index, videos[index])
@@ -263,8 +279,11 @@ class PlayerActivity : AppCompatActivity(), GSYVideoProgressListener {
     }
 
     private fun playNext() {
-        if (index < videos.lastIndex) {
-            index += 1
+        val currentSortedIndex = getCurrentSortedIndex()
+        if (currentSortedIndex < sortedVideos.lastIndex) {
+            val newSortedIndex = currentSortedIndex + 1
+            val newOriginalIndex = videoIndexMap[newSortedIndex] ?: return
+            index = newOriginalIndex
             currentTime = 0
             totalTime = 0
             startPlay(index, videos[index])
@@ -283,9 +302,11 @@ class PlayerActivity : AppCompatActivity(), GSYVideoProgressListener {
         val currentPlayer = playerWrapper.videoPlayer.currentPlayer as NormalGSYVideoPlayer
         playerWrapper.tvTitle.text = video.name.substringBeforeLast(".")
         currentPlayer.titleTextView.text = video.name.substringBeforeLast(".")
-        playlistAdapter.updateCurrentIndex(index)
+        playlistAdapter.updateCurrentIndex(getCurrentSortedIndex())
 
-        if (index == 0) {
+        val currentSortedIndex = getCurrentSortedIndex()
+        
+        if (currentSortedIndex == 0) {
             playerWrapper.btnPrevious.alpha = 0.5f
             currentPlayer.findViewById<View>(R.id.btn_previous).alpha = 0.5f
         } else {
@@ -293,7 +314,7 @@ class PlayerActivity : AppCompatActivity(), GSYVideoProgressListener {
             currentPlayer.findViewById<View>(R.id.btn_previous).alpha = 1f
         }
 
-        if (index == videos.lastIndex) {
+        if (currentSortedIndex == sortedVideos.lastIndex) {
             playerWrapper.btnNext.alpha = 0.5f
             currentPlayer.findViewById<View>(R.id.btn_next).alpha = 0.5f
         } else {
@@ -474,6 +495,45 @@ class PlayerActivity : AppCompatActivity(), GSYVideoProgressListener {
         isPlaylistVisible = !isPlaylistVisible
     }
 
+    private fun getCurrentSortedIndex(): Int {
+        // Find current video in sorted list
+        return sortedVideos.indexOfFirst { it.remotePath == videos[index].remotePath }
+    }
+
+    private fun updateVideoIndexMap() {
+        videoIndexMap.clear()
+        sortedVideos.forEachIndexed { sortedIndex, video ->
+            val originalIndex = videos.indexOfFirst { it.remotePath == video.remotePath }
+            videoIndexMap[sortedIndex] = originalIndex
+        }
+    }
+
+    private fun sortByName() {
+        sortedVideos.sortBy { it.name.lowercase() }
+        updateVideoIndexMap()
+        playlistAdapter.updateVideos(sortedVideos)
+        playlistAdapter.updateCurrentIndex(getCurrentSortedIndex())
+        SmartToast.show(this, "已按文件名排序")
+    }
+
+    private fun sortByDuration() {
+        // Sort by duration (requires getting duration from player or metadata)
+        // For now, sort by file size as a proxy
+        sortedVideos.sortByDescending { it.size?.toLongOrNull() ?: 0L }
+        updateVideoIndexMap()
+        playlistAdapter.updateVideos(sortedVideos)
+        playlistAdapter.updateCurrentIndex(getCurrentSortedIndex())
+        SmartToast.show(this, "已按文件大小排序")
+    }
+
+    private fun shufflePlaylist() {
+        sortedVideos.shuffle()
+        updateVideoIndexMap()
+        playlistAdapter.updateVideos(sortedVideos)
+        playlistAdapter.updateCurrentIndex(getCurrentSortedIndex())
+        SmartToast.show(this, "已打乱顺序")
+    }
+
 
     override fun onProgress(p0: Long, p1: Long, currentTime: Long, totalTime: Long) {
         if (totalTime <= 0) {
@@ -503,8 +563,9 @@ class PlayerActivity : AppCompatActivity(), GSYVideoProgressListener {
 
         fun initViews() {
             findViews()
-            videoPlayer.btnPrevious.alpha = if (index > 0) 1f else 0.5f
-            videoPlayer.btnNext.alpha = if (index >= videos.lastIndex) 0.5f else 1f
+            val currentSortedIndex = getCurrentSortedIndex()
+            videoPlayer.btnPrevious.alpha = if (currentSortedIndex > 0) 1f else 0.5f
+            videoPlayer.btnNext.alpha = if (currentSortedIndex >= sortedVideos.lastIndex) 0.5f else 1f
 
             btnBack.setOnClickListener { finish() }
 
@@ -535,7 +596,7 @@ class PlayerActivity : AppCompatActivity(), GSYVideoProgressListener {
 }
 
 class PlaylistAdapter(
-    private val videos: List<VideoItem>,
+    private var videos: List<VideoItem>,
     private var currentIndex: Int,
     private val onItemClick: (Int) -> Unit
 ) : RecyclerView.Adapter<PlaylistAdapter.VH>() {
@@ -568,5 +629,10 @@ class PlaylistAdapter(
         currentIndex = newIndex
         notifyItemChanged(old)
         notifyItemChanged(newIndex)
+    }
+
+    fun updateVideos(newVideos: List<VideoItem>) {
+        videos = newVideos
+        notifyDataSetChanged()
     }
 }
