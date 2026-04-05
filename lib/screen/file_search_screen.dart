@@ -352,23 +352,26 @@ class FileSearchController extends GetxController {
         final path = "${file.parent}/${file.name}";
         
         try {
-          final vo = FileItemVO(
-            name: file.name ?? "",
-            path: path,
-            size: file.size,
-            sizeDesc: FileUtils.formatBytes(file.size ?? 0),
-            isDir: false,
-            modified: "",
-            typeInt: file.type ?? 0,
-            type: FileUtils.getFileType(false, file.name ?? ""),
-            thumb: "",
-            sign: "",
-            icon: FileUtils.getFileIcon(false, file.name ?? ""),
-            modifiedMilliseconds: -1,
-            provider: null,
-          );
+          // 需要先加载文件信息以获取sign
+          final folderPath = path.substringBeforeLast("/")!;
+          final files = await _loadFiles(folderPath, path, null);
+          
+          if (files == null || files.isEmpty) {
+            debugPrint("无法加载文件信息: ${file.name}");
+            skippedCount++;
+            continue;
+          }
+          
+          // 找到对应的文件
+          final fileVO = files.firstWhereOrNull((f) => f.path == path);
+          if (fileVO == null) {
+            debugPrint("找不到文件: ${file.name}");
+            skippedCount++;
+            continue;
+          }
+          
           // 批量下载时使用 ignoreDuplicates: true 自动跳过已存在的文件
-          final task = await DownloadManager.instance.enqueueFile(vo, ignoreDuplicates: true);
+          final task = await DownloadManager.instance.enqueueFile(fileVO, ignoreDuplicates: true);
           if (task != null) {
             addedCount++;
           } else {
