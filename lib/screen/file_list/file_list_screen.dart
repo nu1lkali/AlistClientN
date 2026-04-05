@@ -583,8 +583,8 @@ class _FileListScreenState extends State<FileListScreen>
     try {
       // Step 1: Collect all files from subdirectories recursively
       final allFiles = <FileItemVO>[];
-      final foldersToDelete = <String>[];
-      await _collectFilesRecursively(path, allFiles, foldersToDelete);
+      final allSubFolders = <String>[];
+      await _collectFilesRecursively(path, allFiles, allSubFolders);
       
       if (allFiles.isEmpty) {
         SmartDialog.dismiss();
@@ -592,9 +592,13 @@ class _FileListScreenState extends State<FileListScreen>
         return;
       }
 
-      // Step 2: Move all files to current directory
+      // Step 2: Get current directory file names to check for conflicts
+      final existingFileNames = _files.where((f) => !f.isDir).map((f) => f.name).toSet();
+
+      // Step 3: Move all files to current directory with rename if needed
       int extractedCount = 0;
       int extractFailCount = 0;
+      int renamedCount = 0;
       
       for (final file in allFiles) {
         final fileName = file.name;
@@ -602,10 +606,39 @@ class _FileListScreenState extends State<FileListScreen>
         
         if (srcDir == path) continue; // already in current dir
         
+        // Check for name conflict and generate new name if needed
+        String targetFileName = fileName;
+        if (existingFileNames.contains(fileName)) {
+          targetFileName = _generateUniqueFileName(fileName, existingFileNames);
+          renamedCount++;
+        }
+        existingFileNames.add(targetFileName);
+
+        // Rename file if needed
+        if (targetFileName != fileName) {
+          final renameReq = FileRenameReq();
+          renameReq.path = file.path;
+          renameReq.name = targetFileName;
+          
+          bool renamed = false;
+          await DioUtils.instance.requestNetwork<String?>(
+            Method.post, 'fs/rename',
+            params: renameReq.toJson(),
+            onSuccess: (_) { renamed = true; },
+            onError: (_, __) {},
+          );
+          
+          if (!renamed) {
+            extractFailCount++;
+            continue;
+          }
+        }
+
+        // Move file
         final req = CopyMoveReq();
         req.srcDir = srcDir;
         req.dstDir = path;
-        req.names = [fileName];
+        req.names = [targetFileName];
         
         await DioUtils.instance.requestNetwork<String?>(
           Method.post, 'fs/move',
@@ -615,11 +648,11 @@ class _FileListScreenState extends State<FileListScreen>
         );
       }
 
-      // Step 3: Refresh file list to get updated files
+      // Step 4: Refresh file list to get updated files
       await _loadFilesInner();
       await Future.delayed(const Duration(milliseconds: 500));
 
-      // Step 4: Organize by type
+      // Step 5: Organize by type
       final Map<String, List<FileItemVO>> groups = {};
       for (final file in _files) {
         if (file.isDir) continue;
@@ -677,18 +710,23 @@ class _FileListScreenState extends State<FileListScreen>
         }
       }
 
-      // Step 5: Delete empty folders
+      // Step 6: Delete empty folders (in reverse order, deepest first)
       int deletedFolders = 0;
-      for (final folderPath in foldersToDelete.reversed) {
+      for (final folderPath in allSubFolders.reversed) {
+        final folderName = folderPath.substring(folderPath.lastIndexOf('/') + 1);
+        final parentPath = folderPath.substring(0, folderPath.lastIndexOf('/'));
+        
         final req = FileRemoveReq();
-        req.dir = folderPath.substring(0, folderPath.lastIndexOf('/'));
-        req.names = [folderPath.substring(folderPath.lastIndexOf('/') + 1)];
+        req.dir = parentPath.isEmpty ? '/' : parentPath;
+        req.names = [folderName];
         
         await DioUtils.instance.requestNetwork<String?>(
           Method.post, 'fs/remove',
           params: req.toJson(),
           onSuccess: (_) { deletedFolders++; },
-          onError: (_, __) {},
+          onError: (_, __) {
+            // Folder might not be empty or already deleted, that's ok
+          },
         );
       }
 
@@ -697,6 +735,7 @@ class _FileListScreenState extends State<FileListScreen>
       
       final summary = StringBuffer();
       summary.write('提取文件：$extractedCount 个');
+      if (renamedCount > 0) summary.write('（重命名 $renamedCount 个）');
       if (extractFailCount > 0) summary.write('（失败 $extractFailCount 个）');
       summary.write('\n归类整理：$organizedCount 个');
       if (organizeFailCount > 0) summary.write('（失败 $organizeFailCount 个）');
@@ -710,10 +749,35 @@ class _FileListScreenState extends State<FileListScreen>
     }
   }
 
+  String _generateUniqueFileName(String originalName, Set<String> existingNames) {
+    // Split filename and extension
+    final lastDotIndex = originalName.lastIndexOf('.');
+    String nameWithoutExt;
+    String extension;
+    
+    if (lastDotIndex > 0 && lastDotIndex < originalName.length - 1) {
+      nameWithoutExt = originalName.substring(0, lastDotIndex);
+      extension = originalName.substring(lastDotIndex);
+    } else {
+      nameWithoutExt = originalName;
+      extension = '';
+    }
+
+    // Try adding numbers until we find a unique name
+    int counter = 1;
+    String newName;
+    do {
+      newName = '$nameWithoutExt($counter)$extension';
+      counter++;
+    } while (existingNames.contains(newName));
+
+    return newName;
+  }
+
   Future<void> _collectFilesRecursively(
     String dirPath, 
     List<FileItemVO> allFiles, 
-    List<String> foldersToDelete,
+    List<String> allSubFolders,
   ) async {
     final body = {
       "path": dirPath,
@@ -730,23 +794,19 @@ class _FileListScreenState extends State<FileListScreen>
       params: body,
       onSuccess: (data) async {
         final files = data?.content ?? [];
-        bool hasFiles = false;
         
         for (var file in files) {
           if (file.isDir) {
             final subPath = dirPath == '/' ? '/${file.name}' : '$dirPath/${file.name}';
-            foldersToDelete.add(subPath);
-            await _collectFilesRecursively(subPath, allFiles, foldersToDelete);
+            // Add this subfolder to the list (will be deleted later)
+            allSubFolders.add(subPath);
+            // Recursively process this subfolder
+            await _collectFilesRecursively(subPath, allFiles, allSubFolders);
           } else {
-            hasFiles = true;
+            // Collect file
             final fileItemVO = _fileResp2VO(data?.provider ?? "", file);
             allFiles.add(fileItemVO);
           }
-        }
-        
-        // If this folder has files, don't delete it (remove from list)
-        if (hasFiles && foldersToDelete.isNotEmpty && foldersToDelete.last == dirPath) {
-          foldersToDelete.removeLast();
         }
         
         completer.complete();

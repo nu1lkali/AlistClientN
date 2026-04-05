@@ -20,47 +20,28 @@ class AlistScaffold extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    List<Color> colors = List.empty();
     bool isDarkMode = WidgetUtils.isDarkMode(context);
-
-    if (!isDarkMode) {
-      Color startColor = Theme.of(context).colorScheme.primaryContainer.withOpacity(0.15);
-      Color midColor = Theme.of(context).colorScheme.primaryContainer.withOpacity(0.05);
-      const Color endColor = Colors.white;
-      colors = [startColor, midColor, endColor];
-    }
     final ModalRoute<dynamic>? parentRoute = ModalRoute.of(context);
     var canPop = null != parentRoute && parentRoute.canPop;
 
-    return DecoratedBox(
-        decoration: isDarkMode
-            ? const BoxDecoration()
-            : BoxDecoration(
-                gradient: LinearGradient(
-                  colors: colors,
-                  begin: Alignment.topCenter,
-                  end: Alignment.bottomCenter,
-                  stops: const [0.0, 0.3, 1.0],
-                ),
-              ),
-        child: Scaffold(
-          backgroundColor: isDarkMode ? null : Colors.transparent,
-          resizeToAvoidBottomInset: resizeToAvoidBottomInset ?? true,
-          appBar: !showAppbar
-              ? null
-              : AppBar(
-                  leading: canPop
-                      ? GestureDetector(
-                          onDoubleTap: onLeadingDoubleTap,
-                          child: const BackButton(),
-                        )
-                      : null,
-                  automaticallyImplyLeading: false,
-                  backgroundColor: isDarkMode ? null : Colors.transparent,
-                  title: appbarTitle,
-                  actions: appbarActions,
-                ),
-          body: SafeArea(child: body),
-        ));
+    return Scaffold(
+      backgroundColor: null,
+      resizeToAvoidBottomInset: resizeToAvoidBottomInset ?? true,
+      appBar: !showAppbar
+          ? null
+          : AppBar(
+              leading: canPop
+                  ? GestureDetector(
+                      onDoubleTap: onLeadingDoubleTap,
+                      child: const BackButton(),
+                    )
+                  : null,
+              automaticallyImplyLeading: false,
+              backgroundColor: null,
+              title: appbarTitle,
+              actions: appbarActions,
+            ),
+      body: SafeArea(child: body),
+    );
   }
 }

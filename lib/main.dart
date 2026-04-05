@@ -55,7 +55,6 @@ class ThemeController extends GetxController {
         appBarTheme: const AppBarTheme(
           centerTitle: false,
           elevation: 0,
-          scrolledUnderElevation: 0,
           titleTextStyle: TextStyle(color: Colors.black, fontSize: 20, fontWeight: FontWeight.w600, letterSpacing: -0.5),
           systemOverlayStyle: SystemUiOverlayStyle(
             statusBarColor: Colors.transparent,
@@ -105,7 +104,6 @@ class ThemeController extends GetxController {
         appBarTheme: const AppBarTheme(
           centerTitle: false,
           elevation: 0,
-          scrolledUnderElevation: 0,
           titleTextStyle: TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.w600, letterSpacing: -0.5),
           systemOverlayStyle: SystemUiOverlayStyle(
             statusBarColor: Colors.transparent,
