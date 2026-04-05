@@ -40,34 +40,37 @@ class GalleryScreen extends StatelessWidget {
       files: files,
       index: initializedIndex,
     ));
-    Widget widget = Stack(
-      children: [
-        _buildImageViewPager(controller),
-        // gradient scrim so AppBar title is readable over bright images
-        Positioned(
-          top: 0,
-          left: 0,
-          right: 0,
-          height: 100,
-          child: IgnorePointer(
-            child: Container(
-              decoration: const BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topCenter,
-                  end: Alignment.bottomCenter,
-                  colors: [Colors.black54, Colors.transparent],
+    Widget widget = Container(
+      color: Colors.black, // Add solid black background to prevent previous page showing through
+      child: Stack(
+        children: [
+          _buildImageViewPager(controller),
+          // gradient scrim so AppBar title is readable over bright images
+          Positioned(
+            top: 0,
+            left: 0,
+            right: 0,
+            height: 100,
+            child: IgnorePointer(
+              child: Container(
+                decoration: const BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: [Colors.black54, Colors.transparent],
+                  ),
                 ),
               ),
             ),
           ),
-        ),
-        Positioned(
-          left: 0,
-          top: 0,
-          right: 0,
-          child: _buildAppBar(controller),
-        )
-      ],
+          Positioned(
+            left: 0,
+            top: 0,
+            right: 0,
+            child: _buildAppBar(controller),
+          )
+        ],
+      ),
     );
 
     return GalleryMenuAnchor(
