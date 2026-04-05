@@ -596,38 +596,73 @@ class _FileListScreenState extends State<FileListScreen>
         await _collectFilesRecursively(dirPath, filesFromSubdirs, allSubFolders);
       }
       
-      // Show debug info
       SmartDialog.dismiss();
-      final debugInfo = '扫描完成\n'
-          '子文件夹数: ${allSubFolders.length}\n'
-          '收集文件数: ${filesFromSubdirs.length}\n'
-          '文件列表:\n${filesFromSubdirs.take(10).map((f) => f.path).join('\n')}${filesFromSubdirs.length > 10 ? '\n...' : ''}';
       
+      if (filesFromSubdirs.isEmpty && subDirs.isEmpty) {
+        SmartDialog.showToast('没有找到文件');
+        return;
+      }
+      
+      // Group files by type for preview
+      final Map<String, List<FileItemVO>> typeGroups = {};
+      for (final file in filesFromSubdirs) {
+        String? category;
+        if (file.type == FileType.image) category = '图片';
+        else if (file.type == FileType.video) category = '视频';
+        else if (file.type == FileType.audio) category = '音频';
+        else if (file.type == FileType.word ||
+                 file.type == FileType.excel ||
+                 file.type == FileType.ppt ||
+                 file.type == FileType.pdf ||
+                 file.type == FileType.txt) category = '文档';
+        else category = '其他';
+        
+        typeGroups.putIfAbsent(category, () => []).add(file);
+      }
+      
+      // Build confirmation message
+      final summary = StringBuffer();
+      summary.writeln('将从 ${allSubFolders.length} 个子文件夹中提取 ${filesFromSubdirs.length} 个文件：\n');
+      
+      for (final entry in typeGroups.entries) {
+        summary.writeln('${entry.key}：${entry.value.length} 个');
+        final fileList = entry.value.take(3).map((f) => '  • ${f.name}').join('\n');
+        summary.writeln(fileList);
+        if (entry.value.length > 3) {
+          summary.writeln('  • ... 还有 ${entry.value.length - 3} 个');
+        }
+        summary.writeln();
+      }
+      
+      summary.writeln('提取后将按类型整理到对应文件夹，并删除空文件夹。');
+      
+      // Show confirmation dialog
       await SmartDialog.show(
         clickMaskDismiss: false,
         builder: (context) => AlertDialog(
-          title: const Text('调试信息'),
-          content: SingleChildScrollView(child: Text(debugInfo)),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          title: const Text('确认提取并整理', style: TextStyle(fontWeight: FontWeight.w600)),
+          content: SingleChildScrollView(
+            child: Text(summary.toString(), style: const TextStyle(fontSize: 14)),
+          ),
           actions: [
             TextButton(
               onPressed: () => SmartDialog.dismiss(),
-              child: const Text('取消'),
+              child: Text('取消', style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant)),
             ),
             FilledButton(
               onPressed: () {
                 SmartDialog.dismiss();
                 _continueExtractAndOrganize(filesFromSubdirs, allSubFolders);
               },
-              child: const Text('继续'),
+              style: FilledButton.styleFrom(
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+              ),
+              child: const Text('确认'),
             ),
           ],
         ),
       );
-      
-      if (filesFromSubdirs.isEmpty && subDirs.isEmpty) {
-        SmartDialog.showToast('没有找到文件');
-        return;
-      }
     } catch (e) {
       SmartDialog.dismiss();
       SmartDialog.showToast('操作失败：$e');
