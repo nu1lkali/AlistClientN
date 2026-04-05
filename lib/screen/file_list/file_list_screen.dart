@@ -1178,37 +1178,84 @@ class _FileListScreenState extends State<FileListScreen>
 
   AlistScaffold _buildScaffold(BuildContext context) {
     return AlistScaffold(
-      appbarTitle: _pageName != null ? Text(_pageName!) : null,
-      appbarActions: [
-        Obx(() => _userController.searchIndex.isNotEmpty
-            ? IconButton(
+      appbarTitle: _isMultiSelectMode 
+          ? Text("${_selectedIndices.length} 项")
+          : (_pageName != null ? Text(_pageName!) : null),
+      appbarActions: _isMultiSelectMode
+          ? [
+              IconButton(
+                icon: const Icon(Icons.select_all),
+                tooltip: "全选",
                 onPressed: () {
-                  final args = {"folder": path};
-                  Get.toNamed(NamedRouter.fileSearch, arguments: args);
+                  setState(() {
+                    if (_selectedIndices.length == _filteredFiles.length) {
+                      _selectedIndices.clear();
+                    } else {
+                      _selectedIndices.addAll(
+                          List.generate(_filteredFiles.length, (i) => i));
+                    }
+                  });
                 },
-                icon: const Icon(Icons.search_rounded))
-            : const SizedBox()),
-        Obx(() => IconButton(
-              tooltip: _filterTooltip(_menuAnchorController.filterMode.value),
-              onPressed: _cycleFilter,
-              icon: _filterIcon(_menuAnchorController.filterMode.value),
-            )),
-        Obx(() => IconButton(
-              onPressed: () {
-                final newVal = !_menuAnchorController.isGridView.value;
-                _menuAnchorController.isGridView.value = newVal;
-                SpUtil.putBool(AlistConstant.fileViewMode, newVal);
-                // load folder thumbs when switching to grid view
-                if (newVal && _files.isNotEmpty) {
-                  _loadFolderThumbs(_files.toList());
-                }
-              },
-              icon: Icon(_menuAnchorController.isGridView.value
-                  ? Icons.list_rounded
-                  : Icons.grid_view_rounded),
-            )),
-        _menuMoreIcon()
-      ],
+              ),
+              IconButton(
+                icon: const Icon(Icons.download_rounded),
+                tooltip: "批量下载",
+                onPressed: _selectedIndices.isEmpty ? null : _batchDownload,
+              ),
+              if (_hasWritePermission)
+                IconButton(
+                  icon: const Icon(Icons.drive_file_move_rounded),
+                  tooltip: "批量移动",
+                  onPressed: _selectedIndices.isEmpty ? null : () => _batchCopyMove(false),
+                ),
+              if (_hasWritePermission)
+                IconButton(
+                  icon: const Icon(Icons.delete),
+                  tooltip: "批量删除",
+                  onPressed: _selectedIndices.isEmpty ? null : _batchDelete,
+                ),
+              IconButton(
+                icon: const Icon(Icons.close),
+                tooltip: "退出多选",
+                onPressed: () {
+                  setState(() {
+                    _isMultiSelectMode = false;
+                    _selectedIndices.clear();
+                  });
+                },
+              ),
+            ]
+          : [
+              Obx(() => _userController.searchIndex.isNotEmpty
+                  ? IconButton(
+                      onPressed: () {
+                        final args = {"folder": path};
+                        Get.toNamed(NamedRouter.fileSearch, arguments: args);
+                      },
+                      icon: const Icon(Icons.search_rounded))
+                  : const SizedBox()),
+              Obx(() => IconButton(
+                    tooltip:
+                        _filterTooltip(_menuAnchorController.filterMode.value),
+                    onPressed: _cycleFilter,
+                    icon: _filterIcon(_menuAnchorController.filterMode.value),
+                  )),
+              Obx(() => IconButton(
+                    onPressed: () {
+                      final newVal = !_menuAnchorController.isGridView.value;
+                      _menuAnchorController.isGridView.value = newVal;
+                      SpUtil.putBool(AlistConstant.fileViewMode, newVal);
+                      // load folder thumbs when switching to grid view
+                      if (newVal && _files.isNotEmpty) {
+                        _loadFolderThumbs(_files.toList());
+                      }
+                    },
+                    icon: Icon(_menuAnchorController.isGridView.value
+                        ? Icons.list_rounded
+                        : Icons.grid_view_rounded),
+                  )),
+              _menuMoreIcon()
+            ],
       onLeadingDoubleTap: () =>
           Get.until((route) => route.isFirst, id: stackId),
       body: SlidableAutoCloseBehavior(
@@ -1219,11 +1266,23 @@ class _FileListScreenState extends State<FileListScreen>
           refreshController: _refreshController,
           hasWritePermission: _hasWritePermission,
           isGridView: _menuAnchorController.isGridView.value,
+          isMultiSelectMode: _isMultiSelectMode,
+          selectedIndices: _selectedIndices,
           groupByDate: !_menuAnchorController.isGridView.value &&
               _menuAnchorController.filterMode.value != FilterMode.none &&
               _menuAnchorController.sortBy.value == MenuId.modifyTime,
           onFileItemClick: (context, index) {
-            _onFileTap(context, index, false);
+            if (_isMultiSelectMode) {
+              setState(() {
+                if (_selectedIndices.contains(index)) {
+                  _selectedIndices.remove(index);
+                } else {
+                  _selectedIndices.add(index);
+                }
+              });
+            } else {
+              _onFileTap(context, index, false);
+            }
           },
           onFileMoreIconButtonTap: _onFileMoreIconButtonTap,
           refreshCallback: _loadFiles,
@@ -1747,13 +1806,17 @@ class _FileListScreenState extends State<FileListScreen>
                   ListTile(
                     leading: const Icon(Icons.checklist_rounded),
                     title: const Text("多选"),
-                    onTap: () {
+                    onTap: () async {
                       Navigator.pop(context);
-                      setState(() {
-                        _isMultiSelectMode = true;
-                        _selectedIndices.clear();
-                        _selectedIndices.add(index);
-                      });
+                      // Wait for dialog to close before updating state
+                      await Future.delayed(const Duration(milliseconds: 100));
+                      if (mounted) {
+                        setState(() {
+                          _isMultiSelectMode = true;
+                          _selectedIndices.clear();
+                          _selectedIndices.add(index);
+                        });
+                      }
                     },
                   ),
                   ListTile(
@@ -1949,24 +2012,62 @@ class _FileListScreenState extends State<FileListScreen>
   }
 
   void _batchDownload() async {
-    final selected = _selectedIndices.map((i) => _files[i]).toList();
-    var hasAdded = false;
-    for (var file in selected) {
-      if (file.isDir) continue;
-      final task = await DownloadManager.instance.enqueueFile(file, ignoreDuplicates: true);
-      if (task != null) hasAdded = true;
+    // 检查存储权限
+    if (Platform.isAndroid && !await AlistPlugin.isScopedStorage()) {
+      if (!await Permission.storage.isGranted) {
+        var storageStatus = await Permission.storage.request();
+        if (storageStatus.isDenied) {
+          SmartDialog.showToast("需要存储权限才能下载文件");
+          return;
+        }
+      }
     }
+    
+    final selected = _selectedIndices.map((i) => _filteredFiles[i]).toList();
+    
+    // 先退出多选模式
     setState(() {
       _isMultiSelectMode = false;
       _selectedIndices.clear();
     });
-    if (hasAdded) {
-      SmartDialog.showToast(Intl.downloadManager_tips_addToQueue.tr);
-    }
+    
+    // 在后台处理，不阻塞UI
+    var addedCount = 0;
+    var skippedCount = 0;
+    SmartDialog.showToast("正在添加 ${selected.length} 个文件到下载队列...");
+    
+    // 异步处理，避免阻塞UI
+    Future.microtask(() async {
+      for (var file in selected) {
+        if (file.isDir) continue;
+        
+        try {
+          // 批量下载时使用 ignoreDuplicates: true 自动跳过已存在的文件
+          final task = await DownloadManager.instance.enqueueFile(file, ignoreDuplicates: true);
+          if (task != null) {
+            addedCount++;
+          } else {
+            skippedCount++;
+          }
+        } catch (e) {
+          debugPrint("添加下载任务失败: ${file.name}, 错误: $e");
+          skippedCount++;
+        }
+      }
+      
+      // 所有任务添加完成后显示结果
+      if (addedCount > 0) {
+        SmartDialog.showToast("已加入 $addedCount 个文件${skippedCount > 0 ? '，跳过 $skippedCount 个' : ''}");
+      } else if (skippedCount > 0) {
+        SmartDialog.showToast("所选文件均已在下载队列或已下载");
+      } else {
+        SmartDialog.showToast("没有文件被添加到下载队列");
+      }
+    });
   }
 
   void _batchDelete() {
-    final names = _selectedIndices.map((i) => _files[i].name).toList();
+    final names = _selectedIndices.map((i) => _filteredFiles[i].name).toList();
     SmartDialog.show(
       clickMaskDismiss: false,
       keepSingle: true,
@@ -2010,7 +2111,7 @@ class _FileListScreenState extends State<FileListScreen>
   }
 
   void _batchCopyMove(bool isCopy) {
-    final names = _selectedIndices.map((i) => _files[i].name).toList();
+    final names = _selectedIndices.map((i) => _filteredFiles[i].name).toList();
     Get.bottomSheet(
       FileCopyMoveDialog(
         originalFolder: path,

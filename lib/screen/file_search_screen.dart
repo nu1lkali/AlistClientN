@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:alist/database/alist_database_controller.dart';
 import 'package:alist/database/table/file_viewing_record.dart';
@@ -126,23 +127,34 @@ class FileSearchScreen extends StatelessWidget {
   Widget _buildMultiSelectBar(FileSearchController controller) {
     return SafeArea(
       bottom: false,
-      child: Row(
-        children: [
-          IconButton(
-            icon: const Icon(Icons.close),
-            onPressed: controller.exitMultiSelect,
-          ),
-          Obx(() => Text("已选 ${controller.selectedIndices.length} 项")),
-          const Spacer(),
-          IconButton(
-            icon: const Icon(Icons.select_all),
-            onPressed: controller.selectAll,
-          ),
-          Obx(() => IconButton(
-                icon: const Icon(Icons.download_rounded),
-                onPressed: controller.selectedIndices.isEmpty ? null : controller.batchDownload,
-              )),
-        ],
+      child: Container(
+        height: 56,
+        padding: const EdgeInsets.symmetric(horizontal: 4),
+        child: Row(
+          children: [
+            const SizedBox(width: 8),
+            Obx(() => Text(
+              "${controller.selectedIndices.length} 项",
+              style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w500),
+            )),
+            const Spacer(),
+            IconButton(
+              icon: const Icon(Icons.select_all),
+              tooltip: "全选",
+              onPressed: controller.selectAll,
+            ),
+            Obx(() => IconButton(
+                  icon: const Icon(Icons.download_rounded),
+                  tooltip: "批量下载",
+                  onPressed: controller.selectedIndices.isEmpty ? null : controller.batchDownload,
+                )),
+            IconButton(
+              icon: const Icon(Icons.close),
+              tooltip: "退出多选",
+              onPressed: controller.exitMultiSelect,
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -324,30 +336,59 @@ class FileSearchController extends GetxController {
 
   void batchDownload() async {
     final selected = selectedIndices.map((i) => list[i]).toList();
-    var hasAdded = false;
-    for (final file in selected) {
-      if (file.isDir == true) continue;
-      final path = "${file.parent}/${file.name}";
-      final vo = FileItemVO(
-        name: file.name ?? "",
-        path: path,
-        size: file.size,
-        sizeDesc: FileUtils.formatBytes(file.size ?? 0),
-        isDir: false,
-        modified: "",
-        typeInt: file.type ?? 0,
-        type: FileUtils.getFileType(false, file.name ?? ""),
-        thumb: "",
-        sign: "",
-        icon: FileUtils.getFileIcon(false, file.name ?? ""),
-        modifiedMilliseconds: -1,
-        provider: null,
-      );
-      final task = await DownloadManager.instance.enqueueFile(vo, ignoreDuplicates: true);
-      if (task != null) hasAdded = true;
-    }
+    
+    // 先退出多选模式
     exitMultiSelect();
-    if (hasAdded) SmartDialog.showToast("已加入下载队列");
+    
+    // 在后台处理，不阻塞UI
+    var addedCount = 0;
+    var skippedCount = 0;
+    SmartDialog.showToast("正在添加 ${selected.length} 个文件到下载队列...");
+    
+    // 异步处理，避免阻塞UI
+    Future.microtask(() async {
+      for (final file in selected) {
+        if (file.isDir == true) continue;
+        final path = "${file.parent}/${file.name}";
+        
+        try {
+          final vo = FileItemVO(
+            name: file.name ?? "",
+            path: path,
+            size: file.size,
+            sizeDesc: FileUtils.formatBytes(file.size ?? 0),
+            isDir: false,
+            modified: "",
+            typeInt: file.type ?? 0,
+            type: FileUtils.getFileType(false, file.name ?? ""),
+            thumb: "",
+            sign: "",
+            icon: FileUtils.getFileIcon(false, file.name ?? ""),
+            modifiedMilliseconds: -1,
+            provider: null,
+          );
+          // 批量下载时使用 ignoreDuplicates: true 自动跳过已存在的文件
+          final task = await DownloadManager.instance.enqueueFile(vo, ignoreDuplicates: true);
+          if (task != null) {
+            addedCount++;
+          } else {
+            skippedCount++;
+          }
+        } catch (e) {
+          debugPrint("添加下载任务失败: ${file.name}, 错误: $e");
+          skippedCount++;
+        }
+      }
+      
+      // 所有任务添加完成后显示结果
+      if (addedCount > 0) {
+        SmartDialog.showToast("已加入 $addedCount 个文件${skippedCount > 0 ? '，跳过 $skippedCount 个' : ''}");
+      } else if (skippedCount > 0) {
+        SmartDialog.showToast("所选文件均已在下载队列或已下载");
+      } else {
+        SmartDialog.showToast("没有文件被添加到下载队列");
+      }
+    });
   }
 
   @override

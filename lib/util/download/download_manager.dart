@@ -326,11 +326,19 @@ class DownloadManager {
     UserController userController = Get.find();
     Directory downloadDir;
     if (Platform.isAndroid) {
-      final dirs = await getExternalStorageDirectory();
-      if (dirs != null) {
-        downloadDir = dirs;
-      } else {
-        downloadDir = await acquireDownloadDirectory();
+      // 使用公共下载目录
+      try {
+        String externalDownloadDir = await AlistPlugin.getExternalDownloadDir();
+        downloadDir = Directory(externalDownloadDir);
+      } catch (e) {
+        LogUtil.e("获取公共下载目录失败: $e");
+        // 降级到应用私有目录
+        final dirs = await getExternalStorageDirectory();
+        if (dirs != null) {
+          downloadDir = dirs;
+        } else {
+          downloadDir = await acquireDownloadDirectory();
+        }
       }
     } else {
       downloadDir = await acquireDownloadDirectory();
