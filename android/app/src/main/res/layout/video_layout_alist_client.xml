@@ -129,28 +129,26 @@
             android:id="@+id/btn_playlist"
             android:layout_width="48dp"
             android:layout_height="48dp"
-            android:paddingRight="4dp"
+            android:padding="12dp"
             android:scaleType="centerInside"
-            android:src="@android:drawable/ic_menu_sort_by_size"
-            android:tint="@android:color/white" />
+            android:src="@drawable/ic_playlist" />
 
         <ImageView
             android:id="@+id/btn_info"
             android:layout_width="48dp"
             android:layout_height="48dp"
-            android:paddingRight="4dp"
+            android:padding="12dp"
             android:scaleType="centerInside"
-            android:src="@android:drawable/ic_menu_info_details"
-            android:tint="@android:color/white" />
+            android:src="@drawable/ic_info" />
 
         <ImageView
             android:id="@+id/btn_delete"
             android:layout_width="48dp"
             android:layout_height="48dp"
+            android:padding="12dp"
             android:paddingRight="10dp"
             android:scaleType="centerInside"
-            android:src="@android:drawable/ic_menu_delete"
-            android:tint="@android:color/white" />
+            android:src="@drawable/ic_delete" />
     </LinearLayout>
 
 
