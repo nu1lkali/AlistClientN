@@ -578,7 +578,7 @@ class _FileListScreenState extends State<FileListScreen>
   }
 
   void _doExtractAndOrganize() async {
-    SmartDialog.showLoading(msg: '处理中，请稍候…', backDismiss: false, clickMaskDismiss: false);
+    SmartDialog.showLoading(msg: '扫描中…', backDismiss: false, clickMaskDismiss: false);
     
     try {
       // Step 1: Get all subdirectories in current path
@@ -592,14 +592,53 @@ class _FileListScreenState extends State<FileListScreen>
       for (final dir in subDirs) {
         final dirPath = dir.path;
         allSubFolders.add(dirPath);
+        SmartDialog.showLoading(msg: '扫描: ${dir.name}…', backDismiss: false, clickMaskDismiss: false);
         await _collectFilesRecursively(dirPath, filesFromSubdirs, allSubFolders);
       }
       
+      // Show debug info
+      SmartDialog.dismiss();
+      final debugInfo = '扫描完成\n'
+          '子文件夹数: ${allSubFolders.length}\n'
+          '收集文件数: ${filesFromSubdirs.length}\n'
+          '文件列表:\n${filesFromSubdirs.take(10).map((f) => f.path).join('\n')}${filesFromSubdirs.length > 10 ? '\n...' : ''}';
+      
+      await SmartDialog.show(
+        clickMaskDismiss: false,
+        builder: (context) => AlertDialog(
+          title: const Text('调试信息'),
+          content: SingleChildScrollView(child: Text(debugInfo)),
+          actions: [
+            TextButton(
+              onPressed: () => SmartDialog.dismiss(),
+              child: const Text('取消'),
+            ),
+            FilledButton(
+              onPressed: () {
+                SmartDialog.dismiss();
+                _continueExtractAndOrganize(filesFromSubdirs, allSubFolders);
+              },
+              child: const Text('继续'),
+            ),
+          ],
+        ),
+      );
+      
       if (filesFromSubdirs.isEmpty && subDirs.isEmpty) {
-        SmartDialog.dismiss();
         SmartDialog.showToast('没有找到文件');
         return;
       }
+    } catch (e) {
+      SmartDialog.dismiss();
+      SmartDialog.showToast('操作失败：$e');
+      LogUtil.e('Extract and organize error: $e');
+    }
+  }
+
+  void _continueExtractAndOrganize(List<FileItemVO> filesFromSubdirs, List<String> allSubFolders) async {
+    SmartDialog.showLoading(msg: '处理中，请稍候…', backDismiss: false, clickMaskDismiss: false);
+    
+    try {
 
       // Step 3: Get current directory file names to check for conflicts
       final existingFileNames = _files.where((f) => !f.isDir).map((f) => f.name).toSet();
@@ -824,6 +863,8 @@ class _FileListScreenState extends State<FileListScreen>
     List<FileItemVO> allFiles, 
     List<String> allSubFolders,
   ) async {
+    LogUtil.d('Collecting files from: $dirPath');
+    
     final body = {
       "path": dirPath,
       "password": _password ?? "",
@@ -839,19 +880,45 @@ class _FileListScreenState extends State<FileListScreen>
       params: body,
       onSuccess: (data) async {
         final files = data?.content ?? [];
+        LogUtil.d('Found ${files.length} items in $dirPath');
         
-        for (var file in files) {
-          if (file.isDir) {
-            final subPath = dirPath == '/' ? '/${file.name}' : '$dirPath/${file.name}';
-            // Add this subfolder to the list (will be deleted later)
-            allSubFolders.add(subPath);
-            // Recursively process this subfolder
-            await _collectFilesRecursively(subPath, allFiles, allSubFolders);
-          } else {
-            // Collect file
-            final fileItemVO = _fileResp2VO(data?.provider ?? "", file);
-            allFiles.add(fileItemVO);
-          }
+        // Process subdirectories first
+        final subDirs = files.where((f) => f.isDir).toList();
+        for (var file in subDirs) {
+          final subPath = dirPath == '/' ? '/${file.name}' : '$dirPath/${file.name}';
+          LogUtil.d('Found subdirectory: $subPath');
+          allSubFolders.add(subPath);
+          // Recursively process this subfolder
+          await _collectFilesRecursively(subPath, allFiles, allSubFolders);
+        }
+        
+        // Then collect files with correct path
+        final regularFiles = files.where((f) => !f.isDir).toList();
+        for (var file in regularFiles) {
+          // Manually construct the correct file path
+          final filePath = dirPath == '/' ? '/${file.name}' : '$dirPath/${file.name}';
+          
+          DateTime? modifyTime = file.parseModifiedTime();
+          String? modifyTimeStr = file.getReformatModified(modifyTime);
+          
+          final fileItemVO = FileItemVO(
+            name: file.name,
+            path: filePath,  // Use the correct path we constructed
+            size: file.size,
+            sizeDesc: file.formatBytes(),
+            isDir: false,
+            modified: modifyTimeStr,
+            typeInt: file.type,
+            type: file.getFileType(),
+            thumb: file.thumb,
+            sign: file.sign,
+            icon: file.getFileIcon(),
+            modifiedMilliseconds: modifyTime?.millisecondsSinceEpoch ?? -1,
+            provider: data?.provider ?? "",
+          );
+          
+          LogUtil.d('Collected file: ${fileItemVO.path}');
+          allFiles.add(fileItemVO);
         }
         
         completer.complete();
