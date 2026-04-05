@@ -21,9 +21,11 @@ class FileListItemView extends StatelessWidget {
     this.fileNameMaxLines,
     this.highlightKeyword,
     this.watchProgress,
+    this.onLongPress,
   }) : super(key: key);
   final GestureTapCallback onTap;
   final GestureTapCallback? onMoreIconButtonTap;
+  final GestureTapCallback? onLongPress;
   final String icon;
   final String? thumbnail;
   final String fileName;
@@ -122,7 +124,7 @@ class FileListItemView extends StatelessWidget {
             ],
           ),
           onTap: onTap,
-          onLongPress: null,
+          onLongPress: onLongPress,
         ),
       ],
     );

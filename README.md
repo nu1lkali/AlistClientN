@@ -2,6 +2,7 @@
 
 基于 [AlistClient](https://github.com/BFWXKJGS/AlistClient) 的增强版 Android 客户端，感谢原作者 [BFWXKJGS](https://github.com/BFWXKJGS) 的开源贡献。
 
+
 ## 下载
 
 **GitHub Releases**
@@ -32,9 +33,12 @@ https://wwanb.lanzoum.com/b016kpl6ub
 - 智能预加载缓存：局域网环境下自动预加载子目录（可在设置中关闭）
 
 **图片画廊**
-- 图片旋转
+- 图片旋转do
 - 幻灯片自动播放
-- 图片信息弹窗（分辨率、大小等）
+- 图片信息弹窗（分辨率、大小、EXIF 信息等）
+  - 相机型号、拍摄时间
+  - ISO、光圈、快门速度、焦距
+  - GPS 位置信息
 - 智能预加载：前后各预加载 5 张图片，滑动无感加载
 - 内存与磁盘缓存优化
 
@@ -50,6 +54,9 @@ https://wwanb.lanzoum.com/b016kpl6ub
 
 **文件搜索**
 - 搜索结果支持多选批量下载
+- 搜索历史记录（圆角标签样式）
+- 快速重复搜索
+- 一键清空历史
 
 **缓存管理**
 - 视频缓存统计与清理

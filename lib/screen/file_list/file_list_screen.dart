@@ -1745,6 +1745,18 @@ class _FileListScreenState extends State<FileListScreen>
                   ),
                   const Divider(),
                   ListTile(
+                    leading: const Icon(Icons.checklist_rounded),
+                    title: const Text("多选"),
+                    onTap: () {
+                      Navigator.pop(context);
+                      setState(() {
+                        _isMultiSelectMode = true;
+                        _selectedIndices.clear();
+                        _selectedIndices.add(index);
+                      });
+                    },
+                  ),
+                  ListTile(
                     leading: const Icon(Icons.open_in_new),
                     title: Text(Intl.fileList_menu_open.tr),
                     onTap: () {
@@ -2329,13 +2341,9 @@ class _FileListView extends StatelessWidget {
           } else {
             // it's file
             final file = files[index];
-            return GestureDetector(
-              onLongPress: onFileLongPress != null
-                  ? () => onFileLongPress!(context, index)
-                  : null,
-              child: Slidable(
-                key: Key(file.path),
-                endActionPane: ActionPane(
+            return Slidable(
+              key: Key(file.path),
+              endActionPane: ActionPane(
                 motion: const DrawerMotion(),
                 extentRatio: hasWritePermission ? 0.5 : 0.25,
                 children: [
@@ -2373,6 +2381,9 @@ class _FileListView extends StatelessWidget {
                             time: file.modified,
                             sizeDesc: file.sizeDesc,
                             onTap: () => onFileItemClick(context, index),
+                            onLongPress: onFileLongPress != null
+                                ? () => onFileLongPress!(context, index)
+                                : null,
                           ),
                         ),
                       ],
@@ -2385,13 +2396,15 @@ class _FileListView extends StatelessWidget {
                       sizeDesc: file.sizeDesc,
                       watchProgress: file.watchProgress,
                       onTap: () => onFileItemClick(context, index),
+                      onLongPress: onFileLongPress != null
+                          ? () => onFileLongPress!(context, index)
+                          : null,
                       onMoreIconButtonTap: () {
                         if (onFileMoreIconButtonTap != null) {
                           onFileMoreIconButtonTap!(context, index);
                         }
                       },
                     ),
-              ),
             );
           }
         },
@@ -2479,49 +2492,47 @@ class _FileListView extends StatelessWidget {
   }
 
   Widget _buildListItem(BuildContext context, FileItemVO file, int index) {
-    return GestureDetector(
-      onLongPress: onFileLongPress != null
-          ? () => onFileLongPress!(context, index)
-          : null,
-      child: Slidable(
-        key: Key(file.path),
-        endActionPane: ActionPane(
-          motion: const DrawerMotion(),
-          extentRatio: hasWritePermission ? 0.5 : 0.25,
-          children: [
+    return Slidable(
+      key: Key(file.path),
+      endActionPane: ActionPane(
+        motion: const DrawerMotion(),
+        extentRatio: hasWritePermission ? 0.5 : 0.25,
+        children: [
+          SlidableAction(
+            onPressed: (context) => _showDetailsDialog(context, file),
+            backgroundColor: Get.theme.colorScheme.secondary,
+            foregroundColor: Colors.white,
+            label: Intl.recentsScreen_menu_details.tr,
+          ),
+          if (hasWritePermission)
             SlidableAction(
-              onPressed: (context) => _showDetailsDialog(context, file),
-              backgroundColor: Get.theme.colorScheme.secondary,
+              onPressed: (context) {
+                if (null != fileDeleteCallback) {
+                  fileDeleteCallback!(context, index);
+                }
+              },
+              backgroundColor: const Color(0xFFFE4A49),
               foregroundColor: Colors.white,
-              label: Intl.recentsScreen_menu_details.tr,
+              label: Intl.recentsScreen_menu_delete.tr,
             ),
-            if (hasWritePermission)
-              SlidableAction(
-                onPressed: (context) {
-                  if (null != fileDeleteCallback) {
-                    fileDeleteCallback!(context, index);
-                  }
-                },
-                backgroundColor: const Color(0xFFFE4A49),
-                foregroundColor: Colors.white,
-                label: Intl.recentsScreen_menu_delete.tr,
-              ),
-          ],
-        ),
-        child: FileListItemView(
-          icon: file.icon,
-          fileName: file.name,
-          thumbnail: file.thumb,
-          time: file.modified,
-          sizeDesc: file.sizeDesc,
-          watchProgress: file.watchProgress,
-          onTap: () => onFileItemClick(context, index),
-          onMoreIconButtonTap: () {
-            if (onFileMoreIconButtonTap != null) {
-              onFileMoreIconButtonTap!(context, index);
-            }
-          },
-        ),
+        ],
+      ),
+      child: FileListItemView(
+        icon: file.icon,
+        fileName: file.name,
+        thumbnail: file.thumb,
+        time: file.modified,
+        sizeDesc: file.sizeDesc,
+        watchProgress: file.watchProgress,
+        onTap: () => onFileItemClick(context, index),
+        onLongPress: onFileLongPress != null
+            ? () => onFileLongPress!(context, index)
+            : null,
+        onMoreIconButtonTap: () {
+          if (onFileMoreIconButtonTap != null) {
+            onFileMoreIconButtonTap!(context, index);
+          }
+        },
       ),
     );
   }
