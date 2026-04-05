@@ -509,11 +509,19 @@ class PlayerActivity : AppCompatActivity(), GSYVideoProgressListener {
     }
 
     private fun sortByName() {
-        sortedVideos.sortBy { it.name.lowercase() }
+        // Use natural sort to handle numbers correctly (1, 2, 3, ..., 10 instead of 1, 10, 2, 3)
+        sortedVideos.sortWith(compareBy { naturalSortKey(it.name) })
         updateVideoIndexMap()
         playlistAdapter.updateVideos(sortedVideos)
         playlistAdapter.updateCurrentIndex(getCurrentSortedIndex())
         SmartToast.show(this, "已按文件名排序")
+    }
+    
+    private fun naturalSortKey(name: String): String {
+        // Convert numbers in the string to zero-padded format for natural sorting
+        return name.replace(Regex("\\d+")) { matchResult ->
+            matchResult.value.padStart(10, '0')
+        }
     }
 
     private fun sortByDuration() {
