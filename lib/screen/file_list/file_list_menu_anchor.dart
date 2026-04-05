@@ -59,6 +59,18 @@ final menuGroupOperations = MenuGroupEntity(
       name: "提取并整理",
       iconData: Icons.auto_awesome_rounded,
     ),
+    MenuItemEntity(
+      menuGroupId: MenuGroupId.operations,
+      menuId: MenuId.randomPlayVideo,
+      name: "随机播放视频",
+      iconData: Icons.play_circle_outline_rounded,
+    ),
+    MenuItemEntity(
+      menuGroupId: MenuGroupId.operations,
+      menuId: MenuId.randomPlayVideoRecursive,
+      name: "递归随机播放",
+      iconData: Icons.shuffle_rounded,
+    ),
   ],
 );
 
@@ -314,6 +326,8 @@ enum MenuId {
   configFileNameLines,
   organizeByType,
   extractAndOrganize,
+  randomPlayVideo,
+  randomPlayVideoRecursive,
 }
 
 class MenuGroupEntity {

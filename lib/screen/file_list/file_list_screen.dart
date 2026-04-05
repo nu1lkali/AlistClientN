@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:math';
 
 import 'package:alist/database/alist_database_controller.dart';
 import 'package:alist/database/dao/favorite_dao.dart';
@@ -347,6 +348,10 @@ class _FileListScreenState extends State<FileListScreen>
               _organizeByType();
             } else if (menu.menuId == MenuId.extractAndOrganize) {
               _extractAndOrganize();
+            } else if (menu.menuId == MenuId.randomPlayVideo) {
+              _randomPlayVideo();
+            } else if (menu.menuId == MenuId.randomPlayVideoRecursive) {
+              _randomPlayVideoRecursive();
             }
             break;
           case MenuGroupId.sort:
@@ -591,6 +596,160 @@ class _FileListScreenState extends State<FileListScreen>
         ],
       ),
     );
+  }
+
+  void _randomPlayVideo() {
+    final videos = _files.where((f) => f.type == FileType.video).toList();
+    if (videos.isEmpty) {
+      SmartDialog.showToast('当前目录没有视频文件');
+      return;
+    }
+    
+    final random = Random();
+    final randomVideo = videos[random.nextInt(videos.length)];
+    _goVideoPlayerScreen(context, randomVideo, _files, false);
+  }
+
+  void _randomPlayVideoRecursive() async {
+    SmartDialog.showLoading(msg: '随机探索中…', backDismiss: false, clickMaskDismiss: false);
+    
+    try {
+      // Random walk to find a directory with videos
+      final result = await _randomWalkToFindVideos(path, maxDepth: 10);
+      
+      SmartDialog.dismiss();
+      
+      if (result == null || result.videoFiles.isEmpty) {
+        SmartDialog.showToast('未找到视频文件');
+        return;
+      }
+      
+      // Pick a random video from the found directory
+      final random = Random();
+      final randomVideo = result.videoFiles[random.nextInt(result.videoFiles.length)];
+      
+      _goVideoPlayerScreen(context, randomVideo, result.videoFiles, false);
+    } catch (e) {
+      SmartDialog.dismiss();
+      SmartDialog.showToast('操作失败：$e');
+      LogUtil.e('Random play video recursive error: $e');
+    }
+  }
+
+  // Random walk algorithm to find a directory with videos
+  // Uses random path exploration instead of exhaustive traversal
+  Future<_RandomVideoResult?> _randomWalkToFindVideos(String startPath, {int maxDepth = 10, int currentDepth = 0}) async {
+    if (currentDepth >= maxDepth) {
+      LogUtil.d('Max depth reached at $startPath');
+      return null;
+    }
+    
+    LogUtil.d('Exploring: $startPath (depth: $currentDepth)');
+    
+    final body = {
+      "path": startPath,
+      "password": _password ?? "",
+      "page": 1,
+      "per_page": 0,
+      "refresh": false
+    };
+
+    final completer = Completer<_RandomVideoResult?>();
+    
+    await DioUtils.instance.requestNetwork<FileListRespEntity>(
+      Method.post, "fs/list",
+      params: body,
+      onSuccess: (data) async {
+        final files = data?.content ?? [];
+        final videoFiles = <FileItemVO>[];
+        final subDirs = <String>[];
+        
+        // Collect videos and subdirectories
+        for (var file in files) {
+          if (file.isDir) {
+            final subPath = startPath == '/' ? '/${file.name}' : '$startPath/${file.name}';
+            subDirs.add(subPath);
+          } else {
+            final fileType = file.getFileType();
+            if (fileType == FileType.video) {
+              final filePath = startPath == '/' ? '/${file.name}' : '$startPath/${file.name}';
+              DateTime? modifyTime = file.parseModifiedTime();
+              String? modifyTimeStr = file.getReformatModified(modifyTime);
+              
+              final fileItemVO = FileItemVO(
+                name: file.name,
+                path: filePath,
+                size: file.size,
+                sizeDesc: file.formatBytes(),
+                isDir: false,
+                modified: modifyTimeStr,
+                typeInt: file.type,
+                type: fileType,
+                thumb: file.thumb,
+                sign: file.sign,
+                icon: file.getFileIcon(),
+                modifiedMilliseconds: modifyTime?.millisecondsSinceEpoch ?? -1,
+                provider: data?.provider ?? "",
+              );
+              videoFiles.add(fileItemVO);
+            }
+          }
+        }
+        
+        LogUtil.d('Found ${videoFiles.length} videos and ${subDirs.length} folders in $startPath');
+        
+        // Create pool of all items (folders + videos)
+        final totalItems = subDirs.length + videoFiles.length;
+        
+        if (totalItems == 0) {
+          // Dead end - empty folder
+          LogUtil.d('Empty folder: $startPath');
+          completer.complete(null);
+          return;
+        }
+        
+        // Randomly select one item from the pool
+        final random = Random();
+        final randomIndex = random.nextInt(totalItems);
+        
+        if (randomIndex < videoFiles.length) {
+          // Hit a video - use all videos from this directory as playlist
+          LogUtil.d('Hit video! Using ${videoFiles.length} videos from $startPath');
+          completer.complete(_RandomVideoResult(dirPath: startPath, videoFiles: videoFiles));
+        } else {
+          // Hit a folder - recursively enter it
+          final folderIndex = randomIndex - videoFiles.length;
+          final selectedFolder = subDirs[folderIndex];
+          
+          LogUtil.d('Hit folder: $selectedFolder, exploring...');
+          
+          // Try the selected folder
+          final subResult = await _randomWalkToFindVideos(
+            selectedFolder, 
+            maxDepth: maxDepth, 
+            currentDepth: currentDepth + 1
+          );
+          
+          if (subResult != null) {
+            LogUtil.d('Found videos in subfolder');
+            completer.complete(subResult);
+          } else if (videoFiles.isNotEmpty) {
+            // Backtrack: if subfolder was a dead end but current dir has videos, use them
+            LogUtil.d('Subfolder was dead end, backtracking to use ${videoFiles.length} videos from $startPath');
+            completer.complete(_RandomVideoResult(dirPath: startPath, videoFiles: videoFiles));
+          } else {
+            LogUtil.d('No videos found, returning null');
+            completer.complete(null);
+          }
+        }
+      },
+      onError: (code, msg) {
+        LogUtil.e('Failed to list directory $startPath: $msg');
+        completer.complete(null);
+      },
+    );
+    
+    return completer.future;
   }
 
   void _doExtractAndOrganize() async {
@@ -984,79 +1143,8 @@ class _FileListScreenState extends State<FileListScreen>
   }
 
   AlistScaffold _buildScaffold(BuildContext context) {
-    if (_isMultiSelectMode) {
-      return AlistScaffold(
-        appbarTitle: Row(
-          children: [
-            IconButton(
-              icon: const Icon(Icons.close),
-              onPressed: () => setState(() {
-                _isMultiSelectMode = false;
-                _selectedIndices.clear();
-              }),
-            ),
-            Text("已选 ${_selectedIndices.length} 项"),
-          ],
-        ),
-        appbarActions: [
-          IconButton(
-            icon: const Icon(Icons.select_all),
-            onPressed: () => setState(() {
-              if (_selectedIndices.length == _files.length) {
-                _selectedIndices.clear();
-              } else {
-                _selectedIndices.addAll(List.generate(_files.length, (i) => i));
-              }
-            }),
-          ),
-          IconButton(
-            icon: const Icon(Icons.download_rounded),
-            onPressed: _selectedIndices.isEmpty ? null : _batchDownload,
-          ),
-          if (_hasWritePermission)
-            IconButton(
-              icon: const Icon(Icons.delete_outline),
-              onPressed: _selectedIndices.isEmpty ? null : _batchDelete,
-            ),
-          if (_hasWritePermission)
-            IconButton(
-              icon: const Icon(Icons.drive_file_move_outlined),
-              onPressed: _selectedIndices.isEmpty ? null : () => _batchCopyMove(false),
-            ),
-        ],
-        body: SlidableAutoCloseBehavior(
-          child: Obx(() => _FileListView(
-            path: path,
-            readme: _data?.readme,
-            files: _filteredFiles,
-            refreshController: _refreshController,
-            hasWritePermission: _hasWritePermission,
-            isGridView: _menuAnchorController.isGridView.value,
-            isMultiSelectMode: true,
-            selectedIndices: _selectedIndices,
-            onFileItemClick: (context, index) {
-              setState(() {
-                if (_selectedIndices.contains(index)) {
-                  _selectedIndices.remove(index);
-                } else {
-                  _selectedIndices.add(index);
-                }
-              });
-            },
-            onFileMoreIconButtonTap: _onFileMoreIconButtonTap,
-            refreshCallback: _loadFiles,
-            fileDeleteCallback: (context, index) {
-              _tryDeleteFile(_filteredFiles[index]);
-            },
-          )),
-        ),
-      );
-    }
-
     return AlistScaffold(
-      appbarTitle: OverflowText(
-        text: _pageName ?? Intl.screenName_fileListRoot.tr,
-      ),
+      appbarTitle: _pageName != null ? Text(_pageName!) : null,
       appbarActions: [
         Obx(() => _userController.searchIndex.isNotEmpty
             ? IconButton(
@@ -2566,4 +2654,12 @@ class _GroupListItem {
   final String? dateHeader;
   final int? fileIndex;
   _GroupListItem({this.dateHeader, this.fileIndex});
+}
+
+
+class _RandomVideoResult {
+  final String dirPath;
+  final List<FileItemVO> videoFiles;
+  
+  _RandomVideoResult({required this.dirPath, required this.videoFiles});
 }

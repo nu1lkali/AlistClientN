@@ -239,8 +239,11 @@ class GalleryController extends GetxController {
       urls.add(url);
     }
     this.urls.value = urls;
-    // preload images around initial index
-    _preloadAround(index.value);
+    
+    // Preload images around initial index
+    Future.delayed(const Duration(milliseconds: 100), () {
+      _preloadAround(index.value);
+    });
   }
 
   void updateIndex(int index) {
@@ -250,20 +253,39 @@ class GalleryController extends GetxController {
     _preloadAround(index);
   }
 
+  final Set<int> _preloadedIndices = {};
+
   void _preloadAround(int index) {
-    const preloadCount = 2;
+    const preloadCount = 5; // Increased to 5 for very smooth experience
     for (int i = 1; i <= preloadCount; i++) {
       final next = index + i;
       final prev = index - i;
-      if (next < urls.length) _preloadImage(urls[next]);
-      if (prev >= 0) _preloadImage(urls[prev]);
+      if (next < urls.length && !_preloadedIndices.contains(next)) {
+        _preloadedIndices.add(next);
+      }
+      if (prev >= 0 && !_preloadedIndices.contains(prev)) {
+        _preloadImage(prev);
+        _preloadedIndices.add(prev);
+      }
     }
   }
 
-  void _preloadImage(String url) {
+  void _preloadImage(int index) {
     try {
-      final config = ExtendedNetworkImageProvider(url, cache: true);
-      precacheImage(config, Get.context!);
+      String? localPath;
+      if (files != null && files!.length > index) {
+        localPath = files?[index].localPath;
+      }
+      
+      if (localPath != null && localPath.isNotEmpty) {
+        // Preload local file
+        final config = ExtendedFileImageProvider(File(localPath));
+        precacheImage(config, Get.context!);
+      } else {
+        // Preload network image
+        final config = ExtendedNetworkImageProvider(urls[index], cache: true);
+        precacheImage(config, Get.context!);
+      }
     } catch (_) {}
   }
 
@@ -447,7 +469,7 @@ class _ImageContainer extends StatelessWidget {
       inertialSpeed: 100.0,
       initialScale: 1.0,
       inPageView: true,
-      cacheGesture: true, // Enable gesture caching to prevent flicker
+      cacheGesture: true,
       initialAlignment: InitialAlignment.center,
     );
 
@@ -457,12 +479,11 @@ class _ImageContainer extends StatelessWidget {
         fit: BoxFit.contain,
         mode: ExtendedImageMode.gesture,
         enableMemoryCache: true,
-        clearMemoryCacheWhenDispose: false, // Keep in memory to prevent reload
+        gaplessPlayback: true, // Hide loading animation for smooth transition
         initGestureConfigHandler: (state) {
           return gestureConfig;
         },
         onDoubleTap: (ExtendedImageGestureState state) {
-          // Log.d("currentScale=${state.gestureDetails?.totalScale}");
           var currentScale = state.gestureDetails?.totalScale ?? 1.0;
           if (currentScale >= 2.0) {
             state.handleDoubleTap(scale: 1);
@@ -476,14 +497,13 @@ class _ImageContainer extends StatelessWidget {
         url,
         fit: BoxFit.contain,
         mode: ExtendedImageMode.gesture,
-        cache: true, // Enable disk cache
+        cache: true,
         enableMemoryCache: true,
-        clearMemoryCacheWhenDispose: false, // Keep in memory to prevent reload
+        gaplessPlayback: true, // Hide loading animation for smooth transition
         initGestureConfigHandler: (state) {
           return gestureConfig;
         },
         onDoubleTap: (ExtendedImageGestureState state) {
-          // Log.d("currentScale=${state.gestureDetails?.totalScale}");
           var currentScale = state.gestureDetails?.totalScale ?? 1.0;
           if (currentScale >= 2.0) {
             state.handleDoubleTap(scale: 1);
