@@ -447,7 +447,7 @@ class _ImageContainer extends StatelessWidget {
       inertialSpeed: 100.0,
       initialScale: 1.0,
       inPageView: true,
-      cacheGesture: false,
+      cacheGesture: true, // Enable gesture caching to prevent flicker
       initialAlignment: InitialAlignment.center,
     );
 
@@ -456,6 +456,8 @@ class _ImageContainer extends StatelessWidget {
         File(localPath!),
         fit: BoxFit.contain,
         mode: ExtendedImageMode.gesture,
+        enableMemoryCache: true,
+        clearMemoryCacheWhenDispose: false, // Keep in memory to prevent reload
         initGestureConfigHandler: (state) {
           return gestureConfig;
         },
@@ -474,6 +476,9 @@ class _ImageContainer extends StatelessWidget {
         url,
         fit: BoxFit.contain,
         mode: ExtendedImageMode.gesture,
+        cache: true, // Enable disk cache
+        enableMemoryCache: true,
+        clearMemoryCacheWhenDispose: false, // Keep in memory to prevent reload
         initGestureConfigHandler: (state) {
           return gestureConfig;
         },

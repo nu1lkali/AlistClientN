@@ -305,8 +305,15 @@ public class AlistClientVideoPlayer extends NormalGSYVideoPlayer {
             }
             if (videoPlayer.btnPlaylist != null && this.playlistClickListener != null) {
                 videoPlayer.btnPlaylist.setOnClickListener(v -> {
+                    // Exit fullscreen first, then trigger playlist
                     if (videoPlayer.playlistClickListener != null) {
-                        videoPlayer.playlistClickListener.onPlaylistClick();
+                        videoPlayer.backFromFull(context);
+                        // Delay to ensure fullscreen exit completes
+                        videoPlayer.postDelayed(() -> {
+                            if (this.playlistClickListener != null) {
+                                this.playlistClickListener.onPlaylistClick();
+                            }
+                        }, 300);
                     }
                 });
             }
