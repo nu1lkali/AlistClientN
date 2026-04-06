@@ -34,6 +34,7 @@ import 'package:alist/util/file_type.dart';
 import 'package:alist/util/file_utils.dart';
 import 'package:alist/util/focus_node_utils.dart';
 import 'package:alist/util/log_utils.dart';
+import 'package:alist/util/lru_path_cache.dart';
 import 'package:alist/util/markdown_utils.dart';
 import 'package:alist/util/named_router.dart';
 import 'package:alist/util/nature_sort.dart';
@@ -93,6 +94,10 @@ class _FileListScreenState extends State<FileListScreen>
 
   // in-memory cache: path -> file list, shared across all instances
   static final Map<String, List<FileItemVO>> _preloadCache = {};
+  
+  // LRU cache for recently visited paths (shared across all instances)
+  static final LruPathCache _recentPathsCache = LruPathCache(capacity: 30);
+  
   final AlistDatabaseController _databaseController = Get.find();
   final FileListMenuAnchorController _menuAnchorController =
       FileListMenuAnchorController();
@@ -629,6 +634,10 @@ class _FileListScreenState extends State<FileListScreen>
         return;
       }
       
+      // 将成功找到视频的目录添加到 LRU Cache
+      _recentPathsCache.add(result.dirPath);
+      LogUtil.d('Added ${result.dirPath} to LRU cache (size: ${_recentPathsCache.size})');
+      
       // 如果开启了随机排序，对播放列表也进行随机排序
       final videoFiles = result.videoFiles;
       if (_menuAnchorController.sortBy.value == MenuId.random) {
@@ -738,14 +747,36 @@ class _FileListScreenState extends State<FileListScreen>
           // Hit a folder - try to explore it
           final folderIndex = randomIndex - videoFiles.length;
           
-          // Shuffle subdirectories to try them in random order
-          subDirs.shuffle(random);
+          // Apply LRU path penalization: filter out recently visited paths with 80% probability
+          final availableSubDirs = <String>[];
+          final penalizedSubDirs = <String>[];
           
-          LogUtil.d('Hit folder, will try ${subDirs.length} folders in random order');
+          for (final subDir in subDirs) {
+            if (_recentPathsCache.contains(subDir)) {
+              // This path was recently visited
+              // 80% chance to penalize (skip), 20% chance to allow
+              if (random.nextDouble() < 0.8) {
+                penalizedSubDirs.add(subDir);
+                LogUtil.d('Penalizing recently visited path: $subDir');
+                continue;
+              } else {
+                LogUtil.d('Lucky! Allowing recently visited path: $subDir');
+              }
+            }
+            availableSubDirs.add(subDir);
+          }
+          
+          // If all paths were penalized, use the penalized ones (fallback)
+          final dirsToTry = availableSubDirs.isNotEmpty ? availableSubDirs : penalizedSubDirs;
+          
+          // Shuffle directories to try them in random order
+          dirsToTry.shuffle(random);
+          
+          LogUtil.d('Hit folder, will try ${dirsToTry.length} folders (${penalizedSubDirs.length} penalized)');
           
           // Try folders one by one until we find videos
           _RandomVideoResult? result;
-          for (final subDir in subDirs) {
+          for (final subDir in dirsToTry) {
             LogUtil.d('Trying folder: $subDir');
             
             final subResult = await _randomWalkToFindVideos(
