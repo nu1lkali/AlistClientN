@@ -523,8 +523,20 @@ class PlayerActivity : AppCompatActivity(), GSYVideoProgressListener {
     }
 
     private object SmartToast {
+        private var currentToast: android.widget.Toast? = null
+        
         fun show(context: android.content.Context, msg: String) {
-            android.widget.Toast.makeText(context, msg, android.widget.Toast.LENGTH_SHORT).show()
+            // Cancel previous toast to avoid queuing
+            currentToast?.cancel()
+            
+            // Create and show new toast with shorter duration
+            currentToast = android.widget.Toast.makeText(context, msg, android.widget.Toast.LENGTH_SHORT).apply {
+                // Use a handler to dismiss after 1 second instead of default 2 seconds
+                android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+                    cancel()
+                }, 1000) // 1 second
+                show()
+            }
         }
     }
 
