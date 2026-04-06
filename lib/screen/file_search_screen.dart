@@ -11,6 +11,7 @@ import 'package:alist/screen/audio_player_screen.dart';
 import 'package:alist/screen/file_reader_screen.dart';
 import 'package:alist/screen/gallery_screen.dart';
 import 'package:alist/screen/pdf_reader_screen.dart';
+import 'package:alist/screen/txt_reader_screen.dart';
 import 'package:alist/screen/video_player_screen.dart';
 import 'package:alist/util/download/download_manager.dart';
 import 'package:alist/util/file_password_helper.dart';
@@ -527,6 +528,8 @@ class FileSearchController extends GetxController {
         _gotoMarkdownScreen(path, file);
         break;
       case FileType.txt:
+        _gotoTxtReaderScreen(path, file);
+        break;
       case FileType.word:
       case FileType.excel:
       case FileType.ppt:
@@ -759,6 +762,34 @@ class FileSearchController extends GetxController {
         "title": file.name
       });
     }
+  }
+
+  void _gotoTxtReaderScreen(String path, FileSearchRespContent file) async {
+    SmartDialog.showLoading();
+    var files = await _loadFilesPrepare(
+        path.substringBeforeLast("/")!, path, FileType.txt);
+    SmartDialog.dismiss();
+    if (files == null) {
+      return;
+    }
+
+    var index = files.lastIndexWhere((element) => element.path == path);
+    if (index == -1) {
+      index = 0;
+    }
+    var file = files[index];
+    _fileViewingRecord(file);
+    var txtItem = TxtItem(
+      name: file.name,
+      remotePath: file.path,
+      sign: file.sign,
+      provider: file.provider,
+      thumb: file.thumb,
+    );
+    Get.toNamed(
+      NamedRouter.txtReader,
+      arguments: {"txtItem": txtItem},
+    );
   }
 
   void _gotoFileReaderScreen(String path, FileSearchRespContent file) async {
