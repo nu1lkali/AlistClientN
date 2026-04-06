@@ -1,114 +1,134 @@
-# Office 文件预览功能集成说明
+# Office 文件预览功能设置指南
 
-## 当前状态
+## 功能概述
+本项目集成了 AndroidDocViewer 库，支持在 Android 应用内直接预览 Office 文档，无需安装第三方应用。
 
-已经完成了 Office 文件预览功能的代码框架，但 AndroidDocViewer 库暂时无法通过 JitPack 下载。
+## 支持的文件格式
+- Word: .doc, .docx
+- Excel: .xls, .xlsx
+- PowerPoint: .ppt, .pptx
+- PDF: .pdf
+- 文本: .txt
+- Markdown: .md
 
-## 已完成的工作
+## 技术实现
+- 使用腾讯 X5 内核进行文档渲染
+- 本地渲染，无需联网
+- 支持文档缩放、翻页等基本操作
 
-1. ✅ 创建了 `office_reader_screen.dart` - Office 文件预览界面
-2. ✅ 创建了 `DocViewerHelper.kt` - 原生文档预览辅助类
-3. ✅ 修改了 `AlistPlugin.kt` - 添加了 `openDocument` 方法
-4. ✅ 修改了 `alist_plugin.dart` - 添加了 Flutter 端调用方法
-5. ✅ 修改了文件列表和搜索界面 - 支持 Office 文件预览
+## 最新优化 (v2)
 
-## 需要手动完成的步骤
+### Excel 预览样式优化
+Excel 文件预览时的 Sheet 标签样式已优化，更加简洁美观：
+- 字体大小：26px → 14px
+- 上边距：60px → 20px
+- 下边距：30px → 12px
+- 添加了浅灰色背景和绿色左边框
+- 整体风格更加现代
 
-### 方案一：使用 JitPack（推荐，但需要等待）
+详见：`EXCEL_STYLING_IMPROVEMENTS.md`
 
-在 `android/app/build.gradle` 的 dependencies 中添加：
+## 依赖配置
 
-```gradle
-implementation 'com.github.seapeak233:AndroidDocViewer:master-SNAPSHOT'
+### Git Submodule 方式（推荐）
+项目已配置 AndroidDocViewer 作为 Git Submodule：
+
+```bash
+# 克隆项目时自动初始化子模块
+git clone --recurse-submodules <your-repo-url>
+
+# 或者克隆后手动初始化
+git clone <your-repo-url>
+cd <your-repo>
+git submodule update --init --recursive
 ```
 
-或者等待作者发布正式版本后使用：
-```gradle
-implementation 'com.github.seapeak233:AndroidDocViewer:1.0.0'
+### 手动下载方式
+如果 Git Submodule 不可用：
+
+```bash
+cd android
+git clone https://github.com/seapeak233/AndroidDocViewer.git
 ```
 
-### 方案二：使用本地 AAR 文件
+## 配置文件
 
-1. 从 GitHub 下载 AndroidDocViewer 项目：
-   ```bash
-   git clone https://github.com/seapeak233/AndroidDocViewer.git
-   ```
+### android/settings.gradle
+```gradle
+include ':app'
+include ':docviewer'
+project(':docviewer').projectDir = new File(rootProject.projectDir, 'AndroidDocViewer/docviewer')
+```
 
-2. 在 Android Studio 中打开该项目并构建 AAR：
-   ```bash
-   ./gradlew assembleRelease
-   ```
+### android/app/build.gradle
+```gradle
+dependencies {
+    implementation project(':docviewer')
+    // ... 其他依赖
+}
 
-3. 将生成的 AAR 文件复制到你的项目：
-   ```
-   android/app/libs/AndroidDocViewer.aar
-   ```
+android {
+    defaultConfig {
+        minSdkVersion 26  // AndroidDocViewer 要求
+    }
+}
+```
 
-4. 在 `android/app/build.gradle` 中添加：
-   ```gradle
-   dependencies {
-       implementation files('libs/AndroidDocViewer.aar')
-       // 还需要添加 AndroidDocViewer 的依赖
-       implementation 'androidx.webkit:webkit:1.8.0'
-   }
-   ```
+## 使用方法
 
-### 方案三：使用其他 Office 预览库
+### Flutter 端调用
+```dart
+import 'package:alist/util/alist_plugin.dart';
 
-如果 AndroidDocViewer 不可用，可以考虑：
+// 打开文档预览
+await AlistPlugin.openDocument(localFilePath, documentTitle);
+```
 
-1. **TBS X5 内核**（腾讯浏览服务）
-   - 优点：功能强大，支持多种格式
-   - 缺点：需要收费，体积较大
+### 原生端实现
+```kotlin
+import com.seapeak.docviewer.DocViewerActivity
 
-2. **flutter_power_file_view**
-   - 优点：Flutter 插件，集成简单
-   - 缺点：依赖 dio 4.x（当前项目使用 dio 5.x）
+// 打开文档
+DocViewerActivity.startWithFile(context, filePath, title)
+```
 
-3. **直接使用 WebView + Office Online**
-   - 优点：无需本地渲染
-   - 缺点：需要网络，隐私问题
+## 系统要求
+- Android 8.0 (API 26) 及以上
+- 存储权限（用于读取文档文件）
 
-## 使用方式
-
-一旦 AndroidDocViewer 库集成成功，用户点击 Office 文件（Word/Excel/PPT）时：
-
-1. 自动下载文件到本地（如果未下载）
-2. 显示下载进度
-3. 下载完成后显示"预览文档"按钮
-4. 点击按钮使用 AndroidDocViewer 在应用内预览文档
-
-## 功能特性
-
-- ✅ 支持 Word (.doc, .docx)
-- ✅ 支持 Excel (.xls, .xlsx)
-- ✅ 支持 PowerPoint (.ppt, .pptx)
-- ✅ 支持 PDF
-- ✅ 支持 TXT
-- ✅ 支持 Markdown
-- ✅ 自动文件类型识别
-- ✅ 文件缓存（下载一次，多次预览）
-- ✅ 错误处理和重试机制
-
-## 测试
-
-集成 AndroidDocViewer 后，可以通过以下方式测试：
-
-1. 在文件列表中点击任意 Office 文件
-2. 等待文件下载完成
-3. 点击"预览文档"按钮
-4. 应该能看到文档内容在应用内显示
+## 注意事项
+1. 首次运行时 X5 内核需要初始化，可能需要几秒钟
+2. APK 大小会增加约 50MB（包含 X5 内核）
+3. 大型文档可能需要较长加载时间
+4. 建议在真机上测试，模拟器可能存在兼容性问题
 
 ## 故障排除
 
-如果遇到问题：
+### 文档无法打开
+- 检查文件路径是否正确
+- 确认文件格式是否支持
+- 检查存储权限是否已授予
 
-1. 检查 AndroidDocViewer 是否正确集成
-2. 查看 Logcat 中的错误信息
-3. 确认文件已成功下载到本地
-4. 检查文件路径是否正确
+### X5 内核初始化失败
+- 清除应用数据后重试
+- 确保设备有足够的存储空间
+- 检查网络连接（首次初始化可能需要下载组件）
 
-## 参考资料
+### 编译错误
+- 确保 minSdkVersion >= 26
+- 检查 AndroidDocViewer 模块是否正确引入
+- 运行 `flutter clean` 后重新编译
 
+## 相关文件
+- `lib/screen/office_reader_screen.dart` - Office 预览界面
+- `android/app/src/main/kotlin/com/github/alist/util/DocViewerHelper.kt` - 原生辅助类
+- `lib/util/alist_plugin.dart` - Flutter 插件接口
+- `android/AndroidDocViewer/` - AndroidDocViewer 库源码
+
+## 更新日志
+- v2 (2026-04-06): 优化 Excel Sheet 标签样式，修复 GitHub 依赖配置
+- v1 (初始版本): 集成 AndroidDocViewer 库，支持基本文档预览
+
+## 参考资源
 - [AndroidDocViewer GitHub](https://github.com/seapeak233/AndroidDocViewer)
-- [JitPack 使用说明](https://jitpack.io/)
+- [腾讯 X5 内核文档](https://x5.tencent.com/docs/index.html)
