@@ -250,6 +250,9 @@ class PlayerActivity : AppCompatActivity(), GSYVideoProgressListener {
                 fullPlayer.setOnDeleteClickListener { confirmDelete() }
                 fullPlayer.setOnInfoClickListener { showVideoInfo() }
                 fullPlayer.setOnFavoriteClickListener { toggleFavorite() }
+                
+                // Sync favorite icon state to fullscreen player
+                checkFavoriteStatus()
             }
         }
 
@@ -497,11 +500,25 @@ class PlayerActivity : AppCompatActivity(), GSYVideoProgressListener {
     }
 
     private fun updateFavoriteIcon(isFavorite: Boolean) {
+        // Update normal player favorite button
         val btnFavorite = findViewById<android.widget.ImageView>(R.id.btn_favorite)
         if (isFavorite) {
             btnFavorite.setImageResource(R.drawable.ic_favorite_filled)
         } else {
             btnFavorite.setImageResource(R.drawable.ic_favorite)
+        }
+        
+        // Update fullscreen player favorite button if in fullscreen mode
+        if (gsyVideoPlayer.isIfCurrentIsFullscreen) {
+            val fullscreenPlayer = gsyVideoPlayer.fullWindowPlayer as? AlistClientVideoPlayer
+            fullscreenPlayer?.let { player ->
+                val fullscreenBtnFavorite = player.findViewById<android.widget.ImageView>(R.id.btn_favorite)
+                if (isFavorite) {
+                    fullscreenBtnFavorite?.setImageResource(R.drawable.ic_favorite_filled)
+                } else {
+                    fullscreenBtnFavorite?.setImageResource(R.drawable.ic_favorite)
+                }
+            }
         }
     }
 

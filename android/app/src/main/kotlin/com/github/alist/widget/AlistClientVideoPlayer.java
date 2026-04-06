@@ -323,9 +323,11 @@ public class AlistClientVideoPlayer extends NormalGSYVideoPlayer {
                 videoPlayer.setCenterButtonsVisibility(View.VISIBLE);
             }
             videoPlayer.btnScreenshot.setOnClickListener(v -> videoPlayer.takeScreenshot());
-            // propagate delete listener to fullscreen instance
+            // propagate listeners to fullscreen instance
             videoPlayer.deleteClickListener = this.deleteClickListener;
             videoPlayer.playlistClickListener = this.playlistClickListener;
+            videoPlayer.infoClickListener = this.infoClickListener;
+            videoPlayer.favoriteClickListener = this.favoriteClickListener;
             
             // Re-attach click listeners to the fullscreen buttons
             if (videoPlayer.btnDelete != null && this.deleteClickListener != null) {
@@ -346,6 +348,20 @@ public class AlistClientVideoPlayer extends NormalGSYVideoPlayer {
                                 this.playlistClickListener.onPlaylistClick();
                             }
                         }, 300);
+                    }
+                });
+            }
+            if (videoPlayer.btnInfo != null && this.infoClickListener != null) {
+                videoPlayer.btnInfo.setOnClickListener(v -> {
+                    if (videoPlayer.infoClickListener != null) {
+                        videoPlayer.infoClickListener.onInfoClick();
+                    }
+                });
+            }
+            if (videoPlayer.btnFavorite != null && this.favoriteClickListener != null) {
+                videoPlayer.btnFavorite.setOnClickListener(v -> {
+                    if (videoPlayer.favoriteClickListener != null) {
+                        videoPlayer.favoriteClickListener.onFavoriteClick();
                     }
                 });
             }
