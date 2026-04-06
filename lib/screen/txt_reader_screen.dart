@@ -164,6 +164,9 @@ class TxtReaderScreenController extends GetxController {
 
     try {
       String decoded;
+      bool autoDetected = false;
+      String detectedEncoding = currentEncoding.value;
+      
       switch (currentEncoding.value) {
         case 'UTF-8':
           decoded = utf8.decode(_rawBytes!, allowMalformed: true);
@@ -180,11 +183,88 @@ class TxtReaderScreenController extends GetxController {
         default:
           decoded = utf8.decode(_rawBytes!, allowMalformed: true);
       }
+      
+      // 检测是否有乱码，如果有则自动尝试其他编码
+      if (_hasGarbledText(decoded) && currentEncoding.value == 'UTF-8') {
+        LogUtil.d("检测到乱码，尝试 GBK 编码");
+        decoded = gbk.decode(_rawBytes!);
+        
+        if (!_hasGarbledText(decoded)) {
+          // GBK 解码成功
+          currentEncoding.value = 'GBK';
+          detectedEncoding = 'GBK';
+          autoDetected = true;
+        } else {
+          // 如果 GBK 还是乱码，尝试 Latin1
+          LogUtil.d("GBK 仍有乱码，尝试 Latin1 编码");
+          decoded = latin1.decode(_rawBytes!);
+          if (!_hasGarbledText(decoded)) {
+            currentEncoding.value = 'Latin1';
+            detectedEncoding = 'Latin1';
+            autoDetected = true;
+          } else {
+            // 都不行，还是用 UTF-8
+            decoded = utf8.decode(_rawBytes!, allowMalformed: true);
+          }
+        }
+      }
+      
       content.value = decoded;
+      
+      // 如果自动检测到了编码，显示提示
+      if (autoDetected) {
+        SmartDialog.showToast("已自动切换到 $detectedEncoding 编码");
+      }
     } catch (e) {
       LogUtil.e("Decode error: $e");
       content.value = utf8.decode(_rawBytes!, allowMalformed: true);
     }
+  }
+
+  // 检测文本中是否有乱码字符
+  bool _hasGarbledText(String text) {
+    // 检查前 1000 个字符（避免检查整个大文件）
+    final sample = text.length > 1000 ? text.substring(0, 1000) : text;
+    
+    // 统计可疑字符的数量
+    int suspiciousCount = 0;
+    int totalChars = 0;
+    
+    for (int i = 0; i < sample.length; i++) {
+      final char = sample[i];
+      final code = char.codeUnitAt(0);
+      
+      // 跳过常见的控制字符（换行、制表符等）
+      if (code == 0x0A || code == 0x0D || code == 0x09 || code == 0x20) {
+        continue;
+      }
+      
+      totalChars++;
+      
+      // 检测常见的乱码模式
+      // 1. Unicode 替换字符 (�)
+      if (code == 0xFFFD) {
+        suspiciousCount += 3; // 权重更高
+      }
+      // 2. 控制字符（除了常见的换行、制表符）
+      else if (code < 0x20 || (code >= 0x7F && code < 0xA0)) {
+        suspiciousCount++;
+      }
+      // 3. 私有使用区字符
+      else if ((code >= 0xE000 && code <= 0xF8FF) ||
+               (code >= 0xF0000 && code <= 0xFFFFD) ||
+               (code >= 0x100000 && code <= 0x10FFFD)) {
+        suspiciousCount++;
+      }
+    }
+    
+    // 如果可疑字符超过 5% 或有替换字符，认为是乱码
+    if (totalChars > 0) {
+      final ratio = suspiciousCount / totalChars;
+      return ratio > 0.05 || sample.contains('�');
+    }
+    
+    return false;
   }
 
   void showEncodingDialog() {
