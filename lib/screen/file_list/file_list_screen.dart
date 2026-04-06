@@ -25,6 +25,7 @@ import 'package:alist/screen/file_list/mkdir_dialog.dart';
 import 'package:alist/screen/file_reader_screen.dart';
 import 'package:alist/screen/gallery_screen.dart';
 import 'package:alist/screen/pdf_reader_screen.dart';
+import 'package:alist/screen/txt_reader_screen.dart';
 import 'package:alist/screen/video_player_screen.dart';
 import 'package:alist/util/alist_plugin.dart';
 import 'package:alist/util/constant.dart';
@@ -1480,6 +1481,18 @@ class _FileListScreenState extends State<FileListScreen>
         _previewMarkdown(file);
         break;
       case FileType.txt:
+        var txtItem = TxtItem(
+          name: file.name,
+          remotePath: file.path,
+          sign: file.sign,
+          provider: file.provider,
+          thumb: file.thumb,
+        );
+        Get.toNamed(
+          NamedRouter.txtReader,
+          arguments: {"txtItem": txtItem},
+        );
+        break;
       case FileType.word:
       case FileType.excel:
       case FileType.ppt:

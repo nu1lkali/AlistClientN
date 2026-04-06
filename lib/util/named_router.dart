@@ -55,4 +55,7 @@ class NamedRouter {
 
   // player settings
   static const playerSettings = "/playerSettings";
+
+  // txt reader
+  static const txtReader = "/txtReader";
 }
