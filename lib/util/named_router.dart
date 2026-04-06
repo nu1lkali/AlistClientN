@@ -61,4 +61,7 @@ class NamedRouter {
 
   // office reader
   static const officeReader = "/officeReader";
+
+  // markdown reader
+  static const markdownReader = "/markdownReader";
 }

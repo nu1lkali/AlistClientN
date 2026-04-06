@@ -213,8 +213,16 @@ class OfficeReaderScreenController extends GetxController {
     }
 
     try {
+      LogUtil.d("Opening document: ${localPath.value}");
       // 使用 Method Channel 调用原生文档预览
       await AlistPlugin.openDocument(localPath.value, officeItem.name);
+    } on PlatformException catch (e) {
+      LogUtil.e("Platform exception: ${e.code} - ${e.message}");
+      if (e.code == "ERROR") {
+        SmartDialog.showToast("打开文件失败: ${e.message}");
+      } else {
+        SmartDialog.showToast("打开文件失败: ${e.code}");
+      }
     } catch (e) {
       LogUtil.e("Open file error: $e");
       SmartDialog.showToast("打开文件失败: $e");
