@@ -99,8 +99,9 @@ object FlutterMethods {
             ),
             object : MethodChannel.Result {
                 override fun success(result: Any?) {
-                    // result is true if now favorited, false if unfavorited
-                    callback(result == true)
+                    // result is "true" or "false" string from Flutter
+                    val isFavorite = result == "true" || result == true
+                    callback(isFavorite)
                 }
                 override fun error(p0: String, p1: String?, p2: Any?) {
                     callback(false)
@@ -118,7 +119,9 @@ object FlutterMethods {
             mutableMapOf("path" to video.remotePath),
             object : MethodChannel.Result {
                 override fun success(result: Any?) {
-                    callback(result == true)
+                    // result is "true" or "false" string from Flutter
+                    val isFavorite = result == "true" || result == true
+                    callback(isFavorite)
                 }
                 override fun error(p0: String, p1: String?, p2: Any?) {
                     callback(false)
