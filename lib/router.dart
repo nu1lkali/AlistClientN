@@ -10,6 +10,7 @@ import 'package:alist/screen/file_search_screen.dart';
 import 'package:alist/screen/gallery_screen.dart';
 import 'package:alist/screen/home_screen.dart';
 import 'package:alist/screen/login_screen.dart';
+import 'package:alist/screen/office_reader_screen.dart';
 import 'package:alist/screen/pdf_reader_screen.dart';
 import 'package:alist/screen/player_settings_screen.dart';
 import 'package:alist/screen/settings_screen.dart';
@@ -48,5 +49,6 @@ class AlistRouter {
     GetPage(name: NamedRouter.cacheManager, page: () => const CacheManagerScreen()),
     GetPage(name: NamedRouter.playerSettings, page: () => const PlayerSettingsScreen()),
     GetPage(name: NamedRouter.txtReader, page: () => TxtReaderScreen()),
+    GetPage(name: NamedRouter.officeReader, page: () => OfficeReaderScreen()),
   ];
 }

@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:gravity="center"
+    tools:context=".MainActivity">
+
+    <androidx.appcompat.widget.AppCompatButton
+        android:id="@+id/btn_excel"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="excel"/>
+
+    <androidx.appcompat.widget.AppCompatButton
+        android:id="@+id/btn_word"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="word"/>
+
+    <androidx.appcompat.widget.AppCompatButton
+        android:id="@+id/btn_pdf"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="pdf"/>
+
+    <androidx.appcompat.widget.AppCompatButton
+        android:id="@+id/btn_ppt"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="ppt"/>
+
+    <androidx.appcompat.widget.AppCompatButton
+        android:id="@+id/btn_txt"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="txt"/>
+
+    <androidx.appcompat.widget.AppCompatButton
+        android:id="@+id/btn_markdown"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="markdown"/>
+
+    <androidx.appcompat.widget.AppCompatButton
+        android:id="@+id/btn_select_file"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="20dp"
+        android:text="选择文件"
+        android:background="@android:color/holo_blue_light"
+        android:textColor="@android:color/white"/>
+</LinearLayout>

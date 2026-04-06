@@ -58,7 +58,7 @@ android {
         applicationId "com.github.alist.client"
         // You can update the following values to match your application needs.
         // For more information, see: https://docs.flutter.dev/deployment/android#reviewing-the-gradle-build-configuration.
-        minSdkVersion 21//flutter.minSdkVersion
+        minSdkVersion 26  // 提升到 26 以支持 AndroidDocViewer
         targetSdkVersion flutter.targetSdkVersion
         versionCode flutterVersionCode.toInteger()
         versionName flutterVersionName
@@ -118,4 +118,6 @@ dependencies {
 //    implementation 'com.github.CarGuo.GSYVideoPlayer:gsyVideoPlayer-arm64:v8.4.0-release-jitpack'
 //    implementation 'com.github.CarGuo.GSYVideoPlayer:gsyVideoPlayer-armv7a:v8.4.0-release-jitpack'
     implementation 'com.github.CarGuo.GSYVideoPlayer:gsyVideoPlayer-ex_so:v8.4.0-release-jitpack'
+    // AndroidDocViewer for Office file preview - 本地模块
+    implementation project(':docviewer')
 }

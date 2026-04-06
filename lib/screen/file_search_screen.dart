@@ -10,6 +10,7 @@ import 'package:alist/net/dio_utils.dart';
 import 'package:alist/screen/audio_player_screen.dart';
 import 'package:alist/screen/file_reader_screen.dart';
 import 'package:alist/screen/gallery_screen.dart';
+import 'package:alist/screen/office_reader_screen.dart';
 import 'package:alist/screen/pdf_reader_screen.dart';
 import 'package:alist/screen/txt_reader_screen.dart';
 import 'package:alist/screen/video_player_screen.dart';
@@ -533,6 +534,8 @@ class FileSearchController extends GetxController {
       case FileType.word:
       case FileType.excel:
       case FileType.ppt:
+        _gotoOfficeReaderScreen(path, file);
+        break;
       case FileType.code:
       case FileType.apk:
       case FileType.compress:
@@ -789,6 +792,35 @@ class FileSearchController extends GetxController {
     Get.toNamed(
       NamedRouter.txtReader,
       arguments: {"txtItem": txtItem},
+    );
+  }
+
+  void _gotoOfficeReaderScreen(String path, FileSearchRespContent searchFile) async {
+    SmartDialog.showLoading();
+    var fileType = FileUtils.getFileType(false, searchFile.name ?? "");
+    var files = await _loadFilesPrepare(
+        path.substringBeforeLast("/")!, path, fileType);
+    SmartDialog.dismiss();
+    if (files == null) {
+      return;
+    }
+
+    var index = files.lastIndexWhere((element) => element.path == path);
+    if (index == -1) {
+      index = 0;
+    }
+    var file = files[index];
+    _fileViewingRecord(file);
+    var officeItem = OfficeItem(
+      name: file.name,
+      remotePath: file.path,
+      sign: file.sign,
+      provider: file.provider,
+      thumb: file.thumb,
+    );
+    Get.toNamed(
+      NamedRouter.officeReader,
+      arguments: {"officeItem": officeItem},
     );
   }
 

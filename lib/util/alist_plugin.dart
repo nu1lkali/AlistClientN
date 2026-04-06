@@ -92,4 +92,17 @@ class AlistPlugin {
     });
     return result == true;
   }
+
+  // Open document with AndroidDocViewer (Android only)
+  static Future<bool> openDocument(String filePath, String title) async {
+    try {
+      var result = await _methodChannel.invokeMethod("openDocument", {
+        "filePath": filePath,
+        "title": title,
+      });
+      return result == true;
+    } catch (e) {
+      return false;
+    }
+  }
 }

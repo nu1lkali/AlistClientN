@@ -24,6 +24,7 @@ import 'package:alist/screen/file_list/file_rename_dialog.dart';
 import 'package:alist/screen/file_list/mkdir_dialog.dart';
 import 'package:alist/screen/file_reader_screen.dart';
 import 'package:alist/screen/gallery_screen.dart';
+import 'package:alist/screen/office_reader_screen.dart';
 import 'package:alist/screen/pdf_reader_screen.dart';
 import 'package:alist/screen/txt_reader_screen.dart';
 import 'package:alist/screen/video_player_screen.dart';
@@ -1496,6 +1497,18 @@ class _FileListScreenState extends State<FileListScreen>
       case FileType.word:
       case FileType.excel:
       case FileType.ppt:
+        var officeItem = OfficeItem(
+          name: file.name,
+          remotePath: file.path,
+          sign: file.sign,
+          provider: file.provider,
+          thumb: file.thumb,
+        );
+        Get.toNamed(
+          NamedRouter.officeReader,
+          arguments: {"officeItem": officeItem},
+        );
+        break;
       case FileType.code:
       case FileType.apk:
       case FileType.compress:

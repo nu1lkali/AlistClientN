@@ -1,0 +1,3 @@
+[submodule "android/AndroidDocViewer"]
+	path = android/AndroidDocViewer
+	url = https://github.com/seapeak233/AndroidDocViewer.git

@@ -16,6 +16,7 @@ import android.webkit.MimeTypeMap
 import androidx.annotation.RequiresApi
 import com.github.alist.DownloadingNotificationService
 import com.github.alist.activity.PlayerActivity
+import com.github.alist.util.DocViewerHelper
 import com.github.alist.utils.FlutterMethods
 import com.github.alist.utils.FileProviderUtils
 import com.github.alist.utils.GsonUtils
@@ -137,6 +138,10 @@ class AlistPlugin(private val activity: Activity, private val scope: CoroutineSc
                 } catch (e: ActivityNotFoundException) {
                     result.success(false)
                 }
+            }
+
+            "openDocument" -> {
+                DocViewerHelper.openDocument(activity, call, result)
             }
 
             else -> {

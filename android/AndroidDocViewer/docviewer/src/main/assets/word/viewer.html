@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <meta name="viewport" content="width=device-width, user-scalable=yes">
+    <title>Excel Online Preview</title>
+    <script src="file:///android_asset/word/jszip.min.js"></script>
+    <script src="file:///android_asset/word/docx-preview.min.js"></script>
+</head>
+
+<body style="padding: 0;margin:0;">
+    <div id="container"></div>
+    <script>
+        const params = new URLSearchParams(window.location.search);
+        const fileUrl = params.get("file");
+
+        var xhr = new XMLHttpRequest
+        xhr.onload = function () {
+            docx.renderAsync(xhr.response, document.getElementById("container"), null, {
+                inWrapper: false
+            }).then(x => console.log("docx: finished"));
+        }
+        xhr.onerror = function () {
+            reject(new TypeError('Local request failed'))
+        }
+        xhr.open('GET', fileUrl)
+        xhr.responseType = "blob";
+        xhr.send(null)
+    </script>
+</body>
