@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:math';
 
 import 'package:alist/database/alist_database_controller.dart';
 import 'package:alist/database/table/favorite.dart';
@@ -81,6 +82,18 @@ class _FavoriteScreenState extends State<FavoriteScreen>
     super.build(context);
     return AlistScaffold(
       appbarTitle: Text(Intl.screenName_favorite.tr),
+      appbarActions: [
+        IconButton(
+          icon: const Icon(Icons.image_outlined),
+          tooltip: '随机打开图片',
+          onPressed: _randomOpenImage,
+        ),
+        IconButton(
+          icon: const Icon(Icons.play_circle_outline),
+          tooltip: '随机播放视频',
+          onPressed: _randomPlayVideo,
+        ),
+      ],
       body: Obx(
         () => !_loading.value && _list.isEmpty
             ? Center(
@@ -666,5 +679,33 @@ class _FavoriteScreenState extends State<FavoriteScreen>
       }
     }
     _databaseController.favoriteDao.updateRecords(needUpdateRecords);
+  }
+
+  // 随机打开一个收藏的图片
+  void _randomOpenImage() {
+    final images = _list.where((f) => !f.isDir && FileUtils.getFileType(f.isDir, f.name) == FileType.image).toList();
+    
+    if (images.isEmpty) {
+      SmartDialog.showToast('收藏夹中没有图片');
+      return;
+    }
+    
+    final random = Random();
+    final randomImage = images[random.nextInt(images.length)];
+    _gotoGalleryScreen(randomImage);
+  }
+  
+  // 随机播放一个收藏的视频
+  void _randomPlayVideo() {
+    final videos = _list.where((f) => !f.isDir && FileUtils.getFileType(f.isDir, f.name) == FileType.video).toList();
+    
+    if (videos.isEmpty) {
+      SmartDialog.showToast('收藏夹中没有视频');
+      return;
+    }
+    
+    final random = Random();
+    final randomVideo = videos[random.nextInt(videos.length)];
+    _gotoVideoPlayer(context, randomVideo, false);
   }
 }

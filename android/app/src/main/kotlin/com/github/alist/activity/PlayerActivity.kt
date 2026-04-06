@@ -249,6 +249,7 @@ class PlayerActivity : AppCompatActivity(), GSYVideoProgressListener {
                 }
                 fullPlayer.setOnDeleteClickListener { confirmDelete() }
                 fullPlayer.setOnInfoClickListener { showVideoInfo() }
+                fullPlayer.setOnFavoriteClickListener { toggleFavorite() }
             }
         }
 
