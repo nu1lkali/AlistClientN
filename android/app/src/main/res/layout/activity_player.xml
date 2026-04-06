@@ -21,61 +21,110 @@
     <!-- playlist drawer: slides in from right, hidden by default -->
     <FrameLayout
         android:id="@+id/playlist_drawer"
-        android:layout_width="260dp"
+        android:layout_width="280dp"
         android:layout_height="match_parent"
         android:layout_gravity="end"
-        android:background="#CC000000"
+        android:background="#E6000000"
         android:visibility="gone"
-        android:translationX="260dp">
+        android:translationX="280dp"
+        android:elevation="8dp">
 
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="match_parent"
             android:orientation="vertical">
 
+            <!-- 标题栏 -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="56dp"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:paddingStart="20dp"
+                android:paddingEnd="20dp"
+                android:background="#1AFFFFFF">
+
+                <TextView
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="播放列表"
+                    android:textColor="#FFFFFF"
+                    android:textSize="17sp"
+                    android:fontFamily="sans-serif-medium" />
+
+            </LinearLayout>
+
+            <!-- 分隔线 -->
+            <View
+                android:layout_width="match_parent"
+                android:layout_height="0.5dp"
+                android:background="#1AFFFFFF" />
+
             <androidx.recyclerview.widget.RecyclerView
                 android:id="@+id/rv_playlist"
                 android:layout_width="match_parent"
                 android:layout_height="0dp"
                 android:layout_weight="1"
-                android:paddingTop="48dp"
-                android:paddingBottom="8dp"
-                android:clipToPadding="false" />
+                android:paddingTop="4dp"
+                android:paddingBottom="4dp"
+                android:clipToPadding="false"
+                android:scrollbars="vertical"
+                android:fadeScrollbars="true" />
+
+            <!-- 分隔线 -->
+            <View
+                android:layout_width="match_parent"
+                android:layout_height="0.5dp"
+                android:background="#1AFFFFFF" />
 
             <!-- Sort buttons at bottom -->
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:orientation="horizontal"
-                android:padding="8dp"
-                android:background="#DD000000">
+                android:paddingTop="12dp"
+                android:paddingBottom="12dp"
+                android:paddingStart="12dp"
+                android:paddingEnd="12dp"
+                android:background="#1A000000">
 
                 <ImageButton
                     android:id="@+id/btn_sort_by_name"
                     android:layout_width="0dp"
-                    android:layout_height="40dp"
+                    android:layout_height="44dp"
                     android:layout_weight="1"
+                    android:layout_marginEnd="4dp"
                     android:background="?attr/selectableItemBackgroundBorderless"
                     android:src="@drawable/ic_sort_by_name"
-                    android:contentDescription="按文件名排序" />
+                    android:contentDescription="按文件名排序"
+                    android:scaleType="centerInside"
+                    android:padding="8dp" />
 
                 <ImageButton
                     android:id="@+id/btn_sort_by_duration"
                     android:layout_width="0dp"
-                    android:layout_height="40dp"
+                    android:layout_height="44dp"
                     android:layout_weight="1"
+                    android:layout_marginStart="4dp"
+                    android:layout_marginEnd="4dp"
                     android:background="?attr/selectableItemBackgroundBorderless"
                     android:src="@drawable/ic_sort_by_duration"
-                    android:contentDescription="按时长排序" />
+                    android:contentDescription="按时长排序"
+                    android:scaleType="centerInside"
+                    android:padding="8dp" />
 
                 <ImageButton
                     android:id="@+id/btn_shuffle"
                     android:layout_width="0dp"
-                    android:layout_height="40dp"
+                    android:layout_height="44dp"
                     android:layout_weight="1"
+                    android:layout_marginStart="4dp"
                     android:background="?attr/selectableItemBackgroundBorderless"
                     android:src="@drawable/ic_shuffle"
-                    android:contentDescription="打乱顺序" />
+                    android:contentDescription="打乱顺序"
+                    android:scaleType="centerInside"
+                    android:padding="8dp" />
 
             </LinearLayout>
 

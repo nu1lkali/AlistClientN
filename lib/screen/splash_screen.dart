@@ -15,7 +15,9 @@ import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:just_audio_background/just_audio_background.dart';
+import 'package:permission_handler/permission_handler.dart';
 import 'package:sp_util/sp_util.dart';
+import 'dart:io';
 
 class SplashScreen extends StatefulWidget {
   const SplashScreen({super.key});
@@ -39,6 +41,10 @@ class _SplashScreenState extends State<SplashScreen> {
     await _databaseController.init();
     FilePasswordHelper().setFilePasswordDao(_databaseController.filePasswordDao);
     await SpUtil.getInstance();
+    
+    // 申请存储权限
+    await _requestStoragePermission();
+    
     await JustAudioBackground.init(
       androidNotificationChannelId: 'com.github.alist.client.audio',
       androidNotificationChannelName: 'Audio playback',
@@ -66,6 +72,30 @@ class _SplashScreenState extends State<SplashScreen> {
       Get.offNamed(NamedRouter.login);
     } else {
       Get.offNamed(NamedRouter.home);
+    }
+  }
+
+  Future<void> _requestStoragePermission() async {
+    if (!Platform.isAndroid) return;
+    
+    try {
+      // Android 11+ (API 30+) 需要 MANAGE_EXTERNAL_STORAGE 权限
+      if (await AlistPlugin.isScopedStorage()) {
+        var status = await Permission.manageExternalStorage.status;
+        if (!status.isGranted) {
+          Log.d("Requesting MANAGE_EXTERNAL_STORAGE permission");
+          await Permission.manageExternalStorage.request();
+        }
+      } else {
+        // Android 10 及以下使用普通存储权限
+        var status = await Permission.storage.status;
+        if (!status.isGranted) {
+          Log.d("Requesting STORAGE permission");
+          await Permission.storage.request();
+        }
+      }
+    } catch (e) {
+      Log.e("Error requesting storage permission: $e");
     }
   }
 

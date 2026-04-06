@@ -134,6 +134,14 @@
             android:src="@drawable/ic_playlist" />
 
         <ImageView
+            android:id="@+id/btn_favorite"
+            android:layout_width="48dp"
+            android:layout_height="48dp"
+            android:padding="12dp"
+            android:scaleType="centerInside"
+            android:src="@drawable/ic_favorite" />
+
+        <ImageView
             android:id="@+id/btn_info"
             android:layout_width="48dp"
             android:layout_height="48dp"

@@ -4,6 +4,7 @@ import 'dart:math';
 import 'dart:ui' as ui;
 
 import 'package:alist/database/alist_database_controller.dart';
+import 'package:alist/database/table/favorite.dart';
 import 'package:alist/l10n/intl_keys.dart';
 import 'package:alist/util/alist_plugin.dart';
 import 'package:alist/util/file_utils.dart';
@@ -124,6 +125,16 @@ class GalleryScreen extends StatelessWidget {
           tooltip: '旋转',
           onPressed: controller.rotate,
         ),
+        Obx(() => IconButton(
+              icon: Icon(
+                controller.isFavorite.value
+                    ? Icons.favorite_rounded
+                    : Icons.favorite_border_rounded,
+                color: controller.isFavorite.value ? Colors.red : Colors.white,
+              ),
+              tooltip: controller.isFavorite.value ? '取消收藏' : '收藏',
+              onPressed: controller.toggleFavorite,
+            )),
         _menuMoreIcon(controller),
       ],
     );
@@ -194,6 +205,9 @@ class GalleryController extends GetxController {
   final slideshowActive = false.obs;
   Timer? _slideshowTimer;
   static const slideshowInterval = Duration(seconds: 3);
+  final isFavorite = false.obs;
+  final AlistDatabaseController _databaseController = Get.find();
+  final UserController _userController = Get.find();
 
   GalleryController(
       {required List<String>? urls, required this.files, required int index})
@@ -215,6 +229,10 @@ class GalleryController extends GetxController {
     } else {
       menuWidth = 120;
     }
+    _checkFavoriteStatus();
+    
+    // 监听页面切换，更新收藏状态
+    ever(index, (_) => _checkFavoriteStatus());
   }
 
   Future<void> _initUrls(List<PhotoItem> files) async {
@@ -320,6 +338,56 @@ class GalleryController extends GetxController {
     slideshowActive.value = false;
     _slideshowTimer?.cancel();
     _slideshowTimer = null;
+  }
+
+  Future<void> _checkFavoriteStatus() async {
+    if (files == null || files!.isEmpty || index.value >= files!.length) {
+      isFavorite.value = false;
+      return;
+    }
+    
+    final file = files![index.value];
+    final user = _userController.user.value;
+    final favorite = await _databaseController.favoriteDao
+        .findByPath(user.serverUrl, user.username, file.remotePath);
+    isFavorite.value = favorite != null;
+  }
+
+  Future<void> toggleFavorite() async {
+    if (files == null || files!.isEmpty || index.value >= files!.length) {
+      return;
+    }
+    
+    final file = files![index.value];
+    final user = _userController.user.value;
+    
+    if (isFavorite.value) {
+      // 取消收藏
+      await _databaseController.favoriteDao
+          .deleteByPath(user.serverUrl, user.username, file.remotePath);
+      isFavorite.value = false;
+      SmartDialog.showToast('已取消收藏');
+    } else {
+      // 添加收藏
+      await _databaseController.favoriteDao.insertRecord(
+        Favorite(
+          isDir: false,
+          serverUrl: user.serverUrl,
+          userId: user.username,
+          remotePath: file.remotePath,
+          path: file.remotePath,
+          name: file.name,
+          size: file.size ?? 0,
+          sign: null,
+          thumb: null,
+          modified: 0,
+          provider: "",
+          createTime: DateTime.now().millisecondsSinceEpoch,
+        ),
+      );
+      isFavorite.value = true;
+      SmartDialog.showToast('已添加到收藏');
+    }
   }
 
   @override

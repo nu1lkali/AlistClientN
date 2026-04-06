@@ -3,26 +3,33 @@
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
     android:orientation="horizontal"
-    android:padding="12dp"
-    android:gravity="center_vertical">
+    android:paddingStart="16dp"
+    android:paddingEnd="16dp"
+    android:paddingTop="14dp"
+    android:paddingBottom="14dp"
+    android:gravity="center_vertical"
+    android:background="?attr/selectableItemBackground">
 
     <TextView
         android:id="@+id/tv_index"
-        android:layout_width="24dp"
-        android:layout_height="wrap_content"
-        android:textColor="#99FFFFFF"
-        android:textSize="12sp"
-        android:gravity="center" />
+        android:layout_width="32dp"
+        android:layout_height="32dp"
+        android:textColor="#B3FFFFFF"
+        android:textSize="14sp"
+        android:gravity="center"
+        android:fontFamily="sans-serif-medium" />
 
     <TextView
         android:id="@+id/tv_name"
         android:layout_width="0dp"
         android:layout_height="wrap_content"
         android:layout_weight="1"
-        android:layout_marginStart="8dp"
+        android:layout_marginStart="12dp"
         android:textColor="#FFFFFF"
-        android:textSize="13sp"
+        android:textSize="15sp"
+        android:lineSpacingExtra="2dp"
         android:maxLines="2"
-        android:ellipsize="end" />
+        android:ellipsize="end"
+        android:fontFamily="sans-serif" />
 
 </LinearLayout>

@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:alist/database/alist_database_controller.dart';
+import 'package:alist/database/table/favorite.dart';
 import 'package:alist/database/table/file_viewing_record.dart';
 import 'package:alist/database/table/video_viewing_record.dart';
 import 'package:alist/entity/file_remove_req.dart';
@@ -158,6 +159,64 @@ class MethodCallHandler {
           createTime: DateTime.now().millisecondsSinceEpoch,
         ));
         return "";
+
+      case "toggleFavorite":
+        String path = call.arguments["path"];
+        String name = call.arguments["name"];
+        String size = call.arguments["size"];
+        String? provider = call.arguments["provider"];
+
+        final AlistDatabaseController databaseController = Get.find();
+        final UserController userController = Get.find();
+        var user = userController.user.value;
+        var favoriteDao = databaseController.favoriteDao;
+        
+        // Check if already favorited
+        var existing = await favoriteDao.findByPath(
+          user.serverUrl, 
+          user.username, 
+          path
+        );
+        
+        if (existing != null) {
+          // Remove from favorites
+          await favoriteDao.deleteByPath(user.serverUrl, user.username, path);
+          return "false"; // Return false to indicate unfavorited
+        } else {
+          // Add to favorites
+          await favoriteDao.insertRecord(Favorite(
+            isDir: false,
+            serverUrl: user.serverUrl,
+            userId: user.username,
+            remotePath: path,
+            path: path,
+            name: name,
+            size: int.tryParse(size) ?? 0,
+            sign: null,
+            thumb: null,
+            modified: 0,
+            provider: provider ?? "",
+            createTime: DateTime.now().millisecondsSinceEpoch,
+          ));
+          return "true"; // Return true to indicate favorited
+        }
+
+      case "checkFavoriteStatus":
+        String path = call.arguments["path"];
+        
+        final AlistDatabaseController databaseController = Get.find();
+        final UserController userController = Get.find();
+        var user = userController.user.value;
+        var favoriteDao = databaseController.favoriteDao;
+        
+        var existing = await favoriteDao.findByPath(
+          user.serverUrl, 
+          user.username, 
+          path
+        );
+        
+        return existing != null ? "true" : "false";
+
       default:
         throw PlatformException(
             code: 'Method not implemented',

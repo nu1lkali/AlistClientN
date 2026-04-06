@@ -87,4 +87,46 @@ object FlutterMethods {
             )
         )
     }
+
+    fun toggleFavorite(video: VideoItem, callback: (Boolean) -> Unit) {
+        channel.invokeMethod(
+            "toggleFavorite",
+            mutableMapOf(
+                "path" to video.remotePath,
+                "name" to video.name,
+                "size" to video.size,
+                "provider" to video.provider
+            ),
+            object : MethodChannel.Result {
+                override fun success(result: Any?) {
+                    // result is true if now favorited, false if unfavorited
+                    callback(result == true)
+                }
+                override fun error(p0: String, p1: String?, p2: Any?) {
+                    callback(false)
+                }
+                override fun notImplemented() {
+                    callback(false)
+                }
+            }
+        )
+    }
+
+    fun checkFavoriteStatus(video: VideoItem, callback: (Boolean) -> Unit) {
+        channel.invokeMethod(
+            "checkFavoriteStatus",
+            mutableMapOf("path" to video.remotePath),
+            object : MethodChannel.Result {
+                override fun success(result: Any?) {
+                    callback(result == true)
+                }
+                override fun error(p0: String, p1: String?, p2: Any?) {
+                    callback(false)
+                }
+                override fun notImplemented() {
+                    callback(false)
+                }
+            }
+        )
+    }
 }

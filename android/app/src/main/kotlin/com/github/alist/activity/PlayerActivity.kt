@@ -165,6 +165,7 @@ class PlayerActivity : AppCompatActivity(), GSYVideoProgressListener {
         gsyVideoPlayer.setOnPlaylistClickListener { togglePlaylist() }
         gsyVideoPlayer.setOnDeleteClickListener { confirmDelete() }
         gsyVideoPlayer.setOnInfoClickListener { showVideoInfo() }
+        gsyVideoPlayer.setOnFavoriteClickListener { toggleFavorite() }
 
         val gsyVideoOption = GSYVideoOptionBuilder()
         gsyVideoOption
@@ -323,6 +324,9 @@ class PlayerActivity : AppCompatActivity(), GSYVideoProgressListener {
             playerWrapper.btnNext.alpha = 1f
             currentPlayer.findViewById<View>(R.id.btn_next).alpha = 1f
         }
+        
+        // 检查收藏状态并更新图标
+        checkFavoriteStatus()
     }
 
     override fun onPause() {
@@ -466,6 +470,40 @@ class PlayerActivity : AppCompatActivity(), GSYVideoProgressListener {
             .show()
     }
 
+    private fun toggleFavorite() {
+        if (videos.isEmpty()) return
+        val video = videos[index]
+        
+        // 调用Flutter方法切换收藏状态
+        FlutterMethods.toggleFavorite(video, fun(isFavorite: Boolean) {
+            runOnUiThread {
+                updateFavoriteIcon(isFavorite)
+                val message = if (isFavorite) "已添加到收藏" else "已取消收藏"
+                SmartToast.show(this@PlayerActivity, message)
+            }
+        })
+    }
+
+    private fun checkFavoriteStatus() {
+        if (videos.isEmpty()) return
+        val video = videos[index]
+        
+        FlutterMethods.checkFavoriteStatus(video, fun(isFavorite: Boolean) {
+            runOnUiThread {
+                updateFavoriteIcon(isFavorite)
+            }
+        })
+    }
+
+    private fun updateFavoriteIcon(isFavorite: Boolean) {
+        val btnFavorite = findViewById<android.widget.ImageView>(R.id.btn_favorite)
+        if (isFavorite) {
+            btnFavorite.setImageResource(R.drawable.ic_favorite_filled)
+        } else {
+            btnFavorite.setImageResource(R.drawable.ic_favorite)
+        }
+    }
+
     private object SmartToast {
         fun show(context: android.content.Context, msg: String) {
             android.widget.Toast.makeText(context, msg, android.widget.Toast.LENGTH_SHORT).show()
@@ -473,7 +511,7 @@ class PlayerActivity : AppCompatActivity(), GSYVideoProgressListener {
     }
 
     private fun togglePlaylist() {
-        val drawerWidth = resources.displayMetrics.density * 260
+        val drawerWidth = resources.displayMetrics.density * 280
         if (isPlaylistVisible) {
             playlistScrim.visibility = View.GONE
             ObjectAnimator.ofFloat(playlistDrawer, "translationX", 0f, drawerWidth).apply {
@@ -641,11 +679,24 @@ class PlaylistAdapter(
 
     override fun onBindViewHolder(holder: VH, position: Int) {
         val video = videos[position]
-        holder.tvIndex.text = "${position + 1}"
-        holder.tvName.text = video.name
         val isPlaying = position == currentIndex
-        holder.tvName.alpha = if (isPlaying) 1f else 0.7f
+        
+        // 序号样式
+        holder.tvIndex.text = "${position + 1}"
+        holder.tvIndex.alpha = if (isPlaying) 1f else 0.6f
+        
+        // 文件名样式
+        holder.tvName.text = video.name
+        holder.tvName.alpha = if (isPlaying) 1f else 0.75f
         holder.tvName.setTypeface(null, if (isPlaying) android.graphics.Typeface.BOLD else android.graphics.Typeface.NORMAL)
+        
+        // 当前播放项添加微妙的背景色
+        if (isPlaying) {
+            holder.itemView.setBackgroundColor(0x1AFFFFFF) // 10% 白色
+        } else {
+            holder.itemView.setBackgroundColor(0x00000000) // 透明
+        }
+        
         holder.itemView.setOnClickListener { onItemClick(position) }
     }
 
