@@ -2012,7 +2012,12 @@ class _FileListScreenState extends State<FileListScreen>
     DioUtils.instance.requestNetwork<String?>(Method.post, "fs/remove",
         params: req.toJson(), onSuccess: (data) {
       SmartDialog.dismiss();
-      _refreshController.requestRefresh();
+      // 直接从列表中移除，不刷新整个页面
+      setState(() {
+        _files.removeWhere((f) => f.name == file.name);
+        _filteredFiles.removeWhere((f) => f.name == file.name);
+      });
+      SmartDialog.showToast("删除成功");
     }, onError: (code, msg) {
       SmartDialog.showToast(msg);
       SmartDialog.dismiss();
@@ -2107,11 +2112,14 @@ class _FileListScreenState extends State<FileListScreen>
     DioUtils.instance.requestNetwork<String?>(Method.post, "fs/remove",
         params: req.toJson(), onSuccess: (_) {
       SmartDialog.dismiss();
+      // 直接从列表中移除已删除的项，不刷新整个页面
       setState(() {
+        _files.removeWhere((f) => names.contains(f.name));
+        _filteredFiles.removeWhere((f) => names.contains(f.name));
         _isMultiSelectMode = false;
         _selectedIndices.clear();
       });
-      _refreshController.requestRefresh();
+      SmartDialog.showToast("删除成功");
     }, onError: (code, msg) {
       SmartDialog.showToast(msg);
       SmartDialog.dismiss();
