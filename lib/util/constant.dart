@@ -7,7 +7,7 @@ class AlistConstant {
   static bool isDriverTest = false;
   static bool isUnitTest = false;
 
-  static const String appName = "AList Client";
+  static const String appName = "ALClientN";
   static const String data = 'data';
   static const String message = 'message';
   static const String code = 'code';

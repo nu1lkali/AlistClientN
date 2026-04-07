@@ -163,7 +163,7 @@ class MyApp extends StatelessWidget {
         builder: _routerBuilder,
         navigatorObservers: [FlutterSmartDialog.observer],
         defaultTransition: Transition.cupertino,
-        title: "ALClient",
+        title: "ALClientN",
         theme: ThemeController._buildLight(seed),
         darkTheme: ThemeController._buildDark(seed),
       );

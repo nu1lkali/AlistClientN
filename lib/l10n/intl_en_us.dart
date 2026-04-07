@@ -1,5 +1,5 @@
 const translationsEnUS = {
-  "appName": "ALClient",
+  "appName": "ALClientN",
   "screenName_login": "Sign in",
   "screenName_fileListRoot": "Root",
   "screenName_settings": "Settings",

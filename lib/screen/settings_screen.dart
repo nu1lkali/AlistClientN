@@ -286,30 +286,73 @@ class _SettingsContainerState extends State<_SettingsContainer>
   void _showSlideshowIntervalDialog(BuildContext context) {
     final options = [1, 2, 3, 5, 8, 10, 15, 20, 30];
     final current = SpUtil.getInt(AlistConstant.slideshowIntervalSeconds, defValue: 3) ?? 3;
+    final customController = TextEditingController(
+      text: options.contains(current) ? '' : '$current',
+    );
+
     showDialog(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('幻灯片间隔时间'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: options.map((s) => RadioListTile<int>(
-            title: Text('$s 秒'),
-            value: s,
-            groupValue: current,
-            onChanged: (v) {
-              if (v != null) {
-                SpUtil.putInt(AlistConstant.slideshowIntervalSeconds, v);
-                Navigator.pop(ctx);
-              }
-            },
-          )).toList(),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('取消'),
-          ),
-        ],
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) {
+          int selected = current;
+          return AlertDialog(
+            title: const Text('幻灯片间隔时间'),
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  ...options.map((s) => RadioListTile<int>(
+                    dense: true,
+                    title: Text('$s 秒'),
+                    value: s,
+                    groupValue: selected,
+                    onChanged: (v) {
+                      if (v != null) {
+                        SpUtil.putInt(AlistConstant.slideshowIntervalSeconds, v);
+                        Navigator.pop(ctx);
+                      }
+                    },
+                  )),
+                  const Divider(),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 4),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: TextField(
+                            controller: customController,
+                            keyboardType: TextInputType.number,
+                            decoration: const InputDecoration(
+                              labelText: '自定义（秒）',
+                              hintText: '1 ~ 3600',
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        TextButton(
+                          onPressed: () {
+                            final v = int.tryParse(customController.text.trim());
+                            if (v != null && v >= 1 && v <= 3600) {
+                              SpUtil.putInt(AlistConstant.slideshowIntervalSeconds, v);
+                              Navigator.pop(ctx);
+                            }
+                          },
+                          child: const Text('确定'),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: const Text('取消'),
+              ),
+            ],
+          );
+        },
       ),
     );
   }

@@ -30,7 +30,7 @@
     <application
         android:name="com.github.alist.App"
         android:icon="@mipmap/ic_launcher"
-        android:label="ALClient"
+        android:label="ALClientN"
         android:usesCleartextTraffic="true"
         tools:replace="android:label">
         <activity
