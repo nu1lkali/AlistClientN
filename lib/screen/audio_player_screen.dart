@@ -363,9 +363,8 @@ class AudioPlayerScreenController extends GetxController {
       children: sources,
     );
     await _audioPlayer.setAudioSource(_playList, initialIndex: _index);
-    // 恢复上次播放进度
+    // 恢复上次播放进度（内部会调用 play）
     await _restoreProgress(_index);
-    _audioPlayer.play();
   }
 
   Future<AudioSource> _audioToUri(String uri, AudioItem audio) async {
@@ -529,15 +528,14 @@ class AudioPlayerScreenController extends GetxController {
     if (record != null &&
         record.videoCurrentPosition > 0 &&
         record.videoDuration > 0) {
-      final progress =
-          record.videoCurrentPosition / record.videoDuration;
-      // 进度超过 98% 视为播完，从头开始
+      final progress = record.videoCurrentPosition / record.videoDuration;
       if (progress < 0.98) {
         await _audioPlayer.seek(
             Duration(milliseconds: record.videoCurrentPosition),
             index: index);
       }
     }
+    _audioPlayer.play();
   }
 
   void _changePlayMode() {
