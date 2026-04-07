@@ -7,6 +7,7 @@ import 'package:alist/database/alist_database_controller.dart';
 import 'package:alist/database/table/favorite.dart';
 import 'package:alist/l10n/intl_keys.dart';
 import 'package:alist/util/alist_plugin.dart';
+import 'package:alist/util/constant.dart';
 import 'package:alist/util/file_utils.dart';
 import 'package:alist/util/string_utils.dart';
 import 'package:alist/util/user_controller.dart';
@@ -204,7 +205,11 @@ class GalleryController extends GetxController {
   final rotation = 0.obs; // 0, 90, 180, 270
   final slideshowActive = false.obs;
   Timer? _slideshowTimer;
-  static const slideshowInterval = Duration(seconds: 3);
+
+  Duration get slideshowInterval {
+    final seconds = SpUtil.getInt(AlistConstant.slideshowIntervalSeconds, defValue: 3) ?? 3;
+    return Duration(seconds: seconds.clamp(1, 60));
+  }
   final isFavorite = false.obs;
   final AlistDatabaseController _databaseController = Get.find();
   final UserController _userController = Get.find();

@@ -80,6 +80,7 @@ class _SettingsContainerState extends State<_SettingsContainer>
         m.menuId == MenuId.aggressiveCache ||
         m.menuId == MenuId.playerSettings ||
         m.menuId == MenuId.iptvUrl ||
+        m.menuId == MenuId.slideshowInterval ||
         m.menuId == MenuId.themeColor).toList();
     final aboutMenus = menus.where((m) =>
         m.menuId == MenuId.donate ||
@@ -257,6 +258,9 @@ class _SettingsContainerState extends State<_SettingsContainer>
       case MenuId.iptvUrl:
         _showUrlInputDialog(context);
         break;
+      case MenuId.slideshowInterval:
+        _showSlideshowIntervalDialog(context);
+        break;
       case MenuId.about:
         String local = Get.locale?.toString().startsWith("zh_") == true ? "zh" : "en_US";
         Get.toNamed(NamedRouter.web, arguments: {
@@ -276,6 +280,37 @@ class _SettingsContainerState extends State<_SettingsContainer>
       title: Text(settingsMenu.name),
       trailing: Image.asset(Images.iconArrowRight,
           color: isDarkMode ? Colors.white : null),
+    );
+  }
+
+  void _showSlideshowIntervalDialog(BuildContext context) {
+    final options = [1, 2, 3, 5, 8, 10, 15, 20, 30];
+    final current = SpUtil.getInt(AlistConstant.slideshowIntervalSeconds, defValue: 3) ?? 3;
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('幻灯片间隔时间'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: options.map((s) => RadioListTile<int>(
+            title: Text('$s 秒'),
+            value: s,
+            groupValue: current,
+            onChanged: (v) {
+              if (v != null) {
+                SpUtil.putInt(AlistConstant.slideshowIntervalSeconds, v);
+                Navigator.pop(ctx);
+              }
+            },
+          )).toList(),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('取消'),
+          ),
+        ],
+      ),
     );
   }
 
@@ -432,6 +467,11 @@ class _SettingsContainerState extends State<_SettingsContainer>
           icon: Images.settingsScreenPlayer,
           iconData: Icons.live_tv_rounded),
       SettingsMenu(
+          menuId: MenuId.slideshowInterval,
+          name: '幻灯片间隔时间',
+          icon: Images.settingsScreenPlayer,
+          iconData: Icons.slideshow_rounded),
+      SettingsMenu(
           menuId: MenuId.privacyPolicy,
           name: Intl.settingsScreen_item_privacyPolicy.tr,
           icon: Images.settingsScreenPrivacyPolicy,
@@ -508,4 +548,5 @@ enum MenuId {
   playerSettings,
   themeColor,
   iptvUrl,
+  slideshowInterval,
 }
