@@ -1,2 +1,9 @@
 # Auto detect text files and perform LF normalization
 * text=auto
+
+# Force GitHub to detect this repo as Dart
+*.dart linguist-detectable=true
+*.dart linguist-language=Dart
+*.gradle linguist-detectable=false
+*.js linguist-detectable=false
+*.ts linguist-detectable=false
