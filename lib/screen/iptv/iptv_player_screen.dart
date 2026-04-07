@@ -2,7 +2,7 @@ import 'dart:async';
 
 import 'package:alist/screen/iptv/model/iptv_channel.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart' show SystemChrome, SystemUiMode;
+import 'package:flutter/services.dart';
 import 'package:get/get.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
@@ -14,18 +14,44 @@ class IptvPlayerScreen extends StatefulWidget {
   State<IptvPlayerScreen> createState() => _IptvPlayerScreenState();
 }
 
-class _IptvPlayerScreenState extends State<IptvPlayerScreen> {
+class _IptvPlayerScreenState extends State<IptvPlayerScreen>
+    with WidgetsBindingObserver {
   late final List<IptvChannel> _playlist;
   late int _index;
   late final Player _player;
   late final VideoController _controller;
+
+  bool _showControls = true;
+  Timer? _hideTimer;
+
+  Duration _position = Duration.zero;
+  Duration _duration = Duration.zero;
+  bool _playing = false;
+  bool _buffering = false;
+  StreamSubscription? _posSub;
+  StreamSubscription? _durSub;
+  StreamSubscription? _playSub;
+  StreamSubscription? _bufSub;
+
+  bool _isDraggingSlider = false;
 
   bool _seeking = false;
   Duration _seekTarget = Duration.zero;
   Duration _seekStartPos = Duration.zero;
   double _dragStartX = 0;
   double _dragStartY = 0;
-  bool _dragConfirmed = false; // 确认是横向拖动后才激活 seek
+  bool _dragConfirmed = false;
+
+  bool _isFullscreen = false;
+
+  void _hideSystemUI() {
+    SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
+    SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
+      systemNavigationBarColor: Colors.black,
+      systemNavigationBarDividerColor: Colors.black,
+      statusBarColor: Colors.transparent,
+    ));
+  }
 
   @override
   void initState() {
@@ -39,11 +65,55 @@ class _IptvPlayerScreenState extends State<IptvPlayerScreen> {
     );
     _controller = VideoController(_player);
 
-    SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
+    _hideSystemUI();
+    WidgetsBinding.instance.addObserver(this);
 
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _playAt(_index);
+    _posSub = _player.stream.position.listen((p) {
+      if (mounted && !_isDraggingSlider) setState(() => _position = p);
     });
+    _durSub = _player.stream.duration.listen((d) {
+      if (mounted) setState(() => _duration = d);
+    });
+    _playSub = _player.stream.playing.listen((p) {
+      if (mounted) setState(() => _playing = p);
+    });
+    _bufSub = _player.stream.buffering.listen((b) {
+      if (mounted) setState(() => _buffering = b);
+    });
+
+    WidgetsBinding.instance.addPostFrameCallback((_) => _playAt(_index));
+    _resetHideTimer();
+  }
+
+  @override
+  void didChangeMetrics() {
+    Future.delayed(const Duration(milliseconds: 300), () {
+      if (mounted) _hideSystemUI();
+    });
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) _hideSystemUI();
+  }
+
+  @override
+  void dispose() {
+    _hideTimer?.cancel();
+    _posSub?.cancel();
+    _durSub?.cancel();
+    _playSub?.cancel();
+    _bufSub?.cancel();
+    WidgetsBinding.instance.removeObserver(this);
+    SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+    if (_isFullscreen) {
+      SystemChrome.setPreferredOrientations([
+        DeviceOrientation.portraitUp,
+        DeviceOrientation.portraitDown,
+      ]);
+    }
+    _player.dispose();
+    super.dispose();
   }
 
   void _playAt(int index) {
@@ -52,10 +122,38 @@ class _IptvPlayerScreenState extends State<IptvPlayerScreen> {
     _player.open(Media(_playlist[index].url));
   }
 
-  @override
-  void dispose() {
-    _player.dispose();
-    super.dispose();
+  void _resetHideTimer() {
+    _hideTimer?.cancel();
+    if (!mounted) return;
+    setState(() => _showControls = true);
+    _hideTimer = Timer(const Duration(seconds: 4), () {
+      if (mounted) setState(() => _showControls = false);
+    });
+  }
+
+  void _toggleControls() {
+    if (_showControls) {
+      _hideTimer?.cancel();
+      setState(() => _showControls = false);
+    } else {
+      _resetHideTimer();
+    }
+  }
+
+  void _toggleFullscreen() async {
+    if (_isFullscreen) {
+      await SystemChrome.setPreferredOrientations([
+        DeviceOrientation.portraitUp,
+        DeviceOrientation.portraitDown,
+      ]);
+    } else {
+      await SystemChrome.setPreferredOrientations([
+        DeviceOrientation.landscapeLeft,
+        DeviceOrientation.landscapeRight,
+      ]);
+    }
+    setState(() => _isFullscreen = !_isFullscreen);
+    _hideSystemUI();
   }
 
   String _fmt(Duration d) {
@@ -75,154 +173,314 @@ class _IptvPlayerScreenState extends State<IptvPlayerScreen> {
   void _onPointerMove(PointerMoveEvent e) {
     final dx = e.position.dx - _dragStartX;
     final dy = e.position.dy - _dragStartY;
-
     if (!_dragConfirmed) {
-      // 移动超过 10px 才判断方向
       if (dx.abs() < 10 && dy.abs() < 10) return;
-      // 横向分量大于纵向才激活 seek
       if (dx.abs() <= dy.abs()) return;
-      final dur = _player.state.duration;
-      if (dur == Duration.zero) return; // 直播流不 seek
+      if (_duration == Duration.zero) return;
       _dragConfirmed = true;
-      _seekStartPos = _player.state.position;
+      _seekStartPos = _position;
       _seekTarget = _seekStartPos;
       setState(() => _seeking = true);
     }
-
     if (!_seeking) return;
-    final dur = _player.state.duration;
-    if (dur == Duration.zero) return;
+    if (_duration == Duration.zero) return;
     final screenW = MediaQuery.of(context).size.width;
-    final ratio = dx / screenW;
-    final deltaMs = (ratio * 90000).round();
-    var target = _seekStartPos + Duration(milliseconds: deltaMs);
+    var target = _seekStartPos +
+        Duration(milliseconds: (dx / screenW * 90000).round());
     if (target.isNegative) target = Duration.zero;
-    if (target > dur) target = dur;
+    if (target > _duration) target = _duration;
     setState(() => _seekTarget = target);
   }
 
   void _onPointerUp(PointerUpEvent e) {
     if (_seeking) {
       _player.seek(_seekTarget);
-      setState(() {
-        _seeking = false;
-        _dragConfirmed = false;
-      });
+      setState(() { _seeking = false; _dragConfirmed = false; });
+    } else if (!_dragConfirmed) {
+      _toggleControls();
     }
   }
 
   void _onPointerCancel(PointerCancelEvent e) {
-    if (_seeking) {
-      setState(() {
-        _seeking = false;
-        _dragConfirmed = false;
-      });
-    }
+    if (_seeking) setState(() { _seeking = false; _dragConfirmed = false; });
   }
 
   @override
   Widget build(BuildContext context) {
     final channel = _playlist[_index];
+    final isLive = _duration == Duration.zero;
 
     return WillPopScope(
       onWillPop: () async {
+        if (_isFullscreen) { _toggleFullscreen(); return false; }
         SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
         return true;
       },
-      child: MaterialVideoControlsTheme(
-        normal: _buildThemeData(channel),
-        fullscreen: _buildThemeData(channel),
+      child: AnnotatedRegion<SystemUiOverlayStyle>(
+        value: const SystemUiOverlayStyle(
+          systemNavigationBarColor: Colors.black,
+          systemNavigationBarDividerColor: Colors.black,
+          statusBarColor: Colors.transparent,
+        ),
         child: Scaffold(
           backgroundColor: Colors.black,
-          body: Stack(
-            children: [
-              Listener(
-                behavior: HitTestBehavior.translucent,
-                onPointerDown: _onPointerDown,
-                onPointerMove: _onPointerMove,
-                onPointerUp: _onPointerUp,
-                onPointerCancel: _onPointerCancel,
-                child: SizedBox.expand(
+          body: Listener(
+            behavior: HitTestBehavior.opaque,
+            onPointerDown: _onPointerDown,
+            onPointerMove: _onPointerMove,
+            onPointerUp: _onPointerUp,
+            onPointerCancel: _onPointerCancel,
+            child: Stack(
+              children: [
+                // 视频画面
+                SizedBox.expand(
                   child: Video(
                     controller: _controller,
+                    controls: null,
                     fit: BoxFit.contain,
                   ),
                 ),
-              ),
-              if (_seeking)
-                Center(
-                  child: IgnorePointer(
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 20, vertical: 12),
-                      decoration: BoxDecoration(
-                        color: Colors.black.withOpacity(0.7),
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(
-                            _seekTarget < _seekStartPos
-                                ? Icons.fast_rewind_rounded
-                                : Icons.fast_forward_rounded,
-                            color: Colors.white,
-                            size: 28,
-                          ),
-                          const SizedBox(width: 8),
-                          Text(
-                            _fmt(_seekTarget),
-                            style: const TextStyle(
+
+                // 缓冲指示
+                if (_buffering && !_seeking)
+                  const Center(
+                    child: CircularProgressIndicator(color: Colors.white),
+                  ),
+
+                // 手势 seek 提示
+                if (_seeking)
+                  Center(
+                    child: IgnorePointer(
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 20, vertical: 12),
+                        decoration: BoxDecoration(
+                          color: Colors.black.withOpacity(0.7),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(
+                              _seekTarget < _seekStartPos
+                                  ? Icons.fast_rewind_rounded
+                                  : Icons.fast_forward_rounded,
                               color: Colors.white,
-                              fontSize: 20,
-                              fontWeight: FontWeight.w600,
+                              size: 28,
                             ),
-                          ),
-                        ],
+                            const SizedBox(width: 8),
+                            Text(
+                              _fmt(_seekTarget),
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 20,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ],
+                        ),
                       ),
                     ),
                   ),
-                ),
-            ],
+
+                // 控制层
+                if (_showControls) ...[
+                  // 顶部：返回 + 标题
+                  Positioned(
+                    top: 0, left: 0, right: 0,
+                    child: Container(
+                      decoration: const BoxDecoration(
+                        gradient: LinearGradient(
+                          begin: Alignment.topCenter,
+                          end: Alignment.bottomCenter,
+                          colors: [Colors.black87, Colors.transparent],
+                        ),
+                      ),
+                      child: SafeArea(
+                        bottom: false,
+                        child: Row(
+                          children: [
+                            IconButton(
+                              icon: const Icon(Icons.arrow_back,
+                                  color: Colors.white),
+                              onPressed: () {
+                                if (_isFullscreen) {
+                                  _toggleFullscreen();
+                                } else {
+                                  SystemChrome.setEnabledSystemUIMode(
+                                      SystemUiMode.edgeToEdge);
+                                  Get.back();
+                                }
+                              },
+                            ),
+                            Expanded(
+                              child: Text(
+                                channel.name,
+                                style: const TextStyle(
+                                    color: Colors.white, fontSize: 16),
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+
+                  // 中间：上一个 / 播放暂停 / 下一个
+                  Center(
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        // 上一个
+                        IconButton(
+                          iconSize: 48,
+                          icon: Icon(
+                            Icons.skip_previous_rounded,
+                            color: _index > 0
+                                ? Colors.white
+                                : Colors.white.withOpacity(0.3),
+                          ),
+                          onPressed: _index > 0
+                              ? () { _playAt(_index - 1); _resetHideTimer(); }
+                              : null,
+                        ),
+                        const SizedBox(width: 16),
+                        // 播放/暂停
+                        IconButton(
+                          iconSize: 64,
+                          icon: Icon(
+                            _playing
+                                ? Icons.pause_circle_outline_rounded
+                                : Icons.play_circle_outline_rounded,
+                            color: Colors.white,
+                          ),
+                          onPressed: () {
+                            _player.playOrPause();
+                            _resetHideTimer();
+                          },
+                        ),
+                        const SizedBox(width: 16),
+                        // 下一个
+                        IconButton(
+                          iconSize: 48,
+                          icon: Icon(
+                            Icons.skip_next_rounded,
+                            color: _index < _playlist.length - 1
+                                ? Colors.white
+                                : Colors.white.withOpacity(0.3),
+                          ),
+                          onPressed: _index < _playlist.length - 1
+                              ? () { _playAt(_index + 1); _resetHideTimer(); }
+                              : null,
+                        ),
+                      ],
+                    ),
+                  ),
+
+                  // 底部：进度条 + 按钮行
+                  Positioned(
+                    bottom: 0, left: 0, right: 0,
+                    child: Container(
+                      decoration: const BoxDecoration(
+                        gradient: LinearGradient(
+                          begin: Alignment.bottomCenter,
+                          end: Alignment.topCenter,
+                          colors: [Colors.black87, Colors.transparent],
+                        ),
+                      ),
+                      padding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
+                      child: SafeArea(
+                        top: false,
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            if (!isLive)
+                              SliderTheme(
+                                data: SliderTheme.of(context).copyWith(
+                                  trackHeight: 2,
+                                  thumbShape: const RoundSliderThumbShape(
+                                      enabledThumbRadius: 6),
+                                  overlayShape: const RoundSliderOverlayShape(
+                                      overlayRadius: 14),
+                                  activeTrackColor: Colors.white,
+                                  inactiveTrackColor:
+                                      Colors.white.withOpacity(0.3),
+                                  thumbColor: Colors.white,
+                                  overlayColor:
+                                      Colors.white.withOpacity(0.2),
+                                ),
+                                child: Slider(
+                                  value: _position.inMilliseconds
+                                      .toDouble()
+                                      .clamp(0,
+                                          _duration.inMilliseconds.toDouble()),
+                                  min: 0,
+                                  max: _duration.inMilliseconds
+                                      .toDouble()
+                                      .clamp(1, double.infinity),
+                                  onChangeStart: (_) {
+                                    _isDraggingSlider = true;
+                                    _hideTimer?.cancel();
+                                  },
+                                  onChanged: (v) {
+                                    setState(() => _position =
+                                        Duration(milliseconds: v.toInt()));
+                                  },
+                                  onChangeEnd: (v) {
+                                    _isDraggingSlider = false;
+                                    _player.seek(
+                                        Duration(milliseconds: v.toInt()));
+                                    _resetHideTimer();
+                                  },
+                                ),
+                              ),
+                            Row(
+                              children: [
+                                const Spacer(),
+                                if (!isLive)
+                                  Text(
+                                    '${_fmt(_position)} / ${_fmt(_duration)}',
+                                    style: const TextStyle(
+                                        color: Colors.white, fontSize: 12),
+                                  ),
+                                if (isLive)
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(
+                                        horizontal: 6, vertical: 2),
+                                    decoration: BoxDecoration(
+                                      color: Colors.red,
+                                      borderRadius: BorderRadius.circular(4),
+                                    ),
+                                    child: const Text('LIVE',
+                                        style: TextStyle(
+                                            color: Colors.white,
+                                            fontSize: 11,
+                                            fontWeight: FontWeight.bold)),
+                                  ),
+                                const SizedBox(width: 8),
+                                IconButton(
+                                  icon: Icon(
+                                    _isFullscreen
+                                        ? Icons.fullscreen_exit
+                                        : Icons.fullscreen,
+                                    color: Colors.white,
+                                  ),
+                                  onPressed: _toggleFullscreen,
+                                ),
+                              ],
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ],
+            ),
           ),
         ),
       ),
-    );
-  }
-
-  MaterialVideoControlsThemeData _buildThemeData(IptvChannel channel) {
-    return MaterialVideoControlsThemeData(
-      topButtonBar: [
-        IconButton(
-          icon: const Icon(Icons.arrow_back, color: Colors.white),
-          onPressed: () {
-            SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
-            Get.back();
-          },
-        ),
-        Expanded(
-          child: Text(
-            channel.name,
-            style: const TextStyle(color: Colors.white, fontSize: 16),
-            overflow: TextOverflow.ellipsis,
-          ),
-        ),
-      ],
-      bottomButtonBar: [
-        if (_index > 0)
-          IconButton(
-            icon: const Icon(Icons.skip_previous, color: Colors.white),
-            onPressed: () => _playAt(_index - 1),
-          ),
-        const Spacer(),
-        if (_index < _playlist.length - 1)
-          IconButton(
-            icon: const Icon(Icons.skip_next, color: Colors.white),
-            onPressed: () => _playAt(_index + 1),
-          ),
-        const MaterialFullscreenButton(),
-      ],
-      padding: const EdgeInsets.only(bottom: 0),
     );
   }
 }
