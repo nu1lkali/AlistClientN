@@ -32,14 +32,23 @@ class M3uParser {
     final dio = Dio();
     dio.options.connectTimeout = const Duration(seconds: 15);
     dio.options.receiveTimeout = const Duration(seconds: 30);
+    dio.options.followRedirects = true;
+    dio.options.maxRedirects = 5;
+    dio.options.headers = {
+      'User-Agent': 'Mozilla/5.0 (Linux; Android 10) AppleWebKit/537.36 Chrome/91.0 Mobile Safari/537.36',
+    };
 
     final response = await dio.get(
       url,
       options: Options(
         responseType: ResponseType.plain,
-        validateStatus: (status) => status != null && status < 400,
+        validateStatus: (status) => status != null && status < 500,
       ),
     );
+    if (response.statusCode != null && response.statusCode! >= 400) {
+      // 请求失败，当作直播流直接播放
+      return M3uParseResult(channels: [], groupOrder: [], isHlsStream: true);
+    }
     return _parseContent(response.data.toString());
   }
 

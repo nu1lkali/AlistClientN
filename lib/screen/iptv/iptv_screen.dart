@@ -61,6 +61,17 @@ class _IptvScreenState extends State<IptvScreen> {
         return;
       }
 
+      // 解析结果为空，当作直播流直接播放
+      if (result.channels.isEmpty) {
+        final channel = IptvChannel(name: _title, url: _url);
+        Get.off(() => const IptvPlayerScreen(), arguments: {
+          'channel': channel,
+          'playlist': [channel],
+          'index': 0,
+        });
+        return;
+      }
+
       setState(() {
         _allChannels = result.channels;
         _groupOrder = result.groupOrder;

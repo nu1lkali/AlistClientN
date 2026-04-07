@@ -272,20 +272,13 @@ class _RecentsScreenState extends State<RecentsScreen>
               final url = controller.text.trim();
               Navigator.pop(ctx);
               if (url.isEmpty) return;
-              // m3u/m3u8 播放列表走 iptv 页面，其他直接进播放器
-              final lower = url.toLowerCase();
-              if (lower.endsWith('.m3u') || lower.endsWith('.m3u8')) {
-                Get.toNamed(NamedRouter.iptv,
-                    arguments: {'name': url, 'url': url});
-              } else {
-                // 直接作为单频道播放
-                final channel = IptvChannel(name: url, url: url);
-                Get.toNamed(NamedRouter.iptvPlayer, arguments: {
-                  'channel': channel,
-                  'playlist': [channel],
-                  'index': 0,
-                });
-              }
+              // 所有地址直接进播放器，media_kit 自己处理 HLS/m3u8/rtmp 等格式
+              final channel = IptvChannel(name: url, url: url);
+              Get.toNamed(NamedRouter.iptvPlayer, arguments: {
+                'channel': channel,
+                'playlist': [channel],
+                'index': 0,
+              });
             },
             child: const Text('播放'),
           ),
