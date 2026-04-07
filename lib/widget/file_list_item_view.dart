@@ -234,6 +234,9 @@ class FileItemVO {
   final String thumb;
   String? folderThumb; // lazy-loaded folder cover
   double? watchProgress; // 0.0~1.0, null = not watched
+  String? localThumb; // 本地生成的视频缩略图路径
+  int? videoCurrentPosition; // 上次播放位置（毫秒）
+  int? videoDuration; // 视频总时长（毫秒）
   final int typeInt;
   final FileType type;
   final String icon;

@@ -355,7 +355,6 @@ class AudioPlayerScreenController extends GetxController {
     final mediaItem = MediaItem(
       id: audio.remotePath,
       title: audio.name,
-      artUri: Uri.parse("https://alistc.techyifu.com/ic_music_head.png"),
     );
 
     if (audio.localPath == null || audio.localPath!.isEmpty) {
@@ -378,16 +377,16 @@ class AudioPlayerScreenController extends GetxController {
     } else {
       if (GetPlatform.isDesktop) {
         return ProgressiveAudioSource(Uri.parse(uri), tag: mediaItem);
-      } else {
-        var headers = <String, String>{};
-        if (audio.provider == "BaiduNetdisk") {
-          headers["User-Agent"] = "pan.baidu.com";
-        }
+      } else if (audio.provider == "BaiduNetdisk") {
+        // 百度网盘需要特殊 User-Agent，走缓存代理
         return AlistLockCachingAudioSource(
           Uri.parse(uri),
-          headers: headers,
+          headers: {"User-Agent": "pan.baidu.com"},
           tag: mediaItem,
         );
+      } else {
+        // 普通 URL 直接用 AudioSource.uri，底层走 ExoPlayer 系统网络栈，支持 VPN
+        return AudioSource.uri(Uri.parse(uri), tag: mediaItem);
       }
     }
   }

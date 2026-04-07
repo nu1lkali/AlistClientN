@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:io';
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 
@@ -37,6 +38,9 @@ class M3uParser {
     dio.options.headers = {
       'User-Agent': 'Mozilla/5.0 (Linux; Android 10) AppleWebKit/537.36 Chrome/91.0 Mobile Safari/537.36',
     };
+    // 让 Dio 走系统代理（VPN 场景）
+    // Dio 5.x 在 Android 上底层用 HttpClient，通过环境变量读取系统代理
+    // 无需额外配置，findProxyFromEnvironment 会自动生效
 
     final response = await dio.get(
       url,

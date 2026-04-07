@@ -11,6 +11,7 @@ import 'package:alist/screen/audio_player_screen.dart';
 import 'package:alist/screen/file_reader_screen.dart';
 import 'package:alist/screen/gallery_screen.dart';
 import 'package:alist/screen/iptv/model/iptv_channel.dart';
+import 'package:alist/screen/markdown_reader_screen.dart';
 import 'package:alist/screen/pdf_reader_screen.dart';
 import 'package:alist/screen/video_player_screen.dart';
 import 'package:alist/util/constant.dart';
@@ -287,13 +288,18 @@ class _RecentsScreenState extends State<RecentsScreen>
     );
   }
 
-  void _previewMarkdown(FileViewingRecord file) async {    var fileLink = await FileUtils.makeFileLink(file.remotePath, file.sign);
-    if (fileLink != null) {
-      Get.toNamed(NamedRouter.web, arguments: {
-        "url": MarkdownUtil.makePreviewUrl(fileLink),
-        "title": file.name
-      });
-    }
+  void _previewMarkdown(FileViewingRecord file) async {
+    var markdownItem = MarkdownItem(
+      name: file.name,
+      remotePath: file.path,
+      sign: file.sign,
+      provider: file.provider,
+      thumb: file.thumb,
+    );
+    Get.toNamed(
+      NamedRouter.markdownReader,
+      arguments: {"markdownItem": markdownItem},
+    );
   }
 
   void _deleteRecord(FileViewingRecord record) {

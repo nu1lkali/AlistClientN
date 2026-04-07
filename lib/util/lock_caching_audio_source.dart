@@ -459,5 +459,7 @@ HttpClient _createHttpClient({String? userAgent}) {
   if (userAgent != null) {
     client.userAgent = userAgent;
   }
+  // 读取系统代理（VPN 等会设置系统代理，Dart 默认不读取）
+  client.findProxy = HttpClient.findProxyFromEnvironment;
   return client;
 }

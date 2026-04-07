@@ -46,6 +46,7 @@ import 'package:alist/util/proxy.dart';
 import 'package:alist/util/string_utils.dart';
 import 'package:alist/util/user_controller.dart';
 import 'package:alist/util/video_player_util.dart';
+import 'package:alist/util/video_thumbnail_manager.dart';
 import 'package:alist/widget/alist_scaffold.dart';
 import 'package:alist/widget/config_file_name_max_lines_dialog.dart';
 import 'package:alist/widget/file_details_dialog.dart';
@@ -1726,11 +1727,56 @@ class _FileListScreenState extends State<FileListScreen>
           .findRecordByPath(user.baseUrl, user.username, file.path);
       if (record != null && record.videoDuration > 0 && mounted) {
         final progress = record.videoCurrentPosition / record.videoDuration;
-        if (progress > 0.01 && progress < 0.99) {
-          setState(() {
+        setState(() {
+          if (progress > 0.01 && progress < 0.99) {
             file.watchProgress = progress.clamp(0.0, 1.0);
-          });
-        }
+          }
+          file.videoCurrentPosition = record.videoCurrentPosition;
+          file.videoDuration = record.videoDuration;
+        });
+      }
+    }
+    // 触发缩略图生成（仅 Android，iOS 暂不支持）
+    if (Platform.isAndroid) {
+      _generateVideoThumbnails(files);
+    }
+  }
+
+  void _generateVideoThumbnails(List<FileItemVO> files) async {
+    for (final file in files) {
+      if (!mounted) return;
+      if (file.isDir || file.type != FileType.video) continue;
+      // 已有本地缩略图则跳过
+      if (file.localThumb != null) continue;
+
+      final url = await FileUtils.makeFileLink(file.path, file.sign,
+          toastShowTips: false);
+      if (url == null || !mounted) continue;
+
+      // 取帧位置：有播放记录用上次位置，否则用 10s
+      final posMs = (file.videoCurrentPosition != null &&
+              file.videoCurrentPosition! > 0)
+          ? file.videoCurrentPosition!
+          : 10000;
+
+      // cacheKey：优先用 sign，没有则用 path
+      final cacheKey =
+          file.sign.isNotEmpty ? file.sign : file.path;
+
+      Map<String, String>? headers;
+      if (file.provider == 'BaiduNetdisk') {
+        headers = {'User-Agent': 'pan.baidu.com'};
+      }
+
+      final thumbPath = await VideoThumbnailManager.instance.getThumbnail(
+        url: url,
+        cacheKey: cacheKey,
+        positionMs: posMs,
+        headers: headers,
+      );
+
+      if (thumbPath != null && mounted) {
+        setState(() => file.localThumb = thumbPath);
       }
     }
   }
@@ -2551,9 +2597,11 @@ class _FileListView extends StatelessWidget {
               sizeDesc: null,
               onTap: () {
                 if (GetUtils.isURL(readme!)) {
-                  Get.toNamed(NamedRouter.web, arguments: {
-                    "url": MarkdownUtil.makePreviewUrl(readme!),
-                    "title": "README.md"
+                  Get.toNamed(NamedRouter.markdownReader, arguments: {
+                    "markdownItem": MarkdownItem(
+                      name: "README.md",
+                      remotePath: readme!,
+                    )
                   });
                 } else {
                   _readMarkdownContent();
@@ -2638,9 +2686,11 @@ class _FileListView extends StatelessWidget {
     return GestureDetector(
       onTap: () {
         if (GetUtils.isURL(readme!)) {
-          Get.toNamed(NamedRouter.web, arguments: {
-            "url": MarkdownUtil.makePreviewUrl(readme!),
-            "title": "README.md"
+          Get.toNamed(NamedRouter.markdownReader, arguments: {
+            "markdownItem": MarkdownItem(
+              name: "README.md",
+              remotePath: readme!,
+            )
           });
         } else {
           _readMarkdownContent();
@@ -2771,25 +2821,22 @@ class _FileListView extends StatelessWidget {
         icon: file.icon,
         name: file.name,
         thumb: file.thumb.isNotEmpty ? file.thumb : file.folderThumb,
+        localThumb: file.localThumb,
         watchProgress: file.watchProgress,
+        videoCurrentPosition: file.videoCurrentPosition,
+        videoDuration: file.videoDuration,
       ),
     );
   }
 
   void _readMarkdownContent() async {
-    ProxyServer proxyServer = Get.find();
-    // 开启本地代理服务器
-    await proxyServer.start();
-    // 设置 path 为本地代理服务器的key，这样就可以通过 http:// 访问 readme 的内容
-    // 并且返回对应的本地链接
-    var proxyUri = proxyServer.makeContentUri(path ?? "/", readme!);
-    LogUtil.d("proxyUri ${proxyUri.toString()}");
-
-    await Get.toNamed(NamedRouter.web, arguments: {
-      "url": MarkdownUtil.makePreviewUrl(proxyUri.toString()),
-      "title": "README.md"
+    Get.toNamed(NamedRouter.markdownReader, arguments: {
+      "markdownItem": MarkdownItem(
+        name: "README.md",
+        remotePath: path ?? "/",
+        content: readme,
+      )
     });
-    proxyServer.stop();
   }
 }
 
@@ -2824,19 +2871,85 @@ class _GridItemWidget extends StatelessWidget {
     required this.icon,
     required this.name,
     this.thumb,
+    this.localThumb,
     this.watchProgress,
+    this.videoCurrentPosition,
+    this.videoDuration,
   });
 
   final String icon;
   final String name;
   final String? thumb;
+  final String? localThumb; // 本地生成的缩略图路径
   final double? watchProgress;
+  final int? videoCurrentPosition;
+  final int? videoDuration;
+
+  String _fmtMs(int ms) {
+    final d = Duration(milliseconds: ms);
+    final h = d.inHours;
+    final m = d.inMinutes.remainder(60).toString().padLeft(2, '0');
+    final s = d.inSeconds.remainder(60).toString().padLeft(2, '0');
+    return h > 0 ? '$h:$m:$s' : '$m:$s';
+  }
 
   @override
   Widget build(BuildContext context) {
     final completeThumbnail = FileUtils.getCompleteThumbnail(thumb);
     final scheme = Theme.of(context).colorScheme;
     final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    // 决定显示哪个缩略图：本地生成 > 服务端 > 无
+    Widget thumbWidget;
+    if (localThumb != null) {
+      thumbWidget = Image.file(
+        File(localThumb!),
+        fit: BoxFit.cover,
+        width: double.infinity,
+        height: double.infinity,
+        errorBuilder: (_, __, ___) =>
+            Center(child: Image.asset(icon, width: 44, height: 44)),
+      );
+    } else if (completeThumbnail != null && completeThumbnail.isNotEmpty) {
+      thumbWidget = Image.network(
+        completeThumbnail,
+        fit: BoxFit.cover,
+        width: double.infinity,
+        height: double.infinity,
+        cacheWidth: 200,
+        errorBuilder: (_, __, ___) =>
+            Center(child: Image.asset(icon, width: 44, height: 44)),
+        loadingBuilder: (_, child, progress) {
+          if (progress == null) return child;
+          return Center(
+            child: SizedBox(
+              width: 22,
+              height: 22,
+              child: CircularProgressIndicator(
+                strokeWidth: 2,
+                value: progress.expectedTotalBytes != null
+                    ? progress.cumulativeBytesLoaded /
+                        progress.expectedTotalBytes!
+                    : null,
+              ),
+            ),
+          );
+        },
+      );
+    } else {
+      thumbWidget = Container(
+        color: isDark
+            ? scheme.surfaceVariant.withOpacity(0.3)
+            : scheme.primaryContainer.withOpacity(0.25),
+        child: Center(child: Image.asset(icon, width: 44, height: 44)),
+      );
+    }
+
+    // 时间标签文字：有播放记录显示 "当前/总时长"，否则只显示总时长（如果有）
+    String? timeLabel;
+    if (videoCurrentPosition != null && videoDuration != null && videoDuration! > 0) {
+      timeLabel = '${_fmtMs(videoCurrentPosition!)} / ${_fmtMs(videoDuration!)}';
+    }
 
     return Card(
       elevation: isDark ? 0 : 1.5,
@@ -2851,38 +2964,8 @@ class _GridItemWidget extends StatelessWidget {
             child: Stack(
               fit: StackFit.expand,
               children: [
-                completeThumbnail != null && completeThumbnail.isNotEmpty
-                    ? Image.network(
-                        completeThumbnail,
-                        fit: BoxFit.cover,
-                        width: double.infinity,
-                        height: double.infinity,
-                        cacheWidth: 200,
-                        errorBuilder: (_, __, ___) =>
-                            Center(child: Image.asset(icon, width: 44, height: 44)),
-                        loadingBuilder: (_, child, progress) {
-                          if (progress == null) return child;
-                          return Center(
-                            child: SizedBox(
-                              width: 22,
-                              height: 22,
-                              child: CircularProgressIndicator(
-                                strokeWidth: 2,
-                                value: progress.expectedTotalBytes != null
-                                    ? progress.cumulativeBytesLoaded /
-                                        progress.expectedTotalBytes!
-                                    : null,
-                              ),
-                            ),
-                          );
-                        },
-                      )
-                    : Container(
-                        color: isDark
-                            ? scheme.surfaceVariant.withOpacity(0.3)
-                            : scheme.primaryContainer.withOpacity(0.25),
-                        child: Center(child: Image.asset(icon, width: 44, height: 44)),
-                      ),
+                thumbWidget,
+                // 播放进度条
                 if (watchProgress != null)
                   Positioned(
                     left: 8,
@@ -2895,6 +2978,28 @@ class _GridItemWidget extends StatelessWidget {
                         minHeight: 3,
                         backgroundColor: Colors.black26,
                         valueColor: AlwaysStoppedAnimation<Color>(scheme.primary),
+                      ),
+                    ),
+                  ),
+                // 右下角时间标签
+                if (timeLabel != null)
+                  Positioned(
+                    right: 4,
+                    bottom: watchProgress != null ? 10 : 4,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 4, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: Colors.black.withOpacity(0.55),
+                        borderRadius: BorderRadius.circular(3),
+                      ),
+                      child: Text(
+                        timeLabel,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 9,
+                          fontWeight: FontWeight.w500,
+                        ),
                       ),
                     ),
                   ),

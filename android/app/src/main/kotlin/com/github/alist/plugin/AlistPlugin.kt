@@ -8,6 +8,8 @@ import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.graphics.Bitmap
+import android.media.MediaMetadataRetriever
 import android.net.Uri
 import android.os.Build
 import android.os.Environment
@@ -25,11 +27,14 @@ import io.flutter.embedding.engine.plugins.FlutterPlugin
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import okio.buffer
 import okio.sink
 import okio.source
 import java.io.File
+import java.io.FileOutputStream
 
 class AlistPlugin(private val activity: Activity, private val scope: CoroutineScope) :
     FlutterPlugin, MethodChannel.MethodCallHandler {
@@ -142,6 +147,46 @@ class AlistPlugin(private val activity: Activity, private val scope: CoroutineSc
 
             "openDocument" -> {
                 DocViewerHelper.openDocument(activity, call, result)
+            }
+
+            "generateVideoThumbnail" -> {
+                val url = call.argument<String>("url") ?: run { result.success(null); return }
+                val cacheKey = call.argument<String>("cacheKey") ?: run { result.success(null); return }
+                val cacheDir = call.argument<String>("cacheDir") ?: run { result.success(null); return }
+                val positionMs = call.argument<Int>("positionMs") ?: 10000
+                val headers = call.argument<Map<String, String>>("headers") ?: emptyMap()
+
+                scope.launch(Dispatchers.IO) {
+                    val outFile = File(cacheDir, "$cacheKey.jpg")
+                    if (outFile.exists()) {
+                        withContext(Dispatchers.Main) { result.success(outFile.absolutePath) }
+                        return@launch
+                    }
+                    try {
+                        val retriever = MediaMetadataRetriever()
+                        retriever.setDataSource(url, headers)
+                        val bitmap = retriever.getFrameAtTime(
+                            positionMs * 1000L,
+                            MediaMetadataRetriever.OPTION_CLOSEST_SYNC
+                        )
+                        retriever.release()
+                        if (bitmap != null) {
+                            File(cacheDir).mkdirs()
+                            // 缩放到最大 320px 宽，保持比例
+                            val scaled = scaleBitmap(bitmap, 320)
+                            FileOutputStream(outFile).use { fos ->
+                                scaled.compress(Bitmap.CompressFormat.JPEG, 75, fos)
+                            }
+                            if (scaled != bitmap) scaled.recycle()
+                            bitmap.recycle()
+                            withContext(Dispatchers.Main) { result.success(outFile.absolutePath) }
+                        } else {
+                            withContext(Dispatchers.Main) { result.success(null) }
+                        }
+                    } catch (e: Exception) {
+                        withContext(Dispatchers.Main) { result.success(null) }
+                    }
+                }
             }
 
             else -> {
@@ -289,5 +334,12 @@ class AlistPlugin(private val activity: Activity, private val scope: CoroutineSc
         if (requestCode == requestCodeLaunchExternalPlayer) {
             FlutterMethods.onPayerDestroyed(null)
         }
+    }
+
+    private fun scaleBitmap(src: Bitmap, maxWidth: Int): Bitmap {
+        if (src.width <= maxWidth) return src
+        val ratio = maxWidth.toFloat() / src.width
+        val newH = (src.height * ratio).toInt()
+        return Bitmap.createScaledBitmap(src, maxWidth, newH, true)
     }
 }

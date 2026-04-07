@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:alist/screen/iptv/model/iptv_channel.dart';
 import 'package:flutter/material.dart';
@@ -61,7 +62,10 @@ class _IptvPlayerScreenState extends State<IptvPlayerScreen>
     _index = args['index'] as int? ?? 0;
 
     _player = Player(
-      configuration: const PlayerConfiguration(bufferSize: 32 * 1024 * 1024),
+      configuration: PlayerConfiguration(
+        bufferSize: 32 * 1024 * 1024,
+        ready: () => _applySystemProxy(),
+      ),
     );
     _controller = VideoController(_player);
 
@@ -85,6 +89,31 @@ class _IptvPlayerScreenState extends State<IptvPlayerScreen>
     _resetHideTimer();
   }
 
+  /// 读取系统代理并传给 libmpv，使 media_kit 能走 VPN 隧道
+  void _applySystemProxy() {
+    if (!Platform.isAndroid) return;
+    try {
+      final proxyHost = Platform.environment['http.proxyHost'] ??
+          Platform.environment['HTTP_PROXY'] ??
+          Platform.environment['http_proxy'];
+      final proxyPort = Platform.environment['http.proxyPort'];
+
+      String? proxyUrl;
+      if (proxyHost != null && proxyHost.isNotEmpty) {
+        proxyUrl = proxyPort != null
+            ? 'http://$proxyHost:$proxyPort'
+            : 'http://$proxyHost';
+      }
+
+      if (proxyUrl != null) {
+        final native = _player.platform as NativePlayer;
+        native.setProperty('http-proxy', proxyUrl);
+      }
+    } catch (_) {
+      // 读取代理失败不影响播放
+    }
+  }
+
   @override
   void didChangeMetrics() {
     Future.delayed(const Duration(milliseconds: 300), () {
@@ -105,7 +134,6 @@ class _IptvPlayerScreenState extends State<IptvPlayerScreen>
     _playSub?.cancel();
     _bufSub?.cancel();
     WidgetsBinding.instance.removeObserver(this);
-    // 恢复系统 UI，避免返回后底部出现黑线
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
     SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
       systemNavigationBarColor: Colors.transparent,
@@ -237,7 +265,6 @@ class _IptvPlayerScreenState extends State<IptvPlayerScreen>
             onPointerCancel: _onPointerCancel,
             child: Stack(
               children: [
-                // 视频画面
                 SizedBox.expand(
                   child: Video(
                     controller: _controller,
@@ -246,13 +273,11 @@ class _IptvPlayerScreenState extends State<IptvPlayerScreen>
                   ),
                 ),
 
-                // 缓冲指示
                 if (_buffering && !_seeking)
                   const Center(
                     child: CircularProgressIndicator(color: Colors.white),
                   ),
 
-                // 手势 seek 提示
                 if (_seeking)
                   Center(
                     child: IgnorePointer(
@@ -288,9 +313,7 @@ class _IptvPlayerScreenState extends State<IptvPlayerScreen>
                     ),
                   ),
 
-                // 控制层
                 if (_showControls) ...[
-                  // 顶部：返回 + 标题
                   Positioned(
                     top: 0, left: 0, right: 0,
                     child: Container(
@@ -330,7 +353,6 @@ class _IptvPlayerScreenState extends State<IptvPlayerScreen>
                     ),
                   ),
 
-                  // 中间：上一个 / 播放暂停 / 下一个
                   Center(
                     child: Row(
                       mainAxisSize: MainAxisSize.min,
@@ -378,7 +400,6 @@ class _IptvPlayerScreenState extends State<IptvPlayerScreen>
                     ),
                   ),
 
-                  // 底部：进度条 + 时间 + 全屏
                   Positioned(
                     bottom: 0, left: 0, right: 0,
                     child: Container(

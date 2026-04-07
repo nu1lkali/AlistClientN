@@ -105,4 +105,35 @@ class AlistPlugin {
       return false;
     }
   }
+
+  /// 生成视频缩略图（Android only）
+  /// [url] 视频直链
+  /// [cacheKey] 缓存文件名（不含扩展名），建议用文件 sign 或 path MD5
+  /// [cacheDir] 缓存目录路径
+  /// [positionMs] 取帧时间点（毫秒），默认 10000
+  /// [headers] 请求头（如百度网盘需要 User-Agent）
+  /// 返回生成的缩略图本地路径，失败返回 null
+  static Future<String?> generateVideoThumbnail({
+    required String url,
+    required String cacheKey,
+    required String cacheDir,
+    int positionMs = 10000,
+    Map<String, String>? headers,
+  }) async {
+    try {
+      final result = await _methodChannel.invokeMethod<String>(
+        'generateVideoThumbnail',
+        {
+          'url': url,
+          'cacheKey': cacheKey,
+          'cacheDir': cacheDir,
+          'positionMs': positionMs,
+          'headers': headers ?? {},
+        },
+      );
+      return result;
+    } catch (_) {
+      return null;
+    }
+  }
 }

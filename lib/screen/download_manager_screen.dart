@@ -9,6 +9,7 @@ import 'package:alist/l10n/intl_keys.dart';
 import 'package:alist/screen/audio_player_screen.dart';
 import 'package:alist/screen/file_reader_screen.dart';
 import 'package:alist/screen/gallery_screen.dart';
+import 'package:alist/screen/markdown_reader_screen.dart';
 import 'package:alist/screen/pdf_reader_screen.dart';
 import 'package:alist/screen/video_player_screen.dart';
 import 'package:alist/util/alist_plugin.dart';
@@ -627,20 +628,15 @@ class DownloadManagerController extends GetxController {
   }
 
   void _previewMarkdown(DownloadItem item) async {
-    ProxyServer proxyServer = Get.find();
-    // 开启本地代理服务器
-    await proxyServer.start();
-    var file = File(item.savedPath.value);
-    var fileContent = await file.readAsString();
-
-    var proxyUri =
-        proxyServer.makeContentUri(item.remotePath ?? "/", fileContent);
-
-    await Get.toNamed(NamedRouter.web, arguments: {
-      "url": MarkdownUtil.makePreviewUrl(proxyUri.toString()),
-      "title": item.name
+    final file = File(item.savedPath.value);
+    final fileContent = await file.readAsString();
+    Get.toNamed(NamedRouter.markdownReader, arguments: {
+      "markdownItem": MarkdownItem(
+        name: item.name,
+        remotePath: item.remotePath ?? "/",
+        content: fileContent,
+      )
     });
-    proxyServer.stop();
   }
 
   void onMenuClick(DownloadManagerMenuId menuId) {

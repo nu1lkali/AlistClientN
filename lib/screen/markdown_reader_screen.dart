@@ -115,6 +115,12 @@ class MarkdownReaderScreenController extends GetxController {
     loading.value = true;
     isDownloading.value = true;
 
+    // 如果直接传入了内容，跳过下载
+    if (markdownItem.content != null) {
+      await _renderMarkdown(null, content: markdownItem.content);
+      return;
+    }
+
     final requestHeaders = <String, dynamic>{};
     var limitFrequency = 0;
     if (markdownItem.provider == "BaiduNetdisk") {
@@ -163,18 +169,22 @@ class MarkdownReaderScreenController extends GetxController {
     });
   }
 
-  Future<void> _renderMarkdown(String filePath) async {
+  Future<void> _renderMarkdown(String? filePath, {String? content}) async {
     try {
-      final file = File(filePath);
-      if (!file.existsSync()) {
-        errMsg.value = "文件不存在";
-        loading.value = false;
-        isDownloading.value = false;
-        return;
+      String mdContent;
+      if (content != null) {
+        mdContent = content;
+      } else {
+        final file = File(filePath!);
+        if (!file.existsSync()) {
+          errMsg.value = "文件不存在";
+          loading.value = false;
+          isDownloading.value = false;
+          return;
+        }
+        mdContent = await file.readAsString();
       }
-
-      final content = await file.readAsString();
-      final escapedContent = _escapeHtml(content);
+      final escapedContent = _escapeHtml(mdContent);
       
       htmlContent.value = '''
 <!DOCTYPE html>
@@ -326,6 +336,7 @@ class MarkdownItem {
   final String? sign;
   final String? provider;
   final String? thumb;
+  final String? content; // 直接传入 markdown 内容，不需要下载
 
   MarkdownItem({
     required this.name,
@@ -334,5 +345,6 @@ class MarkdownItem {
     this.sign,
     this.provider,
     this.thumb,
+    this.content,
   });
 }
