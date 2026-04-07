@@ -12,12 +12,14 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_smart_dialog/flutter_smart_dialog.dart';
 import 'package:get/get.dart';
+import 'package:media_kit/media_kit.dart';
 import 'package:pull_to_refresh/pull_to_refresh.dart';
 
 import 'database/alist_database_controller.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
+  MediaKit.ensureInitialized(); // 初始化 media_kit
   SpUtil.getInstance();
   Log.init();
   runApp(const MyApp());

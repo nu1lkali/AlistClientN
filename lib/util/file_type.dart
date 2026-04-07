@@ -21,5 +21,6 @@ enum FileType {
   folder,
   file,
   apk,
-  markdown
+  markdown,
+  iptv, // m3u/m3u8 playlist
 }

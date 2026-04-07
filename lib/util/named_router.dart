@@ -64,4 +64,10 @@ class NamedRouter {
 
   // markdown reader
   static const markdownReader = "/markdownReader";
+
+  // iptv player
+  static const iptvPlayer = "/iptvPlayer";
+
+  // iptv playlist
+  static const iptv = "/iptv";
 }

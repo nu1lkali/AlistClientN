@@ -1495,6 +1495,9 @@ class _FileListScreenState extends State<FileListScreen>
           arguments: {"txtItem": txtItem},
         );
         break;
+      case FileType.iptv:
+        _goIptvScreen(file);
+        break;
       case FileType.word:
       case FileType.excel:
       case FileType.ppt:
@@ -1528,6 +1531,15 @@ class _FileListScreenState extends State<FileListScreen>
         );
         break;
     }
+  }
+
+  void _goIptvScreen(FileItemVO file) async {
+    final url = await FileUtils.makeFileLink(file.path, file.sign);
+    if (url == null || url.isEmpty) return;
+    Get.toNamed(
+      NamedRouter.iptv,
+      arguments: {'name': file.name, 'url': url},
+    );
   }
 
   void _goAudioPlayerScreen(FileItemVO file, List<FileItemVO> files) async {

@@ -39,19 +39,14 @@ class LoginScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     return AlistScaffold(
       appbarTitle: Text(Intl.screenName_login.tr),
-      body: Stack(
-        children: [
-          GestureDetector(
-            onTap: () {
-              Get.focusScope?.unfocus();
-            },
-            behavior: HitTestBehavior.translucent,
-            child: SingleChildScrollView(
-              child: LoginScreenContainer(),
-            ),
-          ),
-          Obx(() =>
-              Positioned(
+      body: GestureDetector(
+        onTap: () => Get.focusScope?.unfocus(),
+        behavior: HitTestBehavior.translucent,
+        child: SafeArea(
+          child: Stack(
+            children: [
+              LoginScreenContainer(),
+              Obx(() => Positioned(
                 bottom: 0,
                 left: 0,
                 right: 0,
@@ -62,7 +57,9 @@ class LoginScreen extends StatelessWidget {
                       loginScreenController.addressTextFieldIsFocused.value,
                 ),
               )),
-        ],
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -136,135 +133,156 @@ class LoginScreenContainer extends StatelessWidget {
           contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
         );
 
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(24, 40, 24, 24),
-      child: Column(
-        children: [
-          // logo + title
-          Container(
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              color: scheme.primaryContainer.withOpacity(0.3),
-              shape: BoxShape.circle,
-            ),
-            child: Image.asset(Images.logo, width: 64, height: 64),
-          ),
-          const SizedBox(height: 20),
-          Text(
-            'AList Client',
-            style: Theme.of(context).textTheme.headlineMedium?.copyWith(
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final h = constraints.maxHeight;
+        // 根据可用高度动态计算间距，最小 4，最大 20
+        final gap = (h * 0.02).clamp(4.0, 20.0);
+        final logoSize = (h * 0.08).clamp(40.0, 72.0);
+        final btnHeight = (h * 0.07).clamp(44.0, 56.0);
+
+        return Padding(
+          padding: EdgeInsets.symmetric(horizontal: 24, vertical: gap),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              // logo
+              Container(
+                padding: EdgeInsets.all(gap),
+                decoration: BoxDecoration(
+                  color: scheme.primaryContainer.withOpacity(0.3),
+                  shape: BoxShape.circle,
+                ),
+                child: Image.asset(Images.logo, width: logoSize, height: logoSize),
+              ),
+              SizedBox(height: gap),
+              Text(
+                'AList Client',
+                style: Theme.of(context).textTheme.headlineSmall?.copyWith(
                   fontWeight: FontWeight.bold,
                   color: scheme.primary,
                   letterSpacing: -0.5,
                 ),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            '连接你的 AList 服务器',
-            style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                  color: scheme.onSurfaceVariant,
-                ),
-          ),
-          const SizedBox(height: 40),
-
-          // server url
-          TextField(
-            decoration: fieldDecoration(
-              Intl.loginScreen_label_serverUrl.tr,
-              'http://example.com:5244',
-              Icons.dns_rounded,
-            ),
-            controller: loginScreenController.addressController,
-            focusNode: loginScreenController.addressFocusNode,
-            keyboardType: TextInputType.url,
-          ),
-          const SizedBox(height: 16),
-
-          // username
-          TextField(
-            decoration: fieldDecoration(
-              Intl.loginScreen_label_username.tr,
-              'guest',
-              Icons.person_rounded,
-            ),
-            controller: loginScreenController.usernameController,
-          ),
-          const SizedBox(height: 16),
-
-          // password
-          TextField(
-            decoration: fieldDecoration(
-              Intl.loginScreen_label_password.tr,
-              'password',
-              Icons.lock_rounded,
-            ),
-            controller: loginScreenController.passwordController,
-            obscureText: true,
-          ),
-          const SizedBox(height: 12),
-
-          // SSL checkbox
-          Obx(() => buildSSLErrorIgnoreCheckbox(context)),
-          const SizedBox(height: 32),
-
-          // login button
-          SizedBox(
-            width: double.infinity,
-            height: 52,
-            child: FilledButton(
-              onPressed: () {
-                loginScreenController.twofaController.text = "";
-                KeyboardUtil.hideKeyboard(context);
-                loginScreenController._onLoginButtonClick(context);
-              },
-              style: FilledButton.styleFrom(
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                elevation: 2,
-                shadowColor: scheme.primary.withOpacity(0.3),
               ),
-              child: Text(
-                Intl.loginScreen_button_login.tr,
-                style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600, letterSpacing: 0.5),
-              ),
-            ),
-          ),
-          const SizedBox(height: 14),
+              SizedBox(height: gap * 1.5),
 
-          // guest mode button
-          SizedBox(
-            width: double.infinity,
-            height: 52,
-            child: OutlinedButton(
-              onPressed: () {
-                var address = loginScreenController.addressController.text.trim();
-                if (address.isEmpty) {
-                  loginScreenController._tryEntryDefaultServer(context);
-                } else {
-                  loginScreenController._enterVisitorMode(address);
-                }
-              },
-              style: OutlinedButton.styleFrom(
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12),
+              // scheme selector
+              Obx(() => Row(children: [
+                Expanded(
+                  child: SegmentedButton<String>(
+                    segments: const [
+                      ButtonSegment(value: 'http', label: Text('HTTP')),
+                      ButtonSegment(value: 'https', label: Text('HTTPS')),
+                    ],
+                    selected: {loginScreenController.scheme.value},
+                    onSelectionChanged: (s) =>
+                        loginScreenController.scheme.value = s.first,
+                  ),
                 ),
-                side: BorderSide(color: scheme.primary, width: 1.5),
+              ])),
+              SizedBox(height: gap),
+
+              // host
+              TextField(
+                decoration: fieldDecoration(
+                  Intl.loginScreen_label_serverUrl.tr,
+                  'example.com',
+                  Icons.dns_rounded,
+                ),
+                controller: loginScreenController.addressController,
+                focusNode: loginScreenController.addressFocusNode,
+                keyboardType: TextInputType.url,
               ),
-              child: Text(
-                Intl.loginScreen_button_guestMode.tr,
-                style: TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.w600,
-                  color: scheme.primary,
-                  letterSpacing: 0.5,
+              SizedBox(height: gap),
+
+              // port
+              TextField(
+                decoration: fieldDecoration('端口', '5244', Icons.settings_ethernet_rounded),
+                controller: loginScreenController.portController,
+                keyboardType: TextInputType.number,
+              ),
+              SizedBox(height: gap),
+
+              // username
+              TextField(
+                decoration: fieldDecoration(
+                  Intl.loginScreen_label_username.tr,
+                  'guest',
+                  Icons.person_rounded,
+                ),
+                controller: loginScreenController.usernameController,
+              ),
+              SizedBox(height: gap),
+
+              // password
+              TextField(
+                decoration: fieldDecoration(
+                  Intl.loginScreen_label_password.tr,
+                  'password',
+                  Icons.lock_rounded,
+                ),
+                controller: loginScreenController.passwordController,
+                obscureText: true,
+              ),
+              SizedBox(height: gap * 0.5),
+
+              // SSL checkbox
+              Obx(() => buildSSLErrorIgnoreCheckbox(context)),
+              SizedBox(height: gap),
+
+              // login button
+              SizedBox(
+                width: double.infinity,
+                height: btnHeight,
+                child: FilledButton(
+                  onPressed: () {
+                    loginScreenController.twofaController.text = "";
+                    KeyboardUtil.hideKeyboard(context);
+                    loginScreenController._onLoginButtonClick(context,
+                        address: loginScreenController._buildAddress());
+                  },
+                  style: FilledButton.styleFrom(
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  ),
+                  child: Text(
+                    Intl.loginScreen_button_login.tr,
+                    style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+                  ),
                 ),
               ),
-            ),
+              SizedBox(height: gap),
+
+              // guest mode button
+              SizedBox(
+                width: double.infinity,
+                height: btnHeight,
+                child: OutlinedButton(
+                  onPressed: () {
+                    var address = loginScreenController._buildAddress();
+                    if (address.isEmpty || address == 'http://' || address == 'https://') {
+                      loginScreenController._tryEntryDefaultServer(context);
+                    } else {
+                      loginScreenController._enterVisitorMode(address);
+                    }
+                  },
+                  style: OutlinedButton.styleFrom(
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    side: BorderSide(color: scheme.primary, width: 1.5),
+                  ),
+                  child: Text(
+                    Intl.loginScreen_button_guestMode.tr,
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w600,
+                      color: scheme.primary,
+                    ),
+                  ),
+                ),
+              ),
+            ],
           ),
-          const SizedBox(height: 24),
-        ],
-      ),
+        );
+      },
     );
   }
 
@@ -317,11 +335,12 @@ class LoginScreenController extends GetxController with WidgetsBindingObserver {
   final usernameController = TextEditingController();
   final passwordController = TextEditingController();
   final twofaController = TextEditingController();
+  final portController = TextEditingController();
   final CancelToken _cancelToken = CancelToken();
   var keyboardHeight = 0.0.obs;
   var bottomBarTypes = _bottomBarTypes1.obs;
   var addressTextFieldIsFocused = false.obs;
-
+  var scheme = 'http'.obs;
   var ignoreSSLError = false.obs;
 
   @override
@@ -334,9 +353,22 @@ class LoginScreenController extends GetxController with WidgetsBindingObserver {
     ignoreSSLError.value =
         SpUtil.getBool(AlistConstant.ignoreSSLError) ?? false;
 
-    addressController.text = userController
-        .user()
-        .serverUrl;
+    // 解析已保存的 serverUrl，拆分出 scheme、host、port
+    final savedUrl = userController.user().serverUrl;
+    if (savedUrl.isNotEmpty) {
+      try {
+        final uri = Uri.parse(savedUrl);
+        scheme.value = uri.scheme == 'https' ? 'https' : 'http';
+        addressController.text = uri.host;
+        final port = uri.hasPort ? uri.port : (scheme.value == 'https' ? 443 : 5244);
+        portController.text = port.toString();
+      } catch (_) {
+        addressController.text = savedUrl;
+        portController.text = '5244';
+      }
+    } else {
+      portController.text = '5244';
+    }
     String username = userController
         .user()
         .username ?? "";
@@ -381,6 +413,21 @@ class LoginScreenController extends GetxController with WidgetsBindingObserver {
     return DateTime
         .now()
         .millisecondsSinceEpoch;
+  }
+
+  /// 把 scheme + host + port 拼成完整地址
+  String _buildAddress() {
+    final host = addressController.text.trim();
+    final port = portController.text.trim();
+    final s = scheme.value;
+    if (host.startsWith('http://') || host.startsWith('https://')) {
+      // 用户直接粘贴了完整 URL，直接用
+      return host;
+    }
+    if (port.isEmpty || port == '80' && s == 'http' || port == '443' && s == 'https') {
+      return '$s://$host';
+    }
+    return '$s://$host:$port';
   }
 
   Future<void> _login(String address,

@@ -9,6 +9,8 @@ import 'package:alist/screen/file_reader_screen.dart';
 import 'package:alist/screen/file_search_screen.dart';
 import 'package:alist/screen/gallery_screen.dart';
 import 'package:alist/screen/home_screen.dart';
+import 'package:alist/screen/iptv/iptv_player_screen.dart';
+import 'package:alist/screen/iptv/iptv_screen.dart';
 import 'package:alist/screen/login_screen.dart';
 import 'package:alist/screen/markdown_reader_screen.dart';
 import 'package:alist/screen/office_reader_screen.dart';
@@ -52,5 +54,7 @@ class AlistRouter {
     GetPage(name: NamedRouter.txtReader, page: () => TxtReaderScreen()),
     GetPage(name: NamedRouter.officeReader, page: () => OfficeReaderScreen()),
     GetPage(name: NamedRouter.markdownReader, page: () => MarkdownReaderScreen()),
+    GetPage(name: NamedRouter.iptv, page: () => const IptvScreen()),
+    GetPage(name: NamedRouter.iptvPlayer, page: () => const IptvPlayerScreen()),
   ];
 }

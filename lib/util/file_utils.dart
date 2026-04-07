@@ -113,6 +113,9 @@ class FileUtils {
         return FileType.excel;
       case "psd":
         return FileType.psd;
+      case "m3u":
+      case "m3u8":
+        return FileType.iptv;
       case "txt":
       case "log":
       case "xml":
@@ -243,6 +246,8 @@ class FileUtils {
         return Images.fileTypeZip;
       case FileType.markdown:
         return Images.fileTypeMd;
+      case FileType.iptv:
+        return Images.fileTypeVideo; // 复用视频图标
       default:
         return Images.fileTypeUnknow;
     }
