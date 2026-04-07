@@ -78,7 +78,7 @@ flutter build apk --release
 
 ## 致谢
 
-本项目基于 [AlistClient](https://github.com/BFWXKJGS/AlistClient) 开发，感谢原作者的开源工作。
+本项目基于 [AlistClient](https://github.com/BFWXKJGS/AlistClient) 开发，感谢原作者的开源贡献。
 
 ---
 
