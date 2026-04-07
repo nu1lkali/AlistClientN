@@ -10,6 +10,7 @@ import 'package:alist/net/dio_utils.dart';
 import 'package:alist/screen/audio_player_screen.dart';
 import 'package:alist/screen/file_reader_screen.dart';
 import 'package:alist/screen/gallery_screen.dart';
+import 'package:alist/screen/iptv/model/iptv_channel.dart';
 import 'package:alist/screen/pdf_reader_screen.dart';
 import 'package:alist/screen/video_player_screen.dart';
 import 'package:alist/util/constant.dart';
@@ -81,6 +82,13 @@ class _RecentsScreenState extends State<RecentsScreen>
     super.build(context);
     return AlistScaffold(
       appbarTitle: Text(Intl.screenName_recents.tr),
+      appbarActions: [
+        IconButton(
+          icon: const Icon(Icons.live_tv_rounded),
+          tooltip: '输入流媒体地址播放',
+          onPressed: _showUrlInputDialog,
+        ),
+      ],
       body: Obx(
         () => !_loading.value && _list.isEmpty
             ? Center(
@@ -168,6 +176,9 @@ class _RecentsScreenState extends State<RecentsScreen>
       case FileType.image:
         _gotoGalleryScreen(file);
         break;
+      case FileType.iptv:
+        _goIptvScreen(file);
+        break;
       case FileType.pdf:
         var pdfItem = PdfItem(
           name: file.name,
@@ -228,8 +239,62 @@ class _RecentsScreenState extends State<RecentsScreen>
     ));
   }
 
-  void _previewMarkdown(FileViewingRecord file) async {
-    var fileLink = await FileUtils.makeFileLink(file.remotePath, file.sign);
+  void _goIptvScreen(FileViewingRecord file) async {
+    final url = await FileUtils.makeFileLink(file.path, file.sign);
+    if (url == null || url.isEmpty) return;
+    Get.toNamed(
+      NamedRouter.iptv,
+      arguments: {'name': file.name, 'url': url},
+    );
+  }
+
+  void _showUrlInputDialog() {
+    final controller = TextEditingController();
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('输入流媒体地址'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          decoration: const InputDecoration(
+            hintText: 'http(s):// 或 rtmp:// 地址',
+          ),
+          keyboardType: TextInputType.url,
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () {
+              final url = controller.text.trim();
+              Navigator.pop(ctx);
+              if (url.isEmpty) return;
+              // m3u/m3u8 播放列表走 iptv 页面，其他直接进播放器
+              final lower = url.toLowerCase();
+              if (lower.endsWith('.m3u') || lower.endsWith('.m3u8')) {
+                Get.toNamed(NamedRouter.iptv,
+                    arguments: {'name': url, 'url': url});
+              } else {
+                // 直接作为单频道播放
+                final channel = IptvChannel(name: url, url: url);
+                Get.toNamed(NamedRouter.iptvPlayer, arguments: {
+                  'channel': channel,
+                  'playlist': [channel],
+                  'index': 0,
+                });
+              }
+            },
+            child: const Text('播放'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _previewMarkdown(FileViewingRecord file) async {    var fileLink = await FileUtils.makeFileLink(file.remotePath, file.sign);
     if (fileLink != null) {
       Get.toNamed(NamedRouter.web, arguments: {
         "url": MarkdownUtil.makePreviewUrl(fileLink),

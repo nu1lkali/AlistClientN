@@ -5,6 +5,7 @@ import 'package:alist/database/alist_database_controller.dart';
 import 'package:alist/generated/images.dart';
 import 'package:alist/l10n/intl_keys.dart';
 import 'package:alist/main.dart';
+import 'package:alist/screen/iptv/model/iptv_channel.dart';
 import 'package:alist/util/constant.dart';
 import 'package:alist/util/global.dart';
 import 'package:alist/util/log_utils.dart';
@@ -78,6 +79,7 @@ class _SettingsContainerState extends State<_SettingsContainer>
         m.menuId == MenuId.cacheManager ||
         m.menuId == MenuId.aggressiveCache ||
         m.menuId == MenuId.playerSettings ||
+        m.menuId == MenuId.iptvUrl ||
         m.menuId == MenuId.themeColor).toList();
     final aboutMenus = menus.where((m) =>
         m.menuId == MenuId.donate ||
@@ -252,6 +254,9 @@ class _SettingsContainerState extends State<_SettingsContainer>
           "title": Intl.settingsScreen_item_privacyPolicy.tr,
         });
         break;
+      case MenuId.iptvUrl:
+        _showUrlInputDialog(context);
+        break;
       case MenuId.about:
         String local = Get.locale?.toString().startsWith("zh_") == true ? "zh" : "en_US";
         Get.toNamed(NamedRouter.web, arguments: {
@@ -271,6 +276,50 @@ class _SettingsContainerState extends State<_SettingsContainer>
       title: Text(settingsMenu.name),
       trailing: Image.asset(Images.iconArrowRight,
           color: isDarkMode ? Colors.white : null),
+    );
+  }
+
+  void _showUrlInputDialog(BuildContext context) {
+    final controller = TextEditingController();
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('输入流媒体地址'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          decoration: const InputDecoration(
+            hintText: 'http(s):// 或 rtmp:// 地址',
+          ),
+          keyboardType: TextInputType.url,
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () {
+              final url = controller.text.trim();
+              Navigator.pop(ctx);
+              if (url.isEmpty) return;
+              final lower = url.toLowerCase();
+              if (lower.endsWith('.m3u') || lower.endsWith('.m3u8')) {
+                Get.toNamed(NamedRouter.iptv,
+                    arguments: {'name': url, 'url': url});
+              } else {
+                final channel = IptvChannel(name: url, url: url);
+                Get.toNamed(NamedRouter.iptvPlayer, arguments: {
+                  'channel': channel,
+                  'playlist': [channel],
+                  'index': 0,
+                });
+              }
+            },
+            child: const Text('播放'),
+          ),
+        ],
+      ),
     );
   }
 
@@ -383,6 +432,11 @@ class _SettingsContainerState extends State<_SettingsContainer>
           icon: Images.settingsScreenPlayer,
           route: NamedRouter.playerSettings),
       SettingsMenu(
+          menuId: MenuId.iptvUrl,
+          name: '流媒体地址播放',
+          icon: Images.settingsScreenPlayer,
+          iconData: Icons.live_tv_rounded),
+      SettingsMenu(
           menuId: MenuId.privacyPolicy,
           name: Intl.settingsScreen_item_privacyPolicy.tr,
           icon: Images.settingsScreenPrivacyPolicy,
@@ -458,4 +512,5 @@ enum MenuId {
   aggressiveCache,
   playerSettings,
   themeColor,
+  iptvUrl,
 }

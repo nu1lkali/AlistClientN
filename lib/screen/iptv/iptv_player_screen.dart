@@ -37,6 +37,9 @@ class _IptvPlayerScreenState extends State<IptvPlayerScreen> {
     );
     _controller = VideoController(_player);
 
+    // 进入播放器时隐藏系统 UI，只调用一次避免横竖屏切换时闪烁
+    SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
+
     _playAt(_index);
     _resetHideTimer();
   }
@@ -64,9 +67,6 @@ class _IptvPlayerScreenState extends State<IptvPlayerScreen> {
 
   @override
   Widget build(BuildContext context) {
-    // 隐藏系统 UI（状态栏+导航栏），但不强制横屏
-    SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
-
     return WillPopScope(
       onWillPop: () async {
         SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
@@ -83,7 +83,7 @@ class _IptvPlayerScreenState extends State<IptvPlayerScreen> {
                 child: Video(controller: _controller),
               ),
               // 控制层
-              if (_showControls) _buildControls(),
+              if (_showControls) Positioned.fill(child: _buildControls()),
             ],
           ),
         ),
@@ -93,48 +93,61 @@ class _IptvPlayerScreenState extends State<IptvPlayerScreen> {
 
   Widget _buildControls() {
     final channel = _playlist[_index];
-    return Column(
+    return Stack(
       children: [
         // 顶部标题栏
-        Container(
-          decoration: const BoxDecoration(
-            gradient: LinearGradient(
-              begin: Alignment.topCenter,
-              end: Alignment.bottomCenter,
-              colors: [Colors.black87, Colors.transparent],
+        Positioned(
+          top: 0,
+          left: 0,
+          right: 0,
+          child: Container(
+            decoration: const BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                colors: [Colors.black87, Colors.transparent],
+              ),
             ),
-          ),
-          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-          child: SafeArea(
-            child: Row(
-              children: [
-                IconButton(
-                  icon: const Icon(Icons.arrow_back, color: Colors.white),
-                  onPressed: () => Get.back(),
-                ),
-                Expanded(
-                  child: Text(
-                    channel.name,
-                    style: const TextStyle(color: Colors.white, fontSize: 16),
-                    overflow: TextOverflow.ellipsis,
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+            child: SafeArea(
+              bottom: false,
+              child: Row(
+                children: [
+                  IconButton(
+                    icon: const Icon(Icons.arrow_back, color: Colors.white),
+                    onPressed: () => Get.back(),
                   ),
-                ),
-              ],
+                  Expanded(
+                    child: Text(
+                      channel.name,
+                      style: const TextStyle(color: Colors.white, fontSize: 16),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
         ),
-        const Spacer(),
-        // 底部控制栏
-        Container(
-          decoration: const BoxDecoration(
-            gradient: LinearGradient(
-              begin: Alignment.bottomCenter,
-              end: Alignment.topCenter,
-              colors: [Colors.black87, Colors.transparent],
+        // 底部控制栏，固定在底部，padding 留出安全区
+        Positioned(
+          bottom: 0,
+          left: 0,
+          right: 0,
+          child: Container(
+            decoration: const BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.bottomCenter,
+                end: Alignment.topCenter,
+                colors: [Colors.black87, Colors.transparent],
+              ),
             ),
-          ),
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-          child: SafeArea(
+            padding: EdgeInsets.only(
+              left: 16,
+              right: 16,
+              top: 8,
+              bottom: MediaQuery.of(context).padding.bottom + 8,
+            ),
             child: Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
