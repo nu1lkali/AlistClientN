@@ -7,7 +7,6 @@ import 'package:get/get.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 
-/// IPTV 频道播放器 —— 使用 media_kit 播放 HLS/m3u8 直播流
 class IptvPlayerScreen extends StatefulWidget {
   const IptvPlayerScreen({super.key});
 
@@ -18,15 +17,15 @@ class IptvPlayerScreen extends StatefulWidget {
 class _IptvPlayerScreenState extends State<IptvPlayerScreen> {
   late final List<IptvChannel> _playlist;
   late int _index;
-
   late final Player _player;
   late final VideoController _controller;
 
-  // 横向拖动 seek 状态
   bool _seeking = false;
-  Duration _seekDelta = Duration.zero;
+  Duration _seekTarget = Duration.zero;
   Duration _seekStartPos = Duration.zero;
   double _dragStartX = 0;
+  double _dragStartY = 0;
+  bool _dragConfirmed = false; // 确认是横向拖动后才激活 seek
 
   @override
   void initState() {
@@ -59,17 +58,71 @@ class _IptvPlayerScreenState extends State<IptvPlayerScreen> {
     super.dispose();
   }
 
-  String _formatDuration(Duration d) {
+  String _fmt(Duration d) {
+    if (d.isNegative) d = Duration.zero;
     final h = d.inHours;
     final m = d.inMinutes.remainder(60).toString().padLeft(2, '0');
     final s = d.inSeconds.remainder(60).toString().padLeft(2, '0');
     return h > 0 ? '$h:$m:$s' : '$m:$s';
   }
 
+  void _onPointerDown(PointerDownEvent e) {
+    _dragStartX = e.position.dx;
+    _dragStartY = e.position.dy;
+    _dragConfirmed = false;
+  }
+
+  void _onPointerMove(PointerMoveEvent e) {
+    final dx = e.position.dx - _dragStartX;
+    final dy = e.position.dy - _dragStartY;
+
+    if (!_dragConfirmed) {
+      // 移动超过 10px 才判断方向
+      if (dx.abs() < 10 && dy.abs() < 10) return;
+      // 横向分量大于纵向才激活 seek
+      if (dx.abs() <= dy.abs()) return;
+      final dur = _player.state.duration;
+      if (dur == Duration.zero) return; // 直播流不 seek
+      _dragConfirmed = true;
+      _seekStartPos = _player.state.position;
+      _seekTarget = _seekStartPos;
+      setState(() => _seeking = true);
+    }
+
+    if (!_seeking) return;
+    final dur = _player.state.duration;
+    if (dur == Duration.zero) return;
+    final screenW = MediaQuery.of(context).size.width;
+    final ratio = dx / screenW;
+    final deltaMs = (ratio * 90000).round();
+    var target = _seekStartPos + Duration(milliseconds: deltaMs);
+    if (target.isNegative) target = Duration.zero;
+    if (target > dur) target = dur;
+    setState(() => _seekTarget = target);
+  }
+
+  void _onPointerUp(PointerUpEvent e) {
+    if (_seeking) {
+      _player.seek(_seekTarget);
+      setState(() {
+        _seeking = false;
+        _dragConfirmed = false;
+      });
+    }
+  }
+
+  void _onPointerCancel(PointerCancelEvent e) {
+    if (_seeking) {
+      setState(() {
+        _seeking = false;
+        _dragConfirmed = false;
+      });
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final channel = _playlist[_index];
-    final screenW = MediaQuery.of(context).size.width;
 
     return WillPopScope(
       onWillPop: () async {
@@ -83,60 +136,12 @@ class _IptvPlayerScreenState extends State<IptvPlayerScreen> {
           backgroundColor: Colors.black,
           body: Stack(
             children: [
-              // 视频 + 手势层
-              GestureDetector(
+              Listener(
                 behavior: HitTestBehavior.translucent,
-                onHorizontalDragStart: (d) {
-                  final pos = _player.state.position;
-                  final dur = _player.state.duration;
-                  // 直播流没有 duration，不支持 seek
-                  if (dur == Duration.zero) return;
-                  setState(() {
-                    _seeking = true;
-                    _seekStartPos = pos;
-                    _seekDelta = Duration.zero;
-                    _dragStartX = d.localPosition.dx;
-                  });
-                },
-                onHorizontalDragUpdate: (d) {
-                  if (!_seeking) return;
-                  final dur = _player.state.duration;
-                  if (dur == Duration.zero) return;
-                  // 每屏宽度对应最多 90 秒
-                  final ratio = (d.localPosition.dx - _dragStartX) / screenW;
-                  final deltaMs = (ratio * 90000).round();
-                  final newPos = _seekStartPos + Duration(milliseconds: deltaMs);
-                  final clamped = newPos.isNegative
-                      ? Duration.zero
-                      : newPos > dur ? dur : newPos;
-                  setState(() {
-                    _seekDelta = Duration(milliseconds: deltaMs);
-                    _seekStartPos = _seekStartPos; // keep reference
-                    // show preview position
-                    _seekDelta = clamped - _seekStartPos;
-                  });
-                },
-                onHorizontalDragEnd: (_) {
-                  if (!_seeking) return;
-                  final dur = _player.state.duration;
-                  if (dur != Duration.zero) {
-                    final target = _seekStartPos + _seekDelta;
-                    final clamped = target.isNegative
-                        ? Duration.zero
-                        : target > dur ? dur : target;
-                    _player.seek(clamped);
-                  }
-                  setState(() {
-                    _seeking = false;
-                    _seekDelta = Duration.zero;
-                  });
-                },
-                onHorizontalDragCancel: () {
-                  setState(() {
-                    _seeking = false;
-                    _seekDelta = Duration.zero;
-                  });
-                },
+                onPointerDown: _onPointerDown,
+                onPointerMove: _onPointerMove,
+                onPointerUp: _onPointerUp,
+                onPointerCancel: _onPointerCancel,
                 child: SizedBox.expand(
                   child: Video(
                     controller: _controller,
@@ -144,35 +149,37 @@ class _IptvPlayerScreenState extends State<IptvPlayerScreen> {
                   ),
                 ),
               ),
-              // 拖动 seek 提示浮层
               if (_seeking)
                 Center(
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                    decoration: BoxDecoration(
-                      color: Colors.black.withOpacity(0.7),
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(
-                          _seekDelta.isNegative
-                              ? Icons.fast_rewind_rounded
-                              : Icons.fast_forward_rounded,
-                          color: Colors.white,
-                          size: 28,
-                        ),
-                        const SizedBox(width: 8),
-                        Text(
-                          _formatDuration((_seekStartPos + _seekDelta).abs()),
-                          style: const TextStyle(
+                  child: IgnorePointer(
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 20, vertical: 12),
+                      decoration: BoxDecoration(
+                        color: Colors.black.withOpacity(0.7),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            _seekTarget < _seekStartPos
+                                ? Icons.fast_rewind_rounded
+                                : Icons.fast_forward_rounded,
                             color: Colors.white,
-                            fontSize: 18,
-                            fontWeight: FontWeight.w600,
+                            size: 28,
                           ),
-                        ),
-                      ],
+                          const SizedBox(width: 8),
+                          Text(
+                            _fmt(_seekTarget),
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 20,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
                   ),
                 ),
