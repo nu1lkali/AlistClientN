@@ -3,6 +3,7 @@ import 'dart:math';
 import 'dart:ui';
 
 import 'package:alist/database/alist_database_controller.dart';
+import 'package:alist/database/table/video_viewing_record.dart';
 import 'package:alist/l10n/intl_keys.dart';
 import 'package:alist/util/file_utils.dart';
 import 'package:alist/util/lock_caching_audio_source.dart';
@@ -278,6 +279,9 @@ class AudioPlayerScreenController extends GetxController {
   final _seekPos = (-1.0).obs;
   List<StreamSubscription> streamSubscriptions = [];
 
+  // 上次保存进度的时间，避免频繁写库
+  DateTime _lastSaveTime = DateTime.now();
+
   @override
   void onInit() {
     super.onInit();
@@ -299,12 +303,23 @@ class AudioPlayerScreenController extends GetxController {
       if (_duration.value.inMilliseconds < _currentPos.value.inMilliseconds) {
         _currentPos.value = _duration.value;
       }
+      // 每 10 秒保存一次进度
+      final now = DateTime.now();
+      if (now.difference(_lastSaveTime).inSeconds >= 10) {
+        _lastSaveTime = now;
+        _saveProgress(_index);
+      }
     });
     streamSubscriptions.add(positionStreamSubscription);
     var sequenceStreamSubscription =
         _audioPlayer.sequenceStateStream.listen((event) {
       if (event != null && _audios.isNotEmpty) {
+        final prevIndex = _index;
         _index = event.currentIndex;
+        // 切歌时保存上一首进度
+        if (prevIndex != _index) {
+          _saveProgress(prevIndex);
+        }
         var item = event.currentSource?.tag as MediaItem?;
         LogUtil.d("itemId=${item?.id}");
         if (item?.id == _audios[_index].remotePath) {
@@ -347,7 +362,9 @@ class AudioPlayerScreenController extends GetxController {
       shuffleOrder: DefaultShuffleOrder(),
       children: sources,
     );
-    _audioPlayer.setAudioSource(_playList, initialIndex: _index);
+    await _audioPlayer.setAudioSource(_playList, initialIndex: _index);
+    // 恢复上次播放进度
+    await _restoreProgress(_index);
     _audioPlayer.play();
   }
 
@@ -440,6 +457,8 @@ class AudioPlayerScreenController extends GetxController {
   void onClose() {
     super.onClose();
     _cancelToken.cancel();
+    // 关闭时保存当前进度
+    _saveProgress(_index);
     _releasePlayer();
 
     for (var element in streamSubscriptions) {
@@ -470,6 +489,55 @@ class AudioPlayerScreenController extends GetxController {
     }
     _playList.removeAt(index);
     _audios.removeAt(index);
+  }
+
+  void _saveProgress(int index) {
+    if (index < 0 || index >= _audios.length) return;
+    final pos = _currentPos.value.inMilliseconds;
+    final dur = _duration.value.inMilliseconds;
+    if (dur <= 0) return;
+    final audio = _audios[index];
+    final db = Get.find<AlistDatabaseController>();
+    final user = Get.find<UserController>().user.value;
+    db.videoViewingRecordDao
+        .findRecordByPath(user.baseUrl, user.username, audio.remotePath)
+        .then((record) {
+      final newRecord = VideoViewingRecord(
+        id: record?.id,
+        serverUrl: user.baseUrl,
+        userId: user.username,
+        videoSign: audio.sign ?? '',
+        path: audio.remotePath,
+        videoCurrentPosition: pos,
+        videoDuration: dur,
+      );
+      if (record == null) {
+        db.videoViewingRecordDao.insertRecord(newRecord);
+      } else {
+        db.videoViewingRecordDao.updateRecord(newRecord);
+      }
+    });
+  }
+
+  Future<void> _restoreProgress(int index) async {
+    if (index < 0 || index >= _audios.length) return;
+    final audio = _audios[index];
+    final db = Get.find<AlistDatabaseController>();
+    final user = Get.find<UserController>().user.value;
+    final record = await db.videoViewingRecordDao
+        .findRecordByPath(user.baseUrl, user.username, audio.remotePath);
+    if (record != null &&
+        record.videoCurrentPosition > 0 &&
+        record.videoDuration > 0) {
+      final progress =
+          record.videoCurrentPosition / record.videoDuration;
+      // 进度超过 98% 视为播完，从头开始
+      if (progress < 0.98) {
+        await _audioPlayer.seek(
+            Duration(milliseconds: record.videoCurrentPosition),
+            index: index);
+      }
+    }
   }
 
   void _changePlayMode() {
