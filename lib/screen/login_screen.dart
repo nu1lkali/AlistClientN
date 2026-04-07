@@ -157,7 +157,7 @@ class LoginScreenContainer extends StatelessWidget {
               ),
               SizedBox(height: gap),
               Text(
-                'ALClientN',
+                'AList Client N',
                 style: Theme.of(context).textTheme.headlineSmall?.copyWith(
                   fontWeight: FontWeight.bold,
                   color: scheme.primary,
