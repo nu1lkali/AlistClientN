@@ -7,3 +7,4 @@
 *.gradle linguist-detectable=false
 *.js linguist-detectable=false
 *.ts linguist-detectable=false
+android/AndroidDocViewer/** linguist-vendored=true
