@@ -31,6 +31,22 @@ class _IptvScreenState extends State<IptvScreen> {
     final args = Get.arguments as Map<String, dynamic>;
     _title = args['name'] ?? 'IPTV';
     _url = args['url'] ?? '';
+
+    // 如果调用方已经准备好了频道列表（如文件列表页），直接跳播放器
+    final prebuiltChannels = args['channels'];
+    if (prebuiltChannels != null && prebuiltChannels is List && prebuiltChannels.isNotEmpty) {
+      final channels = List<IptvChannel>.from(prebuiltChannels);
+      final index = (args['index'] as int? ?? 0).clamp(0, channels.length - 1);
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        Get.off(() => const IptvPlayerScreen(), arguments: {
+          'channel': channels[index],
+          'playlist': channels,
+          'index': index,
+        });
+      });
+      return;
+    }
+
     _loadPlaylist();
   }
 

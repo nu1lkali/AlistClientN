@@ -105,7 +105,13 @@ class _IptvPlayerScreenState extends State<IptvPlayerScreen>
     _playSub?.cancel();
     _bufSub?.cancel();
     WidgetsBinding.instance.removeObserver(this);
+    // 恢复系统 UI，避免返回后底部出现黑线
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+    SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
+      systemNavigationBarColor: Colors.transparent,
+      systemNavigationBarDividerColor: Colors.transparent,
+      statusBarColor: Colors.transparent,
+    ));
     if (_isFullscreen) {
       SystemChrome.setPreferredOrientations([
         DeviceOrientation.portraitUp,
@@ -213,7 +219,6 @@ class _IptvPlayerScreenState extends State<IptvPlayerScreen>
     return WillPopScope(
       onWillPop: () async {
         if (_isFullscreen) { _toggleFullscreen(); return false; }
-        SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
         return true;
       },
       child: AnnotatedRegion<SystemUiOverlayStyle>(
@@ -307,8 +312,6 @@ class _IptvPlayerScreenState extends State<IptvPlayerScreen>
                                 if (_isFullscreen) {
                                   _toggleFullscreen();
                                 } else {
-                                  SystemChrome.setEnabledSystemUIMode(
-                                      SystemUiMode.edgeToEdge);
                                   Get.back();
                                 }
                               },
@@ -332,7 +335,6 @@ class _IptvPlayerScreenState extends State<IptvPlayerScreen>
                     child: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        // 上一个
                         IconButton(
                           iconSize: 48,
                           icon: Icon(
@@ -346,7 +348,6 @@ class _IptvPlayerScreenState extends State<IptvPlayerScreen>
                               : null,
                         ),
                         const SizedBox(width: 16),
-                        // 播放/暂停
                         IconButton(
                           iconSize: 64,
                           icon: Icon(
@@ -361,7 +362,6 @@ class _IptvPlayerScreenState extends State<IptvPlayerScreen>
                           },
                         ),
                         const SizedBox(width: 16),
-                        // 下一个
                         IconButton(
                           iconSize: 48,
                           icon: Icon(
@@ -378,7 +378,7 @@ class _IptvPlayerScreenState extends State<IptvPlayerScreen>
                     ),
                   ),
 
-                  // 底部：进度条 + 按钮行
+                  // 底部：进度条 + 时间 + 全屏
                   Positioned(
                     bottom: 0, left: 0, right: 0,
                     child: Container(

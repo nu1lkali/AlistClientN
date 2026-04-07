@@ -24,6 +24,7 @@ import 'package:alist/screen/file_list/file_rename_dialog.dart';
 import 'package:alist/screen/file_list/mkdir_dialog.dart';
 import 'package:alist/screen/file_reader_screen.dart';
 import 'package:alist/screen/gallery_screen.dart';
+import 'package:alist/screen/iptv/model/iptv_channel.dart';
 import 'package:alist/screen/markdown_reader_screen.dart';
 import 'package:alist/screen/office_reader_screen.dart';
 import 'package:alist/screen/pdf_reader_screen.dart';
@@ -1534,11 +1535,32 @@ class _FileListScreenState extends State<FileListScreen>
   }
 
   void _goIptvScreen(FileItemVO file) async {
-    final url = await FileUtils.makeFileLink(file.path, file.sign);
-    if (url == null || url.isEmpty) return;
+    // 收集同目录所有 iptv 文件
+    final iptvFiles = _files.where((f) => f.type == FileType.iptv).toList();
+    final index = iptvFiles.indexWhere((f) => f.path == file.path);
+
+    SmartDialog.showLoading();
+    // 批量生成直链
+    final channels = <IptvChannel>[];
+    for (final f in iptvFiles) {
+      final url = await FileUtils.makeFileLink(f.path, f.sign);
+      if (url != null && url.isNotEmpty) {
+        channels.add(IptvChannel(name: f.name, url: url));
+      }
+    }
+    SmartDialog.dismiss();
+
+    if (channels.isEmpty) return;
+    final targetIndex = index.clamp(0, channels.length - 1);
+
     Get.toNamed(
       NamedRouter.iptv,
-      arguments: {'name': file.name, 'url': url},
+      arguments: {
+        'name': file.name,
+        'url': channels[targetIndex].url,
+        'channels': channels,
+        'index': targetIndex,
+      },
     );
   }
 
