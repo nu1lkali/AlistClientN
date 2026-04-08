@@ -49,9 +49,18 @@ subprojects {
                     }
                 } catch (Exception e) { /* ignore */ }
 
+                // Force compileSdk 36 for plugins that declare a lower version
+                try {
+                    android.compileSdkVersion 36
+                } catch (Exception e) { /* ignore */ }
+
                 try {
                     project.tasks.withType(org.jetbrains.kotlin.gradle.tasks.KotlinCompile).configureEach {
-                        kotlinOptions { jvmTarget = "17" }
+                        kotlinOptions {
+                            jvmTarget = "17"
+                            allWarningsAsErrors = false
+                            freeCompilerArgs += ["-Xno-call-assertions", "-Xno-receiver-assertions", "-Xno-param-assertions"]
+                        }
                     }
                 } catch (Exception e) { /* ignore */ }
             }

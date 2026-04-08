@@ -104,6 +104,10 @@ dependencies:
   native_exif: ^0.5.0
   # charset decoder
   charset: ^2.0.1
+  # audio metadata (cover art)
+  flutter_media_metadata: ^1.0.0+1
+  # audio metadata (cover art, title, etc.)
+  audio_metadata_reader: ^0.0.2
 dependency_overrides:
   win32: 5.0.0
   sqflite_common: 2.5.0
@@ -167,3 +171,4 @@ flutter:
   # see https://flutter.dev/custom-fonts/#from-packages
   assets:
     - assets/images/
+    - assets/images/cover.jpg

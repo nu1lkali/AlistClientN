@@ -41,6 +41,14 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "2.11.0"
+  audio_metadata_reader:
+    dependency: "direct main"
+    description:
+      name: audio_metadata_reader
+      sha256: "7a4dd74781c8ae536f46143b45d3479c9c97cf7e0a3b5a8bfe9dcf0d44c71b9f"
+      url: "https://pub.dev"
+    source: hosted
+    version: "0.0.2"
   audio_service:
     dependency: transitive
     description:
@@ -455,6 +463,14 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "2.0.3"
+  flutter_media_metadata:
+    dependency: "direct main"
+    description:
+      name: flutter_media_metadata
+      sha256: "69cfc76ffd6cd5d546dcc4880584b3844c5e879e435aa54f57f1096c15bd04db"
+      url: "https://pub.dev"
+    source: hosted
+    version: "1.0.0+1"
   flutter_pdfview:
     dependency: "direct main"
     description:

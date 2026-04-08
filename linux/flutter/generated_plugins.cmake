@@ -4,6 +4,7 @@
 
 list(APPEND FLUTTER_PLUGIN_LIST
   file_selector_linux
+  flutter_media_metadata
   media_kit_video
   url_launcher_linux
 )
