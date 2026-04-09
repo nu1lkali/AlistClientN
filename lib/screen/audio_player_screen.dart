@@ -4,6 +4,7 @@ import 'dart:typed_data';
 import 'dart:ui';
 
 import 'package:alist/database/alist_database_controller.dart';
+import 'package:alist/database/table/favorite.dart';
 import 'package:alist/database/table/video_viewing_record.dart';
 import 'package:alist/l10n/intl_keys.dart';
 import 'package:alist/util/file_utils.dart';
@@ -128,7 +129,7 @@ class _AudioPlayerScreenState extends State<AudioPlayerScreen>
             ),
           ),
 
-          // 第3层：AppBar（直接放在Stack里，不受BackdropFilter影响）
+          // 第3层：AppBar
           Positioned(
             top: 0,
             left: 0,
@@ -138,15 +139,43 @@ class _AudioPlayerScreenState extends State<AudioPlayerScreen>
               foregroundColor: Colors.white,
               elevation: 0,
               centerTitle: true,
-              title: Obx(() => Text(
-                    _controller._name.value,
-                    style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 16,
-                        fontWeight: FontWeight.bold),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
+              title: Obx(() => Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        _controller._name.value,
+                        style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      if (_controller._artist.value.isNotEmpty)
+                        Text(
+                          _controller._artist.value,
+                          style: const TextStyle(
+                              color: Colors.white70, fontSize: 12),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                    ],
                   )),
+              actions: [
+                Obx(() => IconButton(
+                      icon: Icon(
+                        _controller.isFavorite.value
+                            ? Icons.favorite_rounded
+                            : Icons.favorite_border_rounded,
+                        color: _controller.isFavorite.value
+                            ? Colors.red
+                            : Colors.white,
+                      ),
+                      tooltip:
+                          _controller.isFavorite.value ? '取消收藏' : '收藏',
+                      onPressed: _controller.toggleFavorite,
+                    )),
+              ],
             ),
           ),
 
@@ -453,6 +482,7 @@ class AudioPlayerScreenController extends GetxController {
   final _audioPlayer = AudioPlayer();
   final CancelToken _cancelToken = CancelToken();
   final _name = "".obs;
+  final _artist = "".obs; // 艺术家信息（从音频元数据读取）
   late ConcatenatingAudioSource _playList;
 
   final _duration = const Duration().obs;
@@ -463,6 +493,9 @@ class AudioPlayerScreenController extends GetxController {
 
   final Rx<Uint8List?> coverArtBytes = Rx<Uint8List?>(null);
   int _coverFetchIndex = -1;
+
+  // 收藏状态
+  final isFavorite = false.obs;
 
   // 静态封面缓存，跨页面实例保留，key = remotePath
   static final Map<String, Uint8List> _coverCache = {};
@@ -502,13 +535,14 @@ class AudioPlayerScreenController extends GetxController {
           var item = event.currentSource?.tag as MediaItem?;
           if (item?.id == _audios[_index].remotePath) {
             _name.value = _audios[_index].name;
-            // 同步先从缓存取，有就立即显示，无则异步拉取（不清空旧封面）
+            _artist.value = ''; // 切歌时先清空，等元数据加载
             final cached = _coverCache[_audios[_index].remotePath];
             if (cached != null) {
               coverArtBytes.value = cached;
             } else {
               _fetchCoverArt(_index);
             }
+            _checkFavoriteStatus(_index);
           }
         } else {
           _index = newIndex;
@@ -547,15 +581,15 @@ class AudioPlayerScreenController extends GetxController {
       children: sources,
     );
     await _audioPlayer.setAudioSource(_playList, initialIndex: _index);
-    await _audioPlayer.setLoopMode(LoopMode.all); // 默认list模式，循环播放
+    await _audioPlayer.setLoopMode(LoopMode.all);
     await _restoreProgress(_index);
-    // 先查缓存，有就立即显示，没有再异步拉取
     final firstAudio = _audios[_index];
     if (_coverCache.containsKey(firstAudio.remotePath)) {
       coverArtBytes.value = _coverCache[firstAudio.remotePath];
     } else {
       _fetchCoverArt(_index);
     }
+    _checkFavoriteStatus(_index);
   }
 
   Future<AudioSource> _audioToUri(String uri, AudioItem audio) async {
@@ -631,13 +665,58 @@ class AudioPlayerScreenController extends GetxController {
       } else {
         coverArtBytes.value = null;
       }
+      // 读取艺术家信息
+      final artists = meta?.trackArtistNames;
+      _artist.value = (artists != null && artists.isNotEmpty)
+          ? artists.join(' / ')
+          : '';
     } catch (_) {
       if (_coverFetchIndex == index) coverArtBytes.value = null;
     }
   }
 
-  void _playNext() {
-    _currentPos.value = const Duration(milliseconds: 0);
+  Future<void> _checkFavoriteStatus(int index) async {
+    if (index < 0 || index >= _audios.length) return;
+    final audio = _audios[index];
+    final user = Get.find<UserController>().user.value;
+    final db = Get.find<AlistDatabaseController>();
+    final record = await db.favoriteDao
+        .findByPath(user.serverUrl, user.username, audio.remotePath);
+    isFavorite.value = record != null;
+  }
+
+  Future<void> toggleFavorite() async {
+    if (_index < 0 || _index >= _audios.length) return;
+    final audio = _audios[_index];
+    final user = Get.find<UserController>().user.value;
+    final db = Get.find<AlistDatabaseController>();
+
+    if (isFavorite.value) {
+      await db.favoriteDao
+          .deleteByPath(user.serverUrl, user.username, audio.remotePath);
+      isFavorite.value = false;
+      SmartDialog.showToast('已取消收藏');
+    } else {
+      await db.favoriteDao.insertRecord(Favorite(
+        isDir: false,
+        serverUrl: user.serverUrl,
+        userId: user.username,
+        remotePath: audio.remotePath,
+        path: audio.remotePath,
+        name: audio.name,
+        size: 0,
+        sign: audio.sign,
+        thumb: null,
+        modified: 0,
+        provider: audio.provider ?? '',
+        createTime: DateTime.now().millisecondsSinceEpoch,
+      ));
+      isFavorite.value = true;
+      SmartDialog.showToast('已添加到收藏');
+    }
+  }
+
+  void _playNext() {    _currentPos.value = const Duration(milliseconds: 0);
     if (_playMode.value == PlayMode.single) {
       // 单曲循环：重播当前
       _audioPlayer.seek(const Duration(milliseconds: 0));
