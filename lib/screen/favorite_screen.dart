@@ -550,6 +550,7 @@ class _FavoriteScreenState extends State<FavoriteScreen>
             remotePath: e.path,
             sign: e.sign,
             provider: e.provider,
+            size: e.size ?? 0,
           ),
         )
         .toList();

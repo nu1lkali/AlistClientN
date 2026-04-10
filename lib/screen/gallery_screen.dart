@@ -6,6 +6,7 @@ import 'dart:ui' as ui;
 import 'package:alist/database/alist_database_controller.dart';
 import 'package:alist/database/table/favorite.dart';
 import 'package:alist/l10n/intl_keys.dart';
+import 'package:alist/util/image_utils.dart';
 import 'package:alist/util/alist_plugin.dart';
 import 'package:alist/util/constant.dart';
 import 'package:alist/util/file_utils.dart';
@@ -647,13 +648,12 @@ class _ImageContainer extends StatelessWidget {
         },
       );
     } else {
-      return ExtendedImage.network(
-        url,
+      return ExtendedImage(
+        image: noProxyImageProvider(url, cache: true),
         fit: BoxFit.contain,
         mode: ExtendedImageMode.gesture,
-        cache: true,
         enableMemoryCache: true,
-        gaplessPlayback: true, // Hide loading animation for smooth transition
+        gaplessPlayback: true,
         initGestureConfigHandler: (state) {
           return gestureConfig;
         },

@@ -1573,6 +1573,7 @@ class _FileListScreenState extends State<FileListScreen>
               remotePath: e.path,
               sign: e.sign,
               provider: e.provider,
+              size: e.size ?? 0,
             ))
         .toList();
     final index =

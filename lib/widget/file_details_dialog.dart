@@ -4,6 +4,7 @@ import 'package:alist/entity/file_list_resp_entity.dart';
 import 'package:alist/l10n/intl_keys.dart';
 import 'package:alist/net/dio_utils.dart';
 import 'package:alist/util/file_utils.dart';
+import 'package:alist/util/image_utils.dart';
 import 'package:extended_image/extended_image.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
@@ -244,8 +245,8 @@ class _FileDetailsDialogState extends State<FileDetailsDialog> {
     String thumbnail = FileUtils.getCompleteThumbnail(thumb)!;
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 20),
-      child: ExtendedImage.network(
-        thumbnail,
+      child: ExtendedImage(
+        image: noProxyImageProvider(thumbnail),
         width: 200,
         height: 100,
         loadStateChanged: (state) {

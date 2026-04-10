@@ -4,6 +4,7 @@ import 'package:alist/util/file_utils.dart';
 import 'package:alist/util/global.dart';
 import 'package:alist/util/widget_utils.dart';
 import 'package:alist/widget/overflow_text.dart';
+import 'package:alist/util/image_utils.dart';
 import 'package:extended_image/extended_image.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
@@ -197,8 +198,8 @@ class FileListItemView extends StatelessWidget {
   ClipRRect _buildThumbnailView(String icon, String thumbnail) {
     return ClipRRect(
       borderRadius: const BorderRadius.all(Radius.circular(8)),
-      child: ExtendedImage.network(
-        thumbnail,
+      child: ExtendedImage(
+        image: noProxyImageProvider(thumbnail),
         fit: BoxFit.cover,
         width: 40,
         height: 40,

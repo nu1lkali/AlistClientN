@@ -618,6 +618,7 @@ class _RecentsScreenState extends State<RecentsScreen>
             remotePath: e.path,
             sign: e.sign,
             provider: e.provider,
+            size: e.size ?? 0,
           ),
         )
         .toList();

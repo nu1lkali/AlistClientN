@@ -1,7 +1,10 @@
+import 'dart:io';
+
 import 'package:alist/l10n/alist_translations.dart';
 import 'package:alist/l10n/intl_keys.dart';
 import 'package:alist/router.dart';
 import 'package:alist/util/constant.dart';
+import 'package:alist/util/image_utils.dart';
 import 'package:alist/util/log_utils.dart';
 import 'package:alist/util/named_router.dart';
 import 'package:alist/util/proxy.dart';
@@ -19,9 +22,12 @@ import 'database/alist_database_controller.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
-  MediaKit.ensureInitialized(); // 初始化 media_kit
+  MediaKit.ensureInitialized();
   SpUtil.getInstance();
   Log.init();
+  // 只对局域网地址绕过代理，公网地址仍走系统代理
+  // 解决开启 VPN 时局域网图片/缩略图无法加载的问题
+  HttpOverrides.global = AlistHttpOverrides();
   runApp(const MyApp());
 }
 

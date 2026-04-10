@@ -26,6 +26,7 @@ import 'package:alist/util/user_controller.dart';
 import 'package:alist/util/video_player_util.dart';
 import 'package:alist/widget/alist_scaffold.dart';
 import 'package:alist/widget/overflow_text.dart';
+import 'package:alist/util/image_utils.dart';
 import 'package:extended_image/extended_image.dart';
 import 'package:flustars/flustars.dart';
 import 'package:flutter/cupertino.dart';
@@ -172,8 +173,8 @@ class DownloadManagerScreen extends StatelessWidget {
   ClipRRect _buildThumbnailView(String icon, String thumbnail) {
     return ClipRRect(
       borderRadius: const BorderRadius.all(Radius.circular(4)),
-      child: ExtendedImage.network(
-        thumbnail,
+      child: ExtendedImage(
+        image: noProxyImageProvider(thumbnail),
         fit: BoxFit.cover,
         width: 35,
         height: 35,
@@ -577,6 +578,7 @@ class DownloadManagerController extends GetxController {
             localPath: e.savedPath.value,
             remotePath: e.remotePath ?? "",
             sign: e.sign ?? "",
+            size: e.contentLength ?? 0,
           );
         }).toList();
         Get.toNamed(NamedRouter.audioPlayer,

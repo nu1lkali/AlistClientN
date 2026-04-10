@@ -139,6 +139,8 @@ class _AudioPlayerScreenState extends State<AudioPlayerScreen>
               foregroundColor: Colors.white,
               elevation: 0,
               centerTitle: true,
+              iconTheme: const IconThemeData(color: Colors.white, opacity: 1.0),
+              actionsIconTheme: const IconThemeData(color: Colors.white, opacity: 1.0),
               title: Obx(() => Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
@@ -327,37 +329,40 @@ class _AudioPlayerScreenState extends State<AudioPlayerScreen>
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceEvenly,
         children: [
+          // 循环模式
           Obx(() => IconButton(
                 iconSize: 28,
                 color: Colors.white,
                 icon: _buildPlayModeIcon(_controller._playMode.value),
                 onPressed: _controller._changePlayMode,
               )),
+          // 上一首
           Obx(() => IconButton(
                 iconSize: 40,
                 color: Colors.white,
                 icon: const Icon(Icons.skip_previous),
-                onPressed:
-                    _controller._playMode.value == PlayMode.single ||
-                            _controller._audios.length <= 1
-                        ? null
-                        : _controller._playPrevious,
+                onPressed: _controller._playMode.value == PlayMode.single ||
+                        _controller._audios.length <= 1
+                    ? null
+                    : _controller._playPrevious,
               )),
+          // 播放/暂停
           Obx(() => _buildPlayPauseButton()),
+          // 下一首
           Obx(() => IconButton(
                 iconSize: 40,
                 color: Colors.white,
                 icon: const Icon(Icons.skip_next),
-                onPressed:
-                    _controller._playMode.value == PlayMode.single ||
-                            _controller._audios.length <= 1
-                        ? null
-                        : _controller._playNext,
+                onPressed: _controller._playMode.value == PlayMode.single ||
+                        _controller._audios.length <= 1
+                    ? null
+                    : _controller._playNext,
               )),
+          // 播放列表（用 queue_music 视觉上更饱满）
           IconButton(
             iconSize: 28,
             color: Colors.white,
-            icon: const Icon(Icons.playlist_play_rounded),
+            icon: const Icon(Icons.queue_music_rounded),
             onPressed: () => _showPlayerList(context),
           ),
         ],
@@ -499,6 +504,8 @@ class AudioPlayerScreenController extends GetxController {
 
   // 静态封面缓存，跨页面实例保留，key = remotePath
   static final Map<String, Uint8List> _coverCache = {};
+  // 静态艺术家缓存，与封面缓存同步
+  static final Map<String, String> _artistCache = {};
 
   List<StreamSubscription> streamSubscriptions = [];
   DateTime _lastSaveTime = DateTime.now();
@@ -538,7 +545,8 @@ class AudioPlayerScreenController extends GetxController {
             _artist.value = ''; // 切歌时先清空，等元数据加载
             final cached = _coverCache[_audios[_index].remotePath];
             if (cached != null) {
-              coverArtBytes.value = cached;
+              coverArtBytes.value = cached.isNotEmpty ? cached : null;
+              _artist.value = _artistCache[_audios[_index].remotePath] ?? '';
             } else {
               _fetchCoverArt(_index);
             }
@@ -585,7 +593,9 @@ class AudioPlayerScreenController extends GetxController {
     await _restoreProgress(_index);
     final firstAudio = _audios[_index];
     if (_coverCache.containsKey(firstAudio.remotePath)) {
-      coverArtBytes.value = _coverCache[firstAudio.remotePath];
+      final cached = _coverCache[firstAudio.remotePath]!;
+      coverArtBytes.value = cached.isNotEmpty ? cached : null;
+      _artist.value = _artistCache[firstAudio.remotePath] ?? '';
     } else {
       _fetchCoverArt(_index);
     }
@@ -625,7 +635,9 @@ class AudioPlayerScreenController extends GetxController {
 
     // 先查缓存，有就直接显示，不闪烁
     if (_coverCache.containsKey(audio.remotePath)) {
-      coverArtBytes.value = _coverCache[audio.remotePath];
+      final cached = _coverCache[audio.remotePath]!;
+      coverArtBytes.value = cached.isNotEmpty ? cached : null;
+      _artist.value = _artistCache[audio.remotePath] ?? '';
       return;
     }
 
@@ -659,17 +671,22 @@ class AudioPlayerScreenController extends GetxController {
       final art = (meta?.albumArt != null && meta!.albumArt!.isNotEmpty)
           ? meta.albumArt!
           : null;
-      if (art != null) {
-        _coverCache[audio.remotePath] = art; // 存入缓存
-        coverArtBytes.value = art;
-      } else {
-        coverArtBytes.value = null;
-      }
       // 读取艺术家信息
       final artists = meta?.trackArtistNames;
-      _artist.value = (artists != null && artists.isNotEmpty)
+      final artistStr = (artists != null && artists.isNotEmpty)
           ? artists.join(' / ')
           : '';
+      _artist.value = artistStr;
+      // 同步存入艺术家缓存（无论有没有封面都缓存，避免重复请求）
+      _artistCache[audio.remotePath] = artistStr;
+      if (art != null) {
+        _coverCache[audio.remotePath] = art;
+        coverArtBytes.value = art;
+      } else {
+        // 没有封面也标记已查询过，下次直接用缓存
+        _coverCache[audio.remotePath] = Uint8List(0);
+        coverArtBytes.value = null;
+      }
     } catch (_) {
       if (_coverFetchIndex == index) coverArtBytes.value = null;
     }
@@ -704,7 +721,7 @@ class AudioPlayerScreenController extends GetxController {
         remotePath: audio.remotePath,
         path: audio.remotePath,
         name: audio.name,
-        size: 0,
+        size: audio.size,
         sign: audio.sign,
         thumb: null,
         modified: 0,
@@ -865,6 +882,7 @@ class AudioItem {
   final String remotePath;
   final String? sign;
   final String? provider;
+  final int size;
 
   AudioItem({
     required this.name,
@@ -872,5 +890,6 @@ class AudioItem {
     required this.remotePath,
     this.sign,
     this.provider,
+    this.size = 0,
   });
 }
