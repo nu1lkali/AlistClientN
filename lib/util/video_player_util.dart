@@ -47,18 +47,22 @@ class VideoPlayerUtil {
       // auto-select ijkplayer for formats ExoPlayer handles poorly
       if (playerType == null) {
         playerType = SpUtil.getString(AlistConstant.playerType);
-        if (playerType == null || playerType.isEmpty) {
-          final ext = videos[index].name
-              .substringAfterLast(".")
-              ?.toLowerCase() ?? "";
-          const ijkFormats = {
-            "rmvb", "rm", "vob", "dat", "divx", "xvid",
-            "avi", "wmv", "asf", "asx", "m2ts", "mts",
-            "tp", "trp", "dv", "mxf", "wtv", "dvr-ms",
-          };
-          if (ijkFormats.contains(ext)) {
-            playerType = "ijkplayer";
-          }
+      }
+      // wmv/asf 强制用 ijkplayer，ExoPlayer 不支持 VC-1 解码会黑屏
+      final ext = videos[index].name
+          .substringAfterLast(".")
+          ?.toLowerCase() ?? "";
+      const forceIjkFormats = {"wmv", "asf", "asx", "wmx", "wvx"};
+      if (forceIjkFormats.contains(ext)) {
+        playerType = "ijkplayer";
+      } else if (playerType == null || playerType.isEmpty) {
+        const ijkFormats = {
+          "rmvb", "rm", "vob", "dat", "divx", "xvid",
+          "avi", "m2ts", "mts", "tp", "trp", "dv",
+          "mxf", "wtv", "dvr-ms",
+        };
+        if (ijkFormats.contains(ext)) {
+          playerType = "ijkplayer";
         }
       }
       var videosParams = <Map<String, String?>>[];
