@@ -1074,11 +1074,11 @@ class _FileListScreenState extends State<FileListScreen>
   }
 
   void _continueExtractAndOrganize(List<FileItemVO> filesFromSubdirs, List<String> allSubFolders) async {
-    SmartDialog.showLoading(msg: '整理中…', backDismiss: false, clickMaskDismiss: false);
+    SmartDialog.showLoading(msg: '准备中…', backDismiss: false, clickMaskDismiss: false);
     
     try {
-      // 第一步：按类型分组，统计每种类型的文件数量
-      final Map<String, List<FileItemVO>> filesByType = {};
+      // 第一步：按类型分组，创建任务
+      final tasks = <FileOrganizeTask>[];
       
       for (final file in filesFromSubdirs) {
         String targetFolder;
@@ -1092,125 +1092,115 @@ class _FileListScreenState extends State<FileListScreen>
                  file.type == FileType.txt) targetFolder = '文档';
         else targetFolder = '其他';
         
-        filesByType.putIfAbsent(targetFolder, () => []).add(file);
+        final srcDir = file.path.substring(0, file.path.lastIndexOf('/'));
+        final targetPath = path == '/' ? '/$targetFolder' : '$path/$targetFolder';
+        
+        tasks.add(FileOrganizeTask(
+          fileName: file.name,
+          sourcePath: srcDir,
+          targetPath: targetPath,
+          category: targetFolder,
+        ));
       }
-
-      int totalSuccess = 0;
-      int totalFail = 0;
-      int totalRenamed = 0;
-
-      // 第二步：为每种类型创建文件夹，然后批量移动该类型的所有文件
-      for (final typeEntry in filesByType.entries) {
-        final folderName = typeEntry.key;
-        final allFilesOfType = typeEntry.value;
-        final targetPath = path == '/' ? '/$folderName' : '$path/$folderName';
-
-        SmartDialog.showLoading(msg: '创建 $folderName 文件夹…', backDismiss: false, clickMaskDismiss: false);
-
-        // 创建目标文件夹
+      
+      if (tasks.isEmpty) {
+        SmartDialog.dismiss();
+        SmartDialog.showToast('没有文件需要整理');
+        return;
+      }
+      
+      // 第二步：创建所有需要的目标文件夹
+      final targetFolders = tasks.map((t) => t.targetPath).toSet();
+      for (final targetPath in targetFolders) {
         final mkdirReq = MkdirReq();
         mkdirReq.path = targetPath;
-        bool folderReady = false;
+        
         await DioUtils.instance.requestNetwork<String?>(
           Method.post, 'fs/mkdir',
           params: mkdirReq.toJson(),
-          onSuccess: (_) { folderReady = true; },
+          onSuccess: (_) {},
           onError: (code, _) {
-            if (code == 409 || code == 200) folderReady = true;
+            if (code != 409 && code != 200) {
+              Log.e('创建文件夹失败: $targetPath, code=$code');
+            }
           },
         );
-
-        if (!folderReady) {
-          totalFail += allFilesOfType.length;
-          continue;
-        }
-
-        // 第三步：按源目录分组（因为 API 要求同一批文件必须在同一源目录）
-        final Map<String, List<FileItemVO>> filesBySourceDir = {};
-        for (final file in allFilesOfType) {
-          final srcDir = file.path.substring(0, file.path.lastIndexOf('/'));
-          filesBySourceDir.putIfAbsent(srcDir, () => []).add(file);
-        }
-
-        // 第四步：从每个源目录批量移动到目标文件夹
-        for (final srcEntry in filesBySourceDir.entries) {
-          final srcDir = srcEntry.key;
-          final files = srcEntry.value;
-          
-          SmartDialog.showLoading(
-            msg: '移动 $folderName (${files.length}个)…', 
-            backDismiss: false, 
-            clickMaskDismiss: false
-          );
-          
-          final result = await _batchMoveWithConflictHandling(srcDir, targetPath, files);
-          totalSuccess += result['success']!;
-          totalFail += result['fail']!;
-          totalRenamed += result['renamed']!;
-        }
       }
-
-      // 第五步：删除空文件夹
-      int deletedFolders = 0;
-      SmartDialog.showLoading(msg: '清理空文件夹…', backDismiss: false, clickMaskDismiss: false);
       
-      for (final folderPath in allSubFolders.reversed) {
-        final checkBody = {
-          "path": folderPath,
-          "password": _password ?? "",
-          "page": 1,
-          "per_page": 0,
-          "refresh": false
-        };
-        
-        bool isEmpty = false;
-        await DioUtils.instance.requestNetwork<FileListRespEntity>(
-          Method.post, "fs/list",
-          params: checkBody,
-          onSuccess: (data) {
-            final files = data?.content ?? [];
-            isEmpty = files.isEmpty;
-          },
-          onError: (_, __) {
-            isEmpty = false;
-          },
-        );
-        
-        if (isEmpty) {
-          final folderName = folderPath.substring(folderPath.lastIndexOf('/') + 1);
-          final parentPath = folderPath.substring(0, folderPath.lastIndexOf('/'));
-          
-          final req = FileRemoveReq();
-          req.dir = parentPath.isEmpty ? '/' : parentPath;
-          req.names = [folderName];
-          
-          await DioUtils.instance.requestNetwork<String?>(
-            Method.post, 'fs/remove',
-            params: req.toJson(),
-            onSuccess: (_) { deletedFolders++; },
-            onError: (_, __) {},
-          );
-        }
-      }
-
       SmartDialog.dismiss();
-      _refreshController.requestRefresh();
-
-      // 显示结果
-      final summary = StringBuffer();
-      summary.write('提取并整理完成\n');
-      summary.write('移动文件：$totalSuccess 个');
-      if (totalFail > 0) summary.write('（失败 $totalFail 个）');
-      if (totalRenamed > 0) summary.write('（重命名 $totalRenamed 个）');
-      if (deletedFolders > 0) {
-        summary.write('\n删除空文件夹：$deletedFolders 个');
-      }
       
-      SmartDialog.showToast(summary.toString(), displayTime: const Duration(seconds: 3));
+      // 第三步：创建批次并显示进度界面
+      final batch = FileOrganizeBatch(
+        batchId: DateTime.now().millisecondsSinceEpoch.toString(),
+        operation: 'extract_organize',
+        tasks: tasks,
+      );
+      
+      Get.to(
+        () => FileOrganizeProgressScreen(
+          batch: batch,
+          password: _password,
+          onComplete: () async {
+            // 完成后删除空文件夹
+            await _deleteEmptyFolders(allSubFolders);
+            _refreshController.requestRefresh();
+          },
+        ),
+      );
     } catch (e) {
       SmartDialog.dismiss();
       SmartDialog.showToast('操作失败：$e');
-      LogUtil.e('Extract and organize error: $e');
+      Log.e('Extract and organize error: $e');
+    }
+  }
+  
+  /// 删除空文件夹
+  Future<void> _deleteEmptyFolders(List<String> folders) async {
+    SmartDialog.showLoading(msg: '清理空文件夹…');
+    
+    int deletedCount = 0;
+    for (final folderPath in folders.reversed) {
+      final checkBody = {
+        "path": folderPath,
+        "password": _password ?? "",
+        "page": 1,
+        "per_page": 0,
+        "refresh": false
+      };
+      
+      bool isEmpty = false;
+      await DioUtils.instance.requestNetwork<FileListRespEntity>(
+        Method.post, "fs/list",
+        params: checkBody,
+        onSuccess: (data) {
+          final files = data?.content ?? [];
+          isEmpty = files.isEmpty;
+        },
+        onError: (_, __) {
+          isEmpty = false;
+        },
+      );
+      
+      if (isEmpty) {
+        final folderName = folderPath.substring(folderPath.lastIndexOf('/') + 1);
+        final parentPath = folderPath.substring(0, folderPath.lastIndexOf('/'));
+        
+        final req = FileRemoveReq();
+        req.dir = parentPath.isEmpty ? '/' : parentPath;
+        req.names = [folderName];
+        
+        await DioUtils.instance.requestNetwork<String?>(
+          Method.post, 'fs/remove',
+          params: req.toJson(),
+          onSuccess: (_) { deletedCount++; },
+          onError: (_, __) {},
+        );
+      }
+    }
+    
+    SmartDialog.dismiss();
+    if (deletedCount > 0) {
+      SmartDialog.showToast('已删除 $deletedCount 个空文件夹');
     }
   }
 
