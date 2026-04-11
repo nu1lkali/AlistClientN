@@ -531,6 +531,7 @@ class _FileListScreenState extends State<FileListScreen>
     SmartDialog.showLoading(msg: '归类中…');
     int successCount = 0;
     int failCount = 0;
+    int renamedCount = 0;
 
     for (final entry in groups.entries) {
       final folderName = entry.key;
@@ -556,32 +557,93 @@ class _FileListScreenState extends State<FileListScreen>
         continue; 
       }
 
-      // 使用现有的批量移动功能
-      final fileNames = files.map((f) => f.name).toList();
-      final req = CopyMoveReq();
-      req.srcDir = path;
-      req.dstDir = targetPath;
-      req.names = fileNames;
-      
-      await DioUtils.instance.requestNetwork<String?>(
-        Method.post, 'fs/move',
-        params: req.toJson(),
-        onSuccess: (_) {
-          successCount += fileNames.length;
+      // 检查目标目录中的现有文件名
+      Set<String> existingFileNames = {};
+      await DioUtils.instance.requestNetwork<FileListRespEntity>(
+        Method.post, 'fs/list',
+        params: {
+          'path': targetPath,
+          'password': _password ?? '',
+          'page': 1,
+          'per_page': 0,
+          'refresh': false,
         },
-        onError: (code, msg) {
-          failCount += fileNames.length;
-          LogUtil.e('归类 move 失败: code=$code msg=$msg names=$fileNames');
+        onSuccess: (data) {
+          existingFileNames = (data?.content ?? []).map((f) => f.name).toSet();
         },
+        onError: (_, __) {},
       );
+
+      // 处理同名文件冲突，需要重命名的文件
+      final filesToRename = <FileItemVO>[];
+      final filesToMove = <String>[];
+      
+      for (final file in files) {
+        if (existingFileNames.contains(file.name)) {
+          filesToRename.add(file);
+        } else {
+          filesToMove.add(file.name);
+          existingFileNames.add(file.name); // 防止后续文件重名
+        }
+      }
+
+      // 先重命名有冲突的文件
+      for (final file in filesToRename) {
+        final newName = _generateUniqueFileName(file.name, existingFileNames);
+        final renameReq = FileRenameReq();
+        renameReq.path = file.path;
+        renameReq.name = newName;
+        
+        bool renamed = false;
+        await DioUtils.instance.requestNetwork<String?>(
+          Method.post, 'fs/rename',
+          params: renameReq.toJson(),
+          onSuccess: (_) { 
+            renamed = true;
+            renamedCount++;
+          },
+          onError: (_, __) {},
+        );
+        
+        if (renamed) {
+          filesToMove.add(newName);
+          existingFileNames.add(newName);
+        } else {
+          failCount++;
+        }
+      }
+
+      // 批量移动所有文件（包括重命名后的）
+      if (filesToMove.isNotEmpty) {
+        final req = CopyMoveReq();
+        req.srcDir = path;
+        req.dstDir = targetPath;
+        req.names = filesToMove;
+        
+        await DioUtils.instance.requestNetwork<String?>(
+          Method.post, 'fs/move',
+          params: req.toJson(),
+          onSuccess: (_) {
+            successCount += filesToMove.length;
+          },
+          onError: (code, msg) {
+            failCount += filesToMove.length;
+            LogUtil.e('归类 move 失败: code=$code msg=$msg names=$filesToMove');
+          },
+        );
+      }
     }
 
     SmartDialog.dismiss();
     _refreshController.requestRefresh();
     if (failCount == 0) {
-      SmartDialog.showToast('归类完成，共移动 $successCount 个文件');
+      if (renamedCount > 0) {
+        SmartDialog.showToast('归类完成，共移动 $successCount 个文件（其中 $renamedCount 个因同名被重命名）');
+      } else {
+        SmartDialog.showToast('归类完成，共移动 $successCount 个文件');
+      }
     } else {
-      SmartDialog.showToast('完成：$successCount 个成功，$failCount 个失败');
+      SmartDialog.showToast('完成：$successCount 个成功，$failCount 个失败${renamedCount > 0 ? '，$renamedCount 个重命名' : ''}');
     }
   }
 
