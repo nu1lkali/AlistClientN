@@ -30,6 +30,7 @@ import 'package:alist/screen/office_reader_screen.dart';
 import 'package:alist/screen/pdf_reader_screen.dart';
 import 'package:alist/screen/txt_reader_screen.dart';
 import 'package:alist/screen/video_player_screen.dart';
+import 'package:alist/screen/file_organize_progress_screen.dart';
 import 'package:alist/util/alist_plugin.dart';
 import 'package:alist/util/constant.dart';
 import 'package:alist/util/download/download_manager.dart';
@@ -47,6 +48,7 @@ import 'package:alist/util/string_utils.dart';
 import 'package:alist/util/user_controller.dart';
 import 'package:alist/util/video_player_util.dart';
 import 'package:alist/util/video_thumbnail_manager.dart';
+import 'package:alist/util/file_organize_task.dart';
 import 'package:alist/widget/alist_scaffold.dart';
 import 'package:alist/widget/config_file_name_max_lines_dialog.dart';
 import 'package:alist/widget/file_details_dialog.dart';
@@ -661,74 +663,66 @@ class _FileListScreenState extends State<FileListScreen>
   }
 
   void _doOrganizeByType(Map<String, List<FileItemVO>> groups) async {
-    SmartDialog.showLoading(msg: '归类中…');
-    int totalSuccess = 0;
-    int totalFail = 0;
-    int totalRenamed = 0;
-
+    // 创建任务批次
+    final tasks = <FileOrganizeTask>[];
+    
     for (final entry in groups.entries) {
       final folderName = entry.key;
       final files = entry.value;
       final targetPath = path == '/' ? '/$folderName' : '$path/$folderName';
-
-      // 创建目标文件夹
+      
+      for (final file in files) {
+        tasks.add(FileOrganizeTask(
+          fileName: file.name,
+          sourcePath: path,
+          targetPath: targetPath,
+          category: folderName,
+        ));
+      }
+    }
+    
+    if (tasks.isEmpty) {
+      SmartDialog.showToast('没有文件需要整理');
+      return;
+    }
+    
+    // 创建目标文件夹
+    SmartDialog.showLoading(msg: '准备中...');
+    for (final folderName in groups.keys) {
+      final targetPath = path == '/' ? '/$folderName' : '$path/$folderName';
       final mkdirReq = MkdirReq();
       mkdirReq.path = targetPath;
-      bool folderReady = false;
+      
       await DioUtils.instance.requestNetwork<String?>(
         Method.post, 'fs/mkdir',
         params: mkdirReq.toJson(),
-        onSuccess: (_) { folderReady = true; },
+        onSuccess: (_) {},
         onError: (code, _) {
-          if (code == 409 || code == 200) folderReady = true;
+          // 409 = already exists, that's fine
+          if (code != 409 && code != 200) {
+            LogUtil.e('创建文件夹失败: $targetPath, code=$code');
+          }
         },
       );
-
-      if (!folderReady) { 
-        totalFail += files.length; 
-        continue; 
-      }
-
-      // 批量移动文件
-      SmartDialog.showLoading(msg: '归类到 $folderName (${files.length}个)…');
-      final result = await _batchMoveWithConflictHandling(path, targetPath, files);
-      totalSuccess += result['success']!;
-      totalFail += result['fail']!;
-      totalRenamed += result['renamed']!;
     }
-
     SmartDialog.dismiss();
-    _refreshController.requestRefresh();
     
-    if (totalFail == 0) {
-      if (totalRenamed > 0) {
-        SmartDialog.showToast('归类完成，共移动 $totalSuccess 个文件（其中 $totalRenamed 个因同名被重命名）');
-      } else {
-        SmartDialog.showToast('归类完成，共移动 $totalSuccess 个文件');
-      }
-    } else {
-      String failMsg = '完成：$totalSuccess 个成功，$totalFail 个失败';
-      if (totalRenamed > 0) failMsg += '，$totalRenamed 个重命名';
-      failMsg += '\n\n失败原因可能：\n• 文件被占用（正在播放/预览）\n• 文件名包含特殊字符\n• 权限不足';
-      
-      SmartDialog.show(
-        alignment: Alignment.center,
-        builder: (context) => AlertDialog(
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-          title: const Text('归类结果', style: TextStyle(fontWeight: FontWeight.w600)),
-          content: Text(failMsg),
-          actions: [
-            FilledButton(
-              onPressed: () => SmartDialog.dismiss(),
-              style: FilledButton.styleFrom(
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-              ),
-              child: const Text('知道了'),
-            ),
-          ],
-        ),
-      );
-    }
+    // 创建批次并显示进度界面
+    final batch = FileOrganizeBatch(
+      batchId: DateTime.now().millisecondsSinceEpoch.toString(),
+      operation: 'organize',
+      tasks: tasks,
+    );
+    
+    Get.to(
+      () => FileOrganizeProgressScreen(
+        batch: batch,
+        password: _password,
+        onComplete: () {
+          _refreshController.requestRefresh();
+        },
+      ),
+    );
   }
 
   void _extractAndOrganize() {
