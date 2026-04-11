@@ -551,18 +551,28 @@ class _FileListScreenState extends State<FileListScreen>
         },
       );
 
-      if (!folderReady) { failCount += files.length; continue; }
+      if (!folderReady) { 
+        failCount += files.length; 
+        continue; 
+      }
 
-      // move files
+      // 使用现有的批量移动功能
+      final fileNames = files.map((f) => f.name).toList();
       final req = CopyMoveReq();
       req.srcDir = path;
       req.dstDir = targetPath;
-      req.names = files.map((f) => f.name).toList();
+      req.names = fileNames;
+      
       await DioUtils.instance.requestNetwork<String?>(
         Method.post, 'fs/move',
         params: req.toJson(),
-        onSuccess: (_) { successCount += files.length; },
-        onError: (_, __) { failCount += files.length; },
+        onSuccess: (_) {
+          successCount += fileNames.length;
+        },
+        onError: (code, msg) {
+          failCount += fileNames.length;
+          LogUtil.e('归类 move 失败: code=$code msg=$msg names=$fileNames');
+        },
       );
     }
 
@@ -978,8 +988,8 @@ class _FileListScreenState extends State<FileListScreen>
         for (final entry in fileNamesBySourceDir.entries) {
           final srcDir = entry.key;
           final fileNames = entry.value;
-          
-          // Batch move all files from this directory
+
+          // 使用现有的批量移动功能
           final req = CopyMoveReq();
           req.srcDir = srcDir;
           req.dstDir = path;
@@ -988,8 +998,13 @@ class _FileListScreenState extends State<FileListScreen>
           await DioUtils.instance.requestNetwork<String?>(
             Method.post, 'fs/move',
             params: req.toJson(),
-            onSuccess: (_) { extractedCount += fileNames.length; },
-            onError: (_, __) { extractFailCount += fileNames.length; },
+            onSuccess: (_) {
+              extractedCount += fileNames.length;
+            },
+            onError: (code, msg) {
+              extractFailCount += fileNames.length;
+              LogUtil.e('提取 move 失败: code=$code msg=$msg names=$fileNames');
+            },
           );
         }
       }
@@ -1041,16 +1056,23 @@ class _FileListScreenState extends State<FileListScreen>
             continue; 
           }
 
-          // batch move files
+          // 使用现有的批量移动功能
+          final fileNames = files.map((f) => f.name).toList();
           final req = CopyMoveReq();
           req.srcDir = path;
           req.dstDir = targetPath;
-          req.names = files.map((f) => f.name).toList();
+          req.names = fileNames;
+          
           await DioUtils.instance.requestNetwork<String?>(
             Method.post, 'fs/move',
             params: req.toJson(),
-            onSuccess: (_) { organizedCount += files.length; },
-            onError: (_, __) { organizeFailCount += files.length; },
+            onSuccess: (_) {
+              organizedCount += fileNames.length;
+            },
+            onError: (code, msg) {
+              organizeFailCount += fileNames.length;
+              LogUtil.e('归类(step7) move 失败: code=$code msg=$msg names=$fileNames');
+            },
           );
         }
       }

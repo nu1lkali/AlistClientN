@@ -230,6 +230,16 @@ class PlayerActivity : AppCompatActivity(), GSYVideoProgressListener {
                         gsyVideoPlayer.currentPlayer.seekOnStart = currentTime
                     }
                     Debuger.printfError("***** onPlayError ****")
+                    // 如果当前是 ExoPlayer 且播放失败，自动切换到 ijkplayer 重试
+                    if (playerType != "ijkplayer") {
+                        Debuger.printfError("ExoPlayer failed, switching to ijkplayer")
+                        playerType = "ijkplayer"
+                        PlayerFactory.setPlayManager(IjkPlayerManager::class.java)
+                        val seekPos = if (totalTime > 0) currentTime else 0L
+                        gsyVideoPlayer.currentPlayer.seekOnStart = seekPos
+                        startPlay(index, videos[index])
+                        SmartToast.show(this@PlayerActivity, "已切换到 IJKPlayer 重试")
+                    }
                 }
             }).setLockClickListener { _, lock ->
                 orientationUtils.isEnable = !lock
