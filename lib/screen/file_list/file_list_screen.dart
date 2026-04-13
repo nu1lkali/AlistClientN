@@ -529,7 +529,7 @@ class _FileListScreenState extends State<FileListScreen>
     );
   }
 
-  void _doOrganizeByType(Map<String, List<FileItemVO>> groups) async {
+  void _doOrganizeByType(Map<String, List<FileItemVO>> groups, {VoidCallback? onComplete}) async {
     // 创建任务批次
     final tasks = <FileOrganizeTask>[];
     
@@ -586,24 +586,83 @@ class _FileListScreenState extends State<FileListScreen>
         batch: batch,
         password: _password,
         onComplete: () {
+          onComplete?.call();
           _refreshController.requestRefresh();
         },
       ),
     );
   }
 
-  void _extractAndOrganize() {
+  void _extractAndOrganize() async {
+    final subDirs = _files.where((f) => f.isDir).toList();
+    if (subDirs.isEmpty) {
+      SmartDialog.showToast('当前目录没有子文件夹');
+      return;
+    }
+
+    // 先扫描，收集待处理文件
+    SmartDialog.showLoading(msg: '扫描中…', backDismiss: false, clickMaskDismiss: false);
+    final filesFromSubdirs = <FileItemVO>[];
+    final allSubFolderPaths = <String>[];
+    try {
+      for (final dir in subDirs) {
+        allSubFolderPaths.add(dir.path);
+        SmartDialog.showLoading(msg: '扫描: ${dir.name}…', backDismiss: false, clickMaskDismiss: false);
+        await _collectFilesRecursively(dir.path, filesFromSubdirs, allSubFolderPaths);
+      }
+    } catch (e) {
+      SmartDialog.dismiss();
+      SmartDialog.showToast('扫描失败：$e');
+      return;
+    }
+    SmartDialog.dismiss();
+
+    if (filesFromSubdirs.isEmpty && _files.every((f) => f.isDir)) {
+      SmartDialog.showToast('没有找到可整理的文件');
+      return;
+    }
+
+    // 合并当前目录文件 + 子文件夹文件，一起生成清单
+    final currentDirFiles = _files.where((f) => !f.isDir).toList();
+    final allFilesForPreview = [...currentDirFiles, ...filesFromSubdirs];
+
+    // 按类型分组，生成清单
+    final Map<String, List<FileItemVO>> typeGroups = {};
+    for (final file in allFilesForPreview) {
+      String category;
+      if (file.type == FileType.image) category = '图片';
+      else if (file.type == FileType.video) category = '视频';
+      else if (file.type == FileType.audio) category = '音频';
+      else if (file.type == FileType.word ||
+               file.type == FileType.excel ||
+               file.type == FileType.ppt ||
+               file.type == FileType.pdf ||
+               file.type == FileType.txt) category = '文档';
+      else category = '其他';
+      typeGroups.putIfAbsent(category, () => []).add(file);
+    }
+
+    final summary = StringBuffer();
+    if (currentDirFiles.isNotEmpty) {
+      summary.writeln('当前目录 ${currentDirFiles.length} 个文件 + 子文件夹 ${filesFromSubdirs.length} 个文件，共 ${allFilesForPreview.length} 个：\n');
+    } else {
+      summary.writeln('将从 ${allSubFolderPaths.length} 个子文件夹中提取 ${filesFromSubdirs.length} 个文件：\n');
+    }
+    for (final entry in typeGroups.entries) {
+      summary.write('${entry.key} ${entry.value.length} 个');
+      final samples = entry.value.take(2).map((f) => f.name).join('、');
+      summary.writeln('（$samples${entry.value.length > 2 ? ' 等' : ''}）');
+    }
+    summary.writeln('\n按类型归类到子文件夹，并删除空文件夹。此操作不可撤销。');
+
+    // 展示清单，用户确认后执行
     SmartDialog.show(
       clickMaskDismiss: false,
       builder: (context) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: const Text('提取并整理', style: TextStyle(fontWeight: FontWeight.w600)),
-        content: const Text(
-          '此操作将：\n'
-          '1. 递归提取所有子文件夹中的文件到当前目录\n'
-          '2. 按类型自动归类整理\n'
-          '3. 删除空文件夹\n\n'
-          '此操作不可撤销，确认继续？',
+        title: const Text('确认提取并整理', style: TextStyle(fontWeight: FontWeight.w600)),
+        content: SingleChildScrollView(
+          child: Text(summary.toString(), style: const TextStyle(fontSize: 14)),
         ),
         actions: [
           TextButton(
@@ -613,7 +672,7 @@ class _FileListScreenState extends State<FileListScreen>
           FilledButton(
             onPressed: () {
               SmartDialog.dismiss();
-              _doExtractAndOrganize();
+              _doExtractAndOrganize(filesFromSubdirs, allSubFolderPaths);
             },
             style: FilledButton.styleFrom(
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
@@ -847,180 +906,141 @@ class _FileListScreenState extends State<FileListScreen>
     return completer.future;
   }
 
-  void _doExtractAndOrganize() async {
-    SmartDialog.showLoading(msg: '扫描中…', backDismiss: false, clickMaskDismiss: false);
-    
-    try {
-      // Step 1: Get all subdirectories in current path
-      final subDirs = _files.where((f) => f.isDir).toList();
-      
-      // Step 2: Collect all files from subdirectories recursively (NOT including current directory files)
-      final filesFromSubdirs = <FileItemVO>[];
-      final allSubFolders = <String>[];
-      
-      // Recursively collect files from subdirectories
-      for (final dir in subDirs) {
-        final dirPath = dir.path;
-        allSubFolders.add(dirPath);
-        SmartDialog.showLoading(msg: '扫描: ${dir.name}…', backDismiss: false, clickMaskDismiss: false);
-        await _collectFilesRecursively(dirPath, filesFromSubdirs, allSubFolders);
-      }
-      
-      SmartDialog.dismiss();
-      
-      if (filesFromSubdirs.isEmpty && subDirs.isEmpty) {
-        SmartDialog.showToast('没有找到文件');
-        return;
-      }
-      
-      // Group files by type for preview
-      final Map<String, List<FileItemVO>> typeGroups = {};
-      for (final file in filesFromSubdirs) {
-        String? category;
-        if (file.type == FileType.image) category = '图片';
-        else if (file.type == FileType.video) category = '视频';
-        else if (file.type == FileType.audio) category = '音频';
-        else if (file.type == FileType.word ||
-                 file.type == FileType.excel ||
-                 file.type == FileType.ppt ||
-                 file.type == FileType.pdf ||
-                 file.type == FileType.txt) category = '文档';
-        else category = '其他';
-        
-        typeGroups.putIfAbsent(category, () => []).add(file);
-      }
-      
-      // Build confirmation message
-      final summary = StringBuffer();
-      summary.writeln('将从 ${allSubFolders.length} 个子文件夹中提取 ${filesFromSubdirs.length} 个文件：\n');
-      
-      for (final entry in typeGroups.entries) {
-        summary.writeln('${entry.key}：${entry.value.length} 个');
-        final fileList = entry.value.take(3).map((f) => '  • ${f.name}').join('\n');
-        summary.writeln(fileList);
-        if (entry.value.length > 3) {
-          summary.writeln('  • ... 还有 ${entry.value.length - 3} 个');
-        }
-        summary.writeln();
-      }
-      
-      summary.writeln('提取后将按类型整理到对应文件夹，并删除空文件夹。');
-      
-      // Show confirmation dialog
-      await SmartDialog.show(
-        clickMaskDismiss: false,
-        builder: (context) => AlertDialog(
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-          title: const Text('确认提取并整理', style: TextStyle(fontWeight: FontWeight.w600)),
-          content: SingleChildScrollView(
-            child: Text(summary.toString(), style: const TextStyle(fontSize: 14)),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => SmartDialog.dismiss(),
-              child: Text('取消', style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant)),
-            ),
-            FilledButton(
-              onPressed: () {
-                SmartDialog.dismiss();
-                _continueExtractAndOrganize(filesFromSubdirs, allSubFolders);
-              },
-              style: FilledButton.styleFrom(
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-              ),
-              child: const Text('确认'),
-            ),
-          ],
-        ),
-      );
-    } catch (e) {
-      SmartDialog.dismiss();
-      SmartDialog.showToast('操作失败：$e');
-      LogUtil.e('Extract and organize error: $e');
+  void _doExtractAndOrganize(List<FileItemVO> filesFromSubdirs, List<String> allSubFolderPaths) async {
+    // 合并当前目录的文件 + 子文件夹的文件，一起按类型归类
+    final allFiles = [
+      // 当前目录中已有的文件（非文件夹）
+      ..._files.where((f) => !f.isDir),
+      // 子文件夹中递归收集到的文件
+      ...filesFromSubdirs,
+    ];
+
+    final tasks = <FileOrganizeTask>[];
+    final targetFolders = <String>{};
+
+    for (final file in allFiles) {
+      final srcDir = file.path.substring(0, file.path.lastIndexOf('/'));
+
+      String targetFolder;
+      if (file.type == FileType.image) targetFolder = '图片';
+      else if (file.type == FileType.video) targetFolder = '视频';
+      else if (file.type == FileType.audio) targetFolder = '音频';
+      else if (file.type == FileType.word ||
+               file.type == FileType.excel ||
+               file.type == FileType.ppt ||
+               file.type == FileType.pdf ||
+               file.type == FileType.txt) targetFolder = '文档';
+      else targetFolder = '其他';
+
+      final targetPath = path == '/' ? '/$targetFolder' : '$path/$targetFolder';
+
+      // 文件已经在目标目录则跳过
+      if (srcDir == targetPath) continue;
+
+      targetFolders.add(targetPath);
+      tasks.add(FileOrganizeTask(
+        fileName: file.name,
+        sourcePath: srcDir,
+        targetPath: targetPath,
+        category: targetFolder,
+      ));
     }
+
+    if (tasks.isEmpty) {
+      SmartDialog.showToast('没有文件需要整理');
+      return;
+    }
+
+    // 预创建目标文件夹
+    SmartDialog.showLoading(msg: '准备中…', backDismiss: false, clickMaskDismiss: false);
+    for (final targetPath in targetFolders) {
+      final mkdirReq = MkdirReq();
+      mkdirReq.path = targetPath;
+      await DioUtils.instance.requestNetwork<String?>(
+        Method.post, 'fs/mkdir',
+        params: mkdirReq.toJson(),
+        onSuccess: (_) {},
+        onError: (code, _) {
+          if (code != 409 && code != 200) Log.e('创建文件夹失败: $targetPath, code=$code');
+        },
+      );
+    }
+    SmartDialog.dismiss();
+
+    final batch = FileOrganizeBatch(
+      batchId: DateTime.now().millisecondsSinceEpoch.toString(),
+      operation: 'extract_organize',
+      tasks: tasks,
+    );
+
+    Get.to(
+      () => FileOrganizeProgressScreen(
+        batch: batch,
+        password: _password,
+        onComplete: () async {
+          await _deleteEmptyFolders(allSubFolderPaths);
+          _refreshController.requestRefresh();
+        },
+      ),
+    );
   }
 
-  void _continueExtractAndOrganize(List<FileItemVO> filesFromSubdirs, List<String> allSubFolders) async {
-    SmartDialog.showLoading(msg: '准备中…', backDismiss: false, clickMaskDismiss: false);
-    
-    try {
-      // 第一步：按类型分组，创建任务
-      final tasks = <FileOrganizeTask>[];
-      
-      for (final file in filesFromSubdirs) {
-        String targetFolder;
-        if (file.type == FileType.image) targetFolder = '图片';
-        else if (file.type == FileType.video) targetFolder = '视频';
-        else if (file.type == FileType.audio) targetFolder = '音频';
-        else if (file.type == FileType.word ||
-                 file.type == FileType.excel ||
-                 file.type == FileType.ppt ||
-                 file.type == FileType.pdf ||
-                 file.type == FileType.txt) targetFolder = '文档';
-        else targetFolder = '其他';
-        
-        final srcDir = file.path.substring(0, file.path.lastIndexOf('/'));
-        final targetPath = path == '/' ? '/$targetFolder' : '$path/$targetFolder';
-        
-        tasks.add(FileOrganizeTask(
-          fileName: file.name,
-          sourcePath: srcDir,
-          targetPath: targetPath,
-          category: targetFolder,
-        ));
-      }
-      
-      if (tasks.isEmpty) {
-        SmartDialog.dismiss();
-        SmartDialog.showToast('没有文件需要整理');
-        return;
-      }
-      
-      // 第二步：创建所有需要的目标文件夹
-      final targetFolders = tasks.map((t) => t.targetPath).toSet();
-      for (final targetPath in targetFolders) {
-        final mkdirReq = MkdirReq();
-        mkdirReq.path = targetPath;
-        
-        await DioUtils.instance.requestNetwork<String?>(
-          Method.post, 'fs/mkdir',
-          params: mkdirReq.toJson(),
-          onSuccess: (_) {},
-          onError: (code, _) {
-            if (code != 409 && code != 200) {
-              Log.e('创建文件夹失败: $targetPath, code=$code');
-            }
-          },
-        );
-      }
-      
-      SmartDialog.dismiss();
-      
-      // 第三步：创建批次并显示进度界面
-      final batch = FileOrganizeBatch(
-        batchId: DateTime.now().millisecondsSinceEpoch.toString(),
-        operation: 'extract_organize',
-        tasks: tasks,
-      );
-      
-      Get.to(
-        () => FileOrganizeProgressScreen(
-          batch: batch,
-          password: _password,
-          onComplete: () async {
-            // 完成后删除空文件夹
-            await _deleteEmptyFolders(allSubFolders);
-            _refreshController.requestRefresh();
-          },
-        ),
-      );
-    } catch (e) {
-      SmartDialog.dismiss();
-      SmartDialog.showToast('操作失败：$e');
-      Log.e('Extract and organize error: $e');
-    }
+  Future<void> _collectFilesRecursively(
+    String dirPath,
+    List<FileItemVO> allFiles,
+    List<String> allSubFolders,
+  ) async {
+    final body = {
+      'path': dirPath,
+      'password': _password ?? '',
+      'page': 1,
+      'per_page': 0,
+      'refresh': false,
+    };
+
+    final completer = Completer<void>();
+
+    await DioUtils.instance.requestNetwork<FileListRespEntity>(
+      Method.post, 'fs/list',
+      params: body,
+      onSuccess: (data) async {
+        final files = data?.content ?? [];
+
+        for (final file in files) {
+          final filePath = dirPath == '/' ? '/${file.name}' : '$dirPath/${file.name}';
+          if (file.isDir) {
+            allSubFolders.add(filePath);
+            await _collectFilesRecursively(filePath, allFiles, allSubFolders);
+          } else {
+            DateTime? modifyTime = file.parseModifiedTime();
+            allFiles.add(FileItemVO(
+              name: file.name,
+              path: filePath,
+              size: file.size,
+              sizeDesc: file.formatBytes(),
+              isDir: false,
+              modified: file.getReformatModified(modifyTime),
+              typeInt: file.type,
+              type: file.getFileType(),
+              thumb: file.thumb,
+              sign: file.sign,
+              icon: file.getFileIcon(),
+              modifiedMilliseconds: modifyTime?.millisecondsSinceEpoch ?? -1,
+              provider: data?.provider ?? '',
+            ));
+          }
+        }
+        completer.complete();
+      },
+      onError: (code, msg) {
+        Log.e('列目录失败: $dirPath, code=$code msg=$msg');
+        completer.complete();
+      },
+    );
+
+    return completer.future;
   }
-  
+
   /// 删除空文件夹
   Future<void> _deleteEmptyFolders(List<String> folders) async {
     SmartDialog.showLoading(msg: '清理空文件夹…');
@@ -1069,80 +1089,6 @@ class _FileListScreenState extends State<FileListScreen>
     if (deletedCount > 0) {
       SmartDialog.showToast('已删除 $deletedCount 个空文件夹');
     }
-  }
-
-  Future<void> _collectFilesRecursively(
-    String dirPath, 
-    List<FileItemVO> allFiles, 
-    List<String> allSubFolders,
-  ) async {
-    LogUtil.d('Collecting files from: $dirPath');
-    
-    final body = {
-      "path": dirPath,
-      "password": _password ?? "",
-      "page": 1,
-      "per_page": 0,
-      "refresh": false
-    };
-
-    final completer = Completer<void>();
-    
-    await DioUtils.instance.requestNetwork<FileListRespEntity>(
-      Method.post, "fs/list",
-      params: body,
-      onSuccess: (data) async {
-        final files = data?.content ?? [];
-        LogUtil.d('Found ${files.length} items in $dirPath');
-        
-        // Process subdirectories first
-        final subDirs = files.where((f) => f.isDir).toList();
-        for (var file in subDirs) {
-          final subPath = dirPath == '/' ? '/${file.name}' : '$dirPath/${file.name}';
-          LogUtil.d('Found subdirectory: $subPath');
-          allSubFolders.add(subPath);
-          // Recursively process this subfolder
-          await _collectFilesRecursively(subPath, allFiles, allSubFolders);
-        }
-        
-        // Then collect files with correct path
-        final regularFiles = files.where((f) => !f.isDir).toList();
-        for (var file in regularFiles) {
-          // Manually construct the correct file path
-          final filePath = dirPath == '/' ? '/${file.name}' : '$dirPath/${file.name}';
-          
-          DateTime? modifyTime = file.parseModifiedTime();
-          String? modifyTimeStr = file.getReformatModified(modifyTime);
-          
-          final fileItemVO = FileItemVO(
-            name: file.name,
-            path: filePath,  // Use the correct path we constructed
-            size: file.size,
-            sizeDesc: file.formatBytes(),
-            isDir: false,
-            modified: modifyTimeStr,
-            typeInt: file.type,
-            type: file.getFileType(),
-            thumb: file.thumb,
-            sign: file.sign,
-            icon: file.getFileIcon(),
-            modifiedMilliseconds: modifyTime?.millisecondsSinceEpoch ?? -1,
-            provider: data?.provider ?? "",
-          );
-          
-          LogUtil.d('Collected file: ${fileItemVO.path}');
-          allFiles.add(fileItemVO);
-        }
-        
-        completer.complete();
-      },
-      onError: (code, msg) {
-        LogUtil.e('Failed to list directory $dirPath: $msg');
-        completer.complete();
-      },
-    );
-
-    return completer.future;
   }
 
   AlistScaffold _buildScaffold(BuildContext context) {
