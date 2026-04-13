@@ -1228,26 +1228,30 @@ class _FileListScreenState extends State<FileListScreen>
       ),
       floatingActionButton: _isMultiSelectMode
           ? null
-          : AnimatedSlide(
-              duration: const Duration(milliseconds: 250),
-              curve: Curves.easeInOut,
-              // 收起时向右偏移，只露出约 10px（FAB 宽 56，偏移 0.82 ≈ 46px 隐藏）
-              offset: _fabExpanded ? Offset.zero : const Offset(0.82, 0),
-              child: GestureDetector(
-                onTap: () {
-                  if (!_fabExpanded) {
-                    setState(() => _fabExpanded = true);
-                  } else {
-                    _menuAnchorController.menuController.open();
-                    setState(() => _fabExpanded = false);
-                  }
-                },
-                child: FloatingActionButton(
-                  onPressed: null,
-                  child: const Icon(Icons.menu_rounded),
+          : Padding(
+              padding: const EdgeInsets.only(bottom: 60),
+              child: AnimatedSlide(
+                duration: const Duration(milliseconds: 250),
+                curve: Curves.easeInOut,
+                // 收起时向右偏移，露出约 28px（FAB 宽 56，偏移 0.5 ≈ 28px 隐藏）
+                offset: _fabExpanded ? Offset.zero : const Offset(0.5, 0),
+                child: GestureDetector(
+                  onTap: () {
+                    if (!_fabExpanded) {
+                      setState(() => _fabExpanded = true);
+                    } else {
+                      _menuAnchorController.menuController.open();
+                      setState(() => _fabExpanded = false);
+                    }
+                  },
+                  child: FloatingActionButton(
+                    onPressed: null,
+                    child: const Icon(Icons.menu_rounded),
+                  ),
                 ),
               ),
             ),
+      floatingActionButtonLocation: FloatingActionButtonLocation.endFloat,
     );
   }
 

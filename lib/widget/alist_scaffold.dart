@@ -11,6 +11,7 @@ class AlistScaffold extends StatelessWidget {
     this.appbarActions,
     this.showAppbar = true,
     this.floatingActionButton,
+    this.floatingActionButtonLocation,
   }) : super(key: key);
   final Widget? appbarTitle;
   final Widget body;
@@ -19,6 +20,7 @@ class AlistScaffold extends StatelessWidget {
   final List<Widget>? appbarActions;
   final bool showAppbar;
   final Widget? floatingActionButton;
+  final FloatingActionButtonLocation? floatingActionButtonLocation;
 
   @override
   Widget build(BuildContext context) {
@@ -45,6 +47,7 @@ class AlistScaffold extends StatelessWidget {
             ),
       body: SafeArea(child: body),
       floatingActionButton: floatingActionButton,
+      floatingActionButtonLocation: floatingActionButtonLocation,
     );
   }
 }
