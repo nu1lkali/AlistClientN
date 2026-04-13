@@ -85,6 +85,8 @@ dependencies:
   # image picker
   image_picker: ^0.8.9
   flutter_document_picker: ^5.2.3
+  # heic/heif support
+  flutter_image_compress: ^1.1.3
   # audio palyer
   just_audio: ^0.9.36
   just_audio_background: ^0.0.1-beta.11

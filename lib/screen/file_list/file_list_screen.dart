@@ -113,6 +113,10 @@ class _FileListScreenState extends State<FileListScreen>
   FileListRespEntity? _data;
   List<FileItemVO> _files = List.empty(growable: false);
 
+  // FAB 半隐藏状态
+  bool _fabExpanded = false;
+  final ScrollController _fabScrollController = ScrollController();
+
   // multi-select state
   bool _isMultiSelectMode = false;
   final Set<int> _selectedIndices = {};
@@ -192,6 +196,13 @@ class _FileListScreenState extends State<FileListScreen>
     }
     LogUtil.d("initState ${DateTime.now().millisecondsSinceEpoch}", tag: tag);
     _loadFiles();
+
+    // 滚动时自动收起 FAB
+    _fabScrollController.addListener(() {
+      if (_fabScrollController.position.isScrollingNotifier.value && _fabExpanded) {
+        setState(() => _fabExpanded = false);
+      }
+    });
 
     // refresh when a file is deleted from the video player
     _fileDeletedSubscription = _userController.fileDeletedSignal.stream.listen((_) {
@@ -325,6 +336,7 @@ class _FileListScreenState extends State<FileListScreen>
     _userStreamSubscription?.cancel();
     _fileDeletedSubscription?.cancel();
     _cancelToken?.cancel();
+    _fabScrollController.dispose();
     Log.d("dispose", tag: tag);
   }
 
@@ -1211,15 +1223,30 @@ class _FileListScreenState extends State<FileListScreen>
               _selectedIndices.add(index);
             });
           },
+          scrollController: _fabScrollController,
         )),
       ),
       floatingActionButton: _isMultiSelectMode
           ? null
-          : FloatingActionButton(
-              onPressed: () {
-                _menuAnchorController.menuController.open();
-              },
-              child: const Icon(Icons.menu_rounded),
+          : AnimatedSlide(
+              duration: const Duration(milliseconds: 250),
+              curve: Curves.easeInOut,
+              // 收起时向右偏移，只露出约 10px（FAB 宽 56，偏移 0.82 ≈ 46px 隐藏）
+              offset: _fabExpanded ? Offset.zero : const Offset(0.82, 0),
+              child: GestureDetector(
+                onTap: () {
+                  if (!_fabExpanded) {
+                    setState(() => _fabExpanded = true);
+                  } else {
+                    _menuAnchorController.menuController.open();
+                    setState(() => _fabExpanded = false);
+                  }
+                },
+                child: FloatingActionButton(
+                  onPressed: null,
+                  child: const Icon(Icons.menu_rounded),
+                ),
+              ),
             ),
     );
   }
@@ -1469,6 +1496,14 @@ class _FileListScreenState extends State<FileListScreen>
         .toList();
     final index =
         images.indexWhere((element) => element.remotePath == file.path);
+
+    // 对当前点击的 HEIC 文件提前触发转换（fire-and-forget），与页面跳转并行
+    if (index >= 0) {
+      final target = images[index];
+      FileUtils.makeFileLink(target.remotePath, target.sign).then((url) {
+        if (url != null) preWarmHeicConversion(target.localPath, url);
+      });
+    }
 
     Get.toNamed(
       NamedRouter.gallery,
@@ -2361,6 +2396,7 @@ class _FileListView extends StatelessWidget {
     this.onFileLongPress,
     required this.refreshCallback,
     this.groupByDate = false,
+    this.scrollController,
   }) : super(key: key);
   final String? path;
   final String? readme;
@@ -2376,6 +2412,7 @@ class _FileListView extends StatelessWidget {
   final RefreshController refreshController;
   final VoidCallback refreshCallback;
   final bool groupByDate;
+  final ScrollController? scrollController;
 
   @override
   Widget build(BuildContext context) {
@@ -2390,6 +2427,7 @@ class _FileListView extends StatelessWidget {
         controller: refreshController,
         onRefresh: refreshCallback,
         child: ListView(
+          controller: scrollController,
           children: [
             SizedBox(
               height: MediaQuery.of(context).size.height * 0.5,
@@ -2428,6 +2466,7 @@ class _FileListView extends StatelessWidget {
         controller: refreshController,
         onRefresh: refreshCallback,
         child: GridView.builder(
+          controller: scrollController,
           padding: const EdgeInsets.all(8),
           gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
             crossAxisCount: 3,
@@ -2456,6 +2495,7 @@ class _FileListView extends StatelessWidget {
       controller: refreshController,
       onRefresh: refreshCallback,
       child: ListView.separated(
+        controller: scrollController,
         itemCount: itemCount,
         separatorBuilder: (context, index) => const Padding(
             padding: EdgeInsets.symmetric(horizontal: 18), child: Divider()),
@@ -2611,6 +2651,7 @@ class _FileListView extends StatelessWidget {
       controller: refreshController,
       onRefresh: refreshCallback,
       child: ListView.builder(
+        controller: scrollController,
         itemCount: items.length,
         itemBuilder: (context, i) {
           final item = items[i];

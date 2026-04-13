@@ -13,17 +13,78 @@ import 'package:alist/util/file_utils.dart';
 import 'package:alist/util/string_utils.dart';
 import 'package:alist/util/user_controller.dart';
 import 'package:alist/widget/overflow_text.dart';
+import 'package:dio/dio.dart' as dio_pkg;
 import 'package:extended_image/extended_image.dart';
 import 'package:flustars/flustars.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_image_compress/flutter_image_compress.dart';
 import 'package:flutter_smart_dialog/flutter_smart_dialog.dart';
 import 'package:get/get.dart';
 import 'package:image_gallery_saver/image_gallery_saver.dart';
 import 'package:native_exif/native_exif.dart';
 import 'package:path/path.dart' as p;
+import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:uuid/uuid.dart';
+
+/// 全局 HEIC 转换缓存，避免同一文件重复转换
+class HeicConvertCache {
+  HeicConvertCache._();
+  static final HeicConvertCache instance = HeicConvertCache._();
+
+  // key: 原始路径或 url → value: 转换后的 jpg 路径 Future
+  final Map<String, Future<String?>> _cache = {};
+
+  /// 获取或发起转换，返回 jpg 路径（失败返回 null）
+  Future<String?> getOrConvert(String key, Future<String?> Function() convert) {
+    return _cache.putIfAbsent(key, convert);
+  }
+
+  void remove(String key) => _cache.remove(key);
+}
+
+/// 提前触发 HEIC 转换并缓存，供文件列表在跳转前调用（fire-and-forget）
+void preWarmHeicConversion(String? localPath, String url) {
+  if (!_isHeic(localPath ?? url)) return;
+  final cacheKey = (localPath?.isNotEmpty == true) ? localPath! : url;
+  HeicConvertCache.instance.getOrConvert(
+    cacheKey,
+    () => _doConvertHeic(localPath, url),
+  );
+}
+
+/// 顶层转换函数（FlutterImageCompress 在原生线程异步处理，不阻塞 UI）
+Future<String?> _doConvertHeic(String? localPath, String url) async {
+  try {
+    String heicFilePath;
+    if (localPath != null && localPath.isNotEmpty) {
+      heicFilePath = localPath;
+    } else {
+      final tmpDir = await getTemporaryDirectory();
+      final fileName = Uri.parse(url).pathSegments.last;
+      final heicTmpPath = '${tmpDir.path}/$fileName';
+      if (!File(heicTmpPath).existsSync()) {
+        await dio_pkg.Dio().download(url, heicTmpPath);
+      }
+      heicFilePath = heicTmpPath;
+    }
+    final tmpDir = await getTemporaryDirectory();
+    final outputPath = '${tmpDir.path}/${const Uuid().v4()}.jpg';
+    final result = await FlutterImageCompress.compressAndGetFile(
+      heicFilePath,
+      outputPath,
+      quality: 85,
+      minWidth: 1920,
+      minHeight: 1080,
+      format: CompressFormat.jpeg,
+    );
+    return result?.path;
+  } catch (e) {
+    debugPrint('HEIC 转换失败: $e');
+    return null;
+  }
+}
 
 typedef OnGalleryMenuClickCallback = Function(GalleryMenuId menuId);
 
@@ -302,13 +363,23 @@ class GalleryController extends GetxController {
       if (files != null && files!.length > index) {
         localPath = files?[index].localPath;
       }
-      
+
+      final path = localPath ?? urls[index];
+
+      if (_isHeic(path)) {
+        // HEIC 文件：提前触发转换并缓存，不走 Flutter image provider
+        final cacheKey = localPath?.isNotEmpty == true ? localPath! : urls[index];
+        HeicConvertCache.instance.getOrConvert(
+          cacheKey,
+          () => _doConvertHeic(localPath, urls[index]),
+        );
+        return;
+      }
+
       if (localPath != null && localPath.isNotEmpty) {
-        // Preload local file
         final config = ExtendedFileImageProvider(File(localPath));
         precacheImage(config, Get.context!);
       } else {
-        // Preload network image
         final config = ExtendedNetworkImageProvider(urls[index], cache: true);
         precacheImage(config, Get.context!);
       }
@@ -603,7 +674,12 @@ class GalleryController extends GetxController {
   }
 }
 
-class _ImageContainer extends StatelessWidget {
+bool _isHeic(String path) {
+  final ext = path.split('.').last.toLowerCase();
+  return ext == 'heic' || ext == 'heif';
+}
+
+class _ImageContainer extends StatefulWidget {
   const _ImageContainer({
     super.key,
     required this.url,
@@ -614,8 +690,64 @@ class _ImageContainer extends StatelessWidget {
   final String? localPath;
 
   @override
+  State<_ImageContainer> createState() => _ImageContainerState();
+}
+
+class _ImageContainerState extends State<_ImageContainer> {
+  String? _convertedFilePath;  // 转换后的本地 JPG 路径
+  bool _converting = false;
+  String? _errorMsg;
+
+  @override
+  void initState() {
+    super.initState();
+    final path = widget.localPath ?? widget.url;
+    if (_isHeic(path)) _converting = true;
+    _maybeConvertHeic();
+  }
+
+  @override
+  void didUpdateWidget(_ImageContainer oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.url != widget.url || oldWidget.localPath != widget.localPath) {
+      _convertedFilePath = null;
+      _errorMsg = null;
+      final path = widget.localPath ?? widget.url;
+      if (_isHeic(path)) setState(() => _converting = true);
+      _maybeConvertHeic();
+    }
+  }
+
+  @override
+  void dispose() {
+    // 不删除转换后的临时文件，缓存复用
+    super.dispose();
+  }
+
+  Future<void> _maybeConvertHeic() async {
+    final path = widget.localPath ?? widget.url;
+    if (!_isHeic(path)) return;
+
+    final cacheKey = widget.localPath?.isNotEmpty == true ? widget.localPath! : widget.url;
+
+    try {
+      final convertedPath = await HeicConvertCache.instance.getOrConvert(
+        cacheKey,
+        () => _doConvertHeic(widget.localPath, widget.url),
+      );
+
+      if (convertedPath == null) throw Exception('转换返回空路径');
+      if (mounted) setState(() { _convertedFilePath = convertedPath; _converting = false; });
+    } catch (e) {
+      HeicConvertCache.instance.remove(cacheKey);
+      debugPrint('HEIC 转换失败: $e');
+      if (mounted) setState(() { _errorMsg = '图片加载失败'; _converting = false; });
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
-    var gestureConfig = GestureConfig(
+    final gestureConfig = GestureConfig(
       minScale: 1,
       animationMinScale: 0.9,
       maxScale: 3.0,
@@ -628,45 +760,78 @@ class _ImageContainer extends StatelessWidget {
       initialAlignment: InitialAlignment.center,
     );
 
-    if (localPath != null && localPath!.isNotEmpty) {
-      return ExtendedImage.file(
-        File(localPath!),
+    void onDoubleTap(ExtendedImageGestureState state) {
+      var currentScale = state.gestureDetails?.totalScale ?? 1.0;
+      if (currentScale >= 2.0) {
+        state.handleDoubleTap(scale: 1);
+      } else {
+        state.handleDoubleTap(scale: min(currentScale + 1, 3));
+      }
+    }
+
+    final path = widget.localPath ?? widget.url;
+
+    // HEIC 转换中
+    if (_isHeic(path) && _converting) {
+      return const Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            CircularProgressIndicator(color: Colors.white),
+            SizedBox(height: 12),
+            Text('正在转换 HEIC...', style: TextStyle(color: Colors.white70, fontSize: 13)),
+          ],
+        ),
+      );
+    }
+
+    // HEIC 转换失败
+    if (_isHeic(path) && _errorMsg != null) {
+      return Center(
+        child: Text(_errorMsg!, style: const TextStyle(color: Colors.white70)),
+      );
+    }
+
+    // HEIC 转换完成，用本地 JPG 文件显示，ResizeImage 限制解码分辨率防 OOM
+    if (_isHeic(path) && _convertedFilePath != null) {
+      return ExtendedImage(
+        image: ResizeImage(
+          FileImage(File(_convertedFilePath!)),
+          width: 1920,
+          policy: ResizeImagePolicy.fit,
+        ),
         fit: BoxFit.contain,
         mode: ExtendedImageMode.gesture,
-        enableMemoryCache: true,
-        gaplessPlayback: true, // Hide loading animation for smooth transition
-        initGestureConfigHandler: (state) {
-          return gestureConfig;
-        },
-        onDoubleTap: (ExtendedImageGestureState state) {
-          var currentScale = state.gestureDetails?.totalScale ?? 1.0;
-          if (currentScale >= 2.0) {
-            state.handleDoubleTap(scale: 1);
-          } else {
-            state.handleDoubleTap(scale: min(currentScale + 1, 3));
-          }
-        },
+        enableMemoryCache: false,
+        gaplessPlayback: true,
+        initGestureConfigHandler: (_) => gestureConfig,
+        onDoubleTap: onDoubleTap,
       );
-    } else {
-      return ExtendedImage(
-        image: noProxyImageProvider(url, cache: true),
+    }
+
+    // 本地非 HEIC 文件
+    if (widget.localPath != null && widget.localPath!.isNotEmpty) {
+      return ExtendedImage.file(
+        File(widget.localPath!),
         fit: BoxFit.contain,
         mode: ExtendedImageMode.gesture,
         enableMemoryCache: true,
         gaplessPlayback: true,
-        initGestureConfigHandler: (state) {
-          return gestureConfig;
-        },
-        onDoubleTap: (ExtendedImageGestureState state) {
-          var currentScale = state.gestureDetails?.totalScale ?? 1.0;
-          if (currentScale >= 2.0) {
-            state.handleDoubleTap(scale: 1);
-          } else {
-            state.handleDoubleTap(scale: min(currentScale + 1, 3));
-          }
-        },
+        initGestureConfigHandler: (_) => gestureConfig,
+        onDoubleTap: onDoubleTap,
       );
     }
+
+    // 网络图片
+    return ExtendedImage(
+      image: noProxyImageProvider(widget.url, cache: true),
+      fit: BoxFit.contain,
+      mode: ExtendedImageMode.gesture,
+      enableMemoryCache: true,
+      gaplessPlayback: true,
+      initGestureConfigHandler: (_) => gestureConfig,
+      onDoubleTap: onDoubleTap,
+    );
   }
 }
 

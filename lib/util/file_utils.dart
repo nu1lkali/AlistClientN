@@ -84,6 +84,8 @@ class FileUtils {
       case "pcx":
       case "svg":
       case "webp":
+      case "heic":
+      case "heif":
         return FileType.image;
       case "key":
         return FileType.keynote;
