@@ -304,8 +304,18 @@ class _FileListScreenState extends State<FileListScreen>
   }
 
   void _navigateToPath(String targetPath) {
+    if (targetPath == path) return;
+
     bool found = false;
     Get.until((route) {
+      if (route.isFirst) {
+        final args = route.settings.arguments as Map<String, dynamic>?;
+        final routePath = args?['path'] as String? ?? '/';
+        if (routePath == targetPath) {
+          found = true;
+        }
+        return true;
+      }
       if (route.settings.name == NamedRouter.fileList) {
         final args = route.settings.arguments as Map<String, dynamic>?;
         if (args != null) {
@@ -316,13 +326,10 @@ class _FileListScreenState extends State<FileListScreen>
           }
         }
       }
-      if (route.isFirst) {
-        return true;
-      }
       return false;
     }, id: stackId);
 
-    if (!found && targetPath != path) {
+    if (!found) {
       Get.toNamed(
         NamedRouter.fileList,
         arguments: {
