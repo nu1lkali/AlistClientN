@@ -89,26 +89,81 @@ https://wwanb.lanzoum.com/b016kpl6ub
 
 ## UI 截图
 
-### 文件列表界面
-![文件列表](https://img.erpweb.eu.org/imgs/2026/04/2ff3cae272e1915f.jpg)
+### 项目界面预览
 
-### 路径导航菜单
-![路径导航](https://img.erpweb.eu.org/imgs/2026/04/aa7518e5d18fbd96.jpg)
+<style>
+  .screenshot-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+    gap: 10px;
+    margin: 20px 0;
+  }
+  
+  .screenshot-item {
+    position: relative;
+    overflow: hidden;
+    border-radius: 8px;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    cursor: pointer;
+    transition: transform 0.2s ease;
+  }
+  
+  .screenshot-item:hover {
+    transform: scale(1.02);
+  }
+  
+  .screenshot-item img {
+    width: 100%;
+    height: auto;
+    display: block;
+  }
+  
+  .screenshot-caption {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    background: rgba(0,0,0,0.6);
+    color: white;
+    padding: 8px;
+    font-size: 12px;
+    text-align: center;
+  }
+</style>
 
-### 视频播放器
-![视频播放器](https://img.erpweb.eu.org/imgs/2026/04/ef361608e25743f7.jpg)
+<div class="screenshot-grid">
+  <div class="screenshot-item" onclick="window.open('https://img.erpweb.eu.org/imgs/2026/04/2ff3cae272e1915f.jpg', '_blank')">
+    <img src="https://img.erpweb.eu.org/imgs/2026/04/2ff3cae272e1915f.jpg" alt="文件列表">
+    <div class="screenshot-caption">文件列表界面</div>
+  </div>
+  <div class="screenshot-item" onclick="window.open('https://img.erpweb.eu.org/imgs/2026/04/aa7518e5d18fbd96.jpg', '_blank')">
+    <img src="https://img.erpweb.eu.org/imgs/2026/04/aa7518e5d18fbd96.jpg" alt="路径导航">
+    <div class="screenshot-caption">路径导航菜单</div>
+  </div>
+  <div class="screenshot-item" onclick="window.open('https://img.erpweb.eu.org/imgs/2026/04/ef361608e25743f7.jpg', '_blank')">
+    <img src="https://img.erpweb.eu.org/imgs/2026/04/ef361608e25743f7.jpg" alt="视频播放器">
+    <div class="screenshot-caption">视频播放器</div>
+  </div>
+  <div class="screenshot-item" onclick="window.open('https://img.erpweb.eu.org/imgs/2026/04/7f71f3cf43822283.jpg', '_blank')">
+    <img src="https://img.erpweb.eu.org/imgs/2026/04/7f71f3cf43822283.jpg" alt="图片画廊">
+    <div class="screenshot-caption">图片画廊</div>
+  </div>
+  <div class="screenshot-item" onclick="window.open('https://img.erpweb.eu.org/imgs/2026/04/91ca257bb62f2d09.jpg', '_blank')">
+    <img src="https://img.erpweb.eu.org/imgs/2026/04/91ca257bb62f2d09.jpg" alt="IPTV 直播">
+    <div class="screenshot-caption">IPTV 直播</div>
+  </div>
+  <div class="screenshot-item" onclick="window.open('https://img.erpweb.eu.org/imgs/2026/04/c96448889173df98.jpg', '_blank')">
+    <img src="https://img.erpweb.eu.org/imgs/2026/04/c96448889173df98.jpg" alt="搜索功能">
+    <div class="screenshot-caption">搜索功能</div>
+  </div>
+  <div class="screenshot-item" onclick="window.open('https://img.erpweb.eu.org/imgs/2026/04/64442e665e6bca3b.jpg', '_blank')">
+    <img src="https://img.erpweb.eu.org/imgs/2026/04/64442e665e6bca3b.jpg" alt="收藏夹">
+    <div class="screenshot-caption">收藏夹</div>
+  </div>
+</div>
 
-### 图片画廊
-![图片画廊](https://img.erpweb.eu.org/imgs/2026/04/7f71f3cf43822283.jpg)
-
-### IPTV 直播
-![IPTV 直播](https://img.erpweb.eu.org/imgs/2026/04/91ca257bb62f2d09.jpg)
-
-### 搜索功能
-![搜索功能](https://img.erpweb.eu.org/imgs/2026/04/c96448889173df98.jpg)
-
-### 收藏夹
-![收藏夹](https://img.erpweb.eu.org/imgs/2026/04/64442e665e6bca3b.jpg)
+* 点击图片可放大查看
+* 响应式布局，适配不同屏幕尺寸
 
 ## 构建
 
