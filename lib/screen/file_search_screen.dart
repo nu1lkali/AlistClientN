@@ -19,6 +19,7 @@ import 'package:alist/util/download/download_manager.dart';
 import 'package:alist/util/file_password_helper.dart';
 import 'package:alist/util/file_type.dart';
 import 'package:alist/util/file_utils.dart';
+import 'package:alist/util/alist_plugin.dart';
 import 'package:alist/util/markdown_utils.dart';
 import 'package:alist/util/named_router.dart';
 import 'package:alist/util/nature_sort.dart';
@@ -689,32 +690,53 @@ class FileSearchController extends GetxController {
     var files = await _loadFilesPrepare(
         path.substringBeforeLast("/")!, path, FileType.image);
     SmartDialog.dismiss();
-    if (files == null) {
-      return;
-    }
+    if (files == null) return;
 
     var index = files.lastIndexWhere((element) => element.path == path);
-    if (index == -1) {
-      index = 0;
-    }
+    if (index == -1) index = 0;
     _fileViewingRecord(files[index]);
+
     var photos = files
-        .map(
-          (e) => PhotoItem(
-            name: e.name,
-            remotePath: e.path,
-            sign: e.sign,
-            provider: e.provider,
-          ),
-        )
+        .map((e) => PhotoItem(
+              name: e.name,
+              remotePath: e.path,
+              sign: e.sign,
+              provider: e.provider,
+            ))
         .toList();
+
+    // HEIC 文件走原生 Activity
+    final isHeic = _isHeicName(file.name ?? '');
+    if (isHeic && Platform.isAndroid) {
+      final heicPhotos = photos.where((e) => _isHeicName(e.name)).toList();
+      final heicIndex = heicPhotos.indexWhere((e) => e.remotePath == path).clamp(0, heicPhotos.length - 1);
+      if (heicPhotos.isNotEmpty) {
+        final urlFutures = heicPhotos.map((e) => FileUtils.makeFileLink(e.remotePath, e.sign));
+        final resolvedUrls = await Future.wait(urlFutures);
+        final urls = resolvedUrls.map((u) => u ?? '').toList();
+        if (urls[heicIndex].isNotEmpty) {
+          AlistPlugin.openHeicViewer(
+            names: heicPhotos.map((e) => e.name).toList(),
+            urls: urls,
+            localPaths: heicPhotos.map((e) => e.localPath ?? '').toList(),
+            index: heicIndex,
+            remotePaths: heicPhotos.map((e) => e.remotePath).toList(),
+            signs: heicPhotos.map((e) => e.sign ?? '').toList(),
+          );
+          return;
+        }
+      }
+    }
+
     Get.toNamed(
       NamedRouter.gallery,
-      arguments: {
-        "files": photos,
-        "index": index,
-      },
+      arguments: {"files": photos, "index": index},
     );
+  }
+
+  bool _isHeicName(String name) {
+    final ext = name.split('.').last.toLowerCase();
+    return ext == 'heic' || ext == 'heif';
   }
 
   void _gotoPdfScreen(String path, FileSearchRespContent file) async {

@@ -61,6 +61,13 @@
             android:screenOrientation="portrait" />
 
         <activity
+            android:name="com.github.alist.activity.HeicViewerActivity"
+            android:theme="@style/PlayerTheme"
+            android:configChanges="keyboard|keyboardHidden|orientation|screenSize|screenLayout|smallestScreenSize|uiMode"
+            android:screenOrientation="portrait"
+            android:exported="false" />
+
+        <activity
             android:name="io.flutter.plugins.urllauncher.WebViewActivity"
             tools:node="remove" />
         <activity

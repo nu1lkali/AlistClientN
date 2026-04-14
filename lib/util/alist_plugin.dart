@@ -136,4 +136,25 @@ class AlistPlugin {
       return null;
     }
   }
+
+  /// 打开原生 HEIC 图片浏览器（Android only）
+  static Future<void> openHeicViewer({
+    required List<String> names,
+    required List<String> urls,
+    required List<String> localPaths,
+    required int index,
+    List<String>? remotePaths,
+    List<String>? signs,
+    List<String>? sizes,
+  }) async {
+    await _methodChannel.invokeMethod('openHeicViewer', {
+      'names': names,
+      'urls': urls,
+      'localPaths': localPaths,
+      'index': index,
+      'remotePaths': remotePaths ?? urls,
+      'signs': signs ?? List.filled(urls.length, ''),
+      'sizes': sizes ?? List.filled(urls.length, ''),
+    });
+  }
 }

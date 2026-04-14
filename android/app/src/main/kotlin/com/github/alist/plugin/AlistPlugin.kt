@@ -149,8 +149,48 @@ class AlistPlugin(private val activity: Activity, private val scope: CoroutineSc
                 DocViewerHelper.openDocument(activity, call, result)
             }
 
-            "generateVideoThumbnail" -> {
-                val url = call.argument<String>("url") ?: run { result.success(null); return }
+            "openHeicViewer" -> {
+                val names = call.argument<List<String>>("names") ?: emptyList()
+                val urls = call.argument<List<String>>("urls") ?: emptyList()
+                val localPaths = call.argument<List<String>>("localPaths") ?: emptyList()
+                val remotePaths = call.argument<List<String>>("remotePaths") ?: urls
+                val signs = call.argument<List<String>>("signs") ?: emptyList()
+                val sizes = call.argument<List<String>>("sizes") ?: emptyList()
+                val index = call.argument<Int>("index") ?: 0
+                val intent = android.content.Intent(activity, com.github.alist.activity.HeicViewerActivity::class.java)
+                intent.putStringArrayListExtra("names", ArrayList(names))
+                intent.putStringArrayListExtra("urls", ArrayList(urls))
+                intent.putStringArrayListExtra("localPaths", ArrayList(localPaths))
+                intent.putStringArrayListExtra("remotePaths", ArrayList(remotePaths))
+                intent.putStringArrayListExtra("signs", ArrayList(signs))
+                intent.putStringArrayListExtra("sizes", ArrayList(sizes))
+                intent.putExtra("index", index)
+                activity.startActivity(intent)
+                result.success(null)
+            }
+
+            "convertHeic" -> {                val srcPath = call.argument<String>("srcPath") ?: run { result.success(null); return }
+                val cacheDir = call.argument<String>("cacheDir") ?: run { result.success(null); return }
+                val cacheKey = call.argument<String>("cacheKey") ?: run { result.success(null); return }
+                val maxLongEdge = call.argument<Int>("maxLongEdge") ?: 2048
+
+                scope.launch(Dispatchers.IO) {
+                    val outFile = File(cacheDir, "$cacheKey.jpg")
+                    if (outFile.exists()) {
+                        withContext(Dispatchers.Main) { result.success(outFile.absolutePath) }
+                        return@launch
+                    }
+                    try {
+                        val jpgPath = convertHeicToJpeg(srcPath, outFile.absolutePath, maxLongEdge)
+                        withContext(Dispatchers.Main) { result.success(jpgPath) }
+                    } catch (e: Exception) {
+                        android.util.Log.e("AlistPlugin", "convertHeic failed: $e")
+                        withContext(Dispatchers.Main) { result.success(null) }
+                    }
+                }
+            }
+
+            "generateVideoThumbnail" -> {                val url = call.argument<String>("url") ?: run { result.success(null); return }
                 val cacheKey = call.argument<String>("cacheKey") ?: run { result.success(null); return }
                 val cacheDir = call.argument<String>("cacheDir") ?: run { result.success(null); return }
                 val positionMs = call.argument<Int>("positionMs") ?: 10000
@@ -341,5 +381,51 @@ class AlistPlugin(private val activity: Activity, private val scope: CoroutineSc
         val ratio = maxWidth.toFloat() / src.width
         val newH = (src.height * ratio).toInt()
         return Bitmap.createScaledBitmap(src, maxWidth, newH, true)
+    }
+
+    /**
+     * 用 Android 原生解码 HEIC，按长边缩放后压缩为 JPEG。
+     * - API 28+：ImageDecoder + setTargetSize 直接缩放解码，原生层完成，不 OOM
+     * - API < 28：BitmapFactory inSampleSize 采样解码（不支持 HEIC，返回 null 让 Flutter 降级）
+     */
+    private fun convertHeicToJpeg(srcPath: String, outPath: String, maxLongEdge: Int): String? {
+        val srcFile = File(srcPath)
+        if (!srcFile.exists()) return null
+
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) {
+            // API < 28 不支持 ImageDecoder，返回 null 让 Flutter 用 flutter_image_compress 降级
+            return null
+        }
+
+        // ImageDecoder onHeaderDecoded 回调里拿到原图尺寸，直接设置目标尺寸
+        // setTargetSize 让原生层在解码时直接缩放，不会先解码全图到内存
+        val source = android.graphics.ImageDecoder.createSource(srcFile)
+        val bitmap = android.graphics.ImageDecoder.decodeBitmap(source) { decoder, info, _ ->
+            val srcW = info.size.width
+            val srcH = info.size.height
+            val longEdge = maxOf(srcW, srcH)
+            if (longEdge > maxLongEdge && srcW > 0 && srcH > 0) {
+                val scale = longEdge.toFloat() / maxLongEdge
+                val targetW = (srcW / scale).toInt().coerceAtLeast(1)
+                val targetH = (srcH / scale).toInt().coerceAtLeast(1)
+                decoder.setTargetSize(targetW, targetH)
+            }
+            decoder.allocator = android.graphics.ImageDecoder.ALLOCATOR_SOFTWARE
+        }
+
+        // 转为 ARGB_8888 确保 JPEG 压缩兼容
+        val rgbBitmap = if (bitmap.config != Bitmap.Config.ARGB_8888) {
+            bitmap.copy(Bitmap.Config.ARGB_8888, false).also { bitmap.recycle() }
+        } else {
+            bitmap
+        }
+
+        File(outPath).parentFile?.mkdirs()
+        FileOutputStream(outPath).use { fos ->
+            rgbBitmap.compress(Bitmap.CompressFormat.JPEG, 85, fos)
+        }
+        rgbBitmap.recycle()
+
+        return outPath
     }
 }

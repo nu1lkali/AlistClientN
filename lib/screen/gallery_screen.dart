@@ -1,6 +1,6 @@
 import 'dart:async';
 import 'dart:io';
-import 'dart:math';
+import 'dart:math' as math;
 import 'dart:ui' as ui;
 
 import 'package:alist/database/alist_database_controller.dart';
@@ -54,7 +54,7 @@ void preWarmHeicConversion(String? localPath, String url) {
   );
 }
 
-/// 顶层转换函数（FlutterImageCompress 在原生线程异步处理，不阻塞 UI）
+/// 顶层转换函数（优先用 Android 原生 ImageDecoder，API<28 降级到 flutter_image_compress）
 Future<String?> _doConvertHeic(String? localPath, String url) async {
   try {
     String heicFilePath;
@@ -69,14 +69,33 @@ Future<String?> _doConvertHeic(String? localPath, String url) async {
       }
       heicFilePath = heicTmpPath;
     }
+
     final tmpDir = await getTemporaryDirectory();
-    final outputPath = '${tmpDir.path}/${const Uuid().v4()}.jpg';
+    // 用文件路径的 hash 作为缓存 key，同一文件不重复转换
+    final cacheKey = heicFilePath.hashCode.toRadixString(16);
+    const int maxLongEdge = 2048;
+
+    // API 28+ 用原生 ImageDecoder，速度更快，内存更可控
+    if (Platform.isAndroid) {
+      const channel = MethodChannel('com.github.alist.client.plugin');
+      final result = await channel.invokeMethod<String>('convertHeic', {
+        'srcPath': heicFilePath,
+        'cacheDir': tmpDir.path,
+        'cacheKey': cacheKey,
+        'maxLongEdge': maxLongEdge,
+      });
+      if (result != null) return result;
+      // 原生返回 null 说明 API < 28，降级处理
+    }
+
+    // 降级：flutter_image_compress（iOS 或 Android API < 28）
+    final outputPath = '${tmpDir.path}/$cacheKey.jpg';
+    if (File(outputPath).existsSync()) return outputPath;
+
+    // flutter_image_compress 的缩放算法按短边对齐，用正方形目标让长边也被约束
     final result = await FlutterImageCompress.compressAndGetFile(
-      heicFilePath,
-      outputPath,
-      quality: 85,
-      minWidth: 1920,
-      minHeight: 1080,
+      heicFilePath, outputPath,
+      quality: 85, minWidth: maxLongEdge, minHeight: maxLongEdge,
       format: CompressFormat.jpeg,
     );
     return result?.path;
@@ -765,7 +784,7 @@ class _ImageContainerState extends State<_ImageContainer> {
       if (currentScale >= 2.0) {
         state.handleDoubleTap(scale: 1);
       } else {
-        state.handleDoubleTap(scale: min(currentScale + 1, 3));
+        state.handleDoubleTap(scale: math.min(currentScale + 1, 3));
       }
     }
 
@@ -792,17 +811,18 @@ class _ImageContainerState extends State<_ImageContainer> {
       );
     }
 
-    // HEIC 转换完成，用本地 JPG 文件显示，ResizeImage 限制解码分辨率防 OOM
+    // HEIC 转换完成，用 ResizeImage 限制解码分辨率防 OOM（2048px 覆盖 2K 屏）
     if (_isHeic(path) && _convertedFilePath != null) {
       return ExtendedImage(
         image: ResizeImage(
           FileImage(File(_convertedFilePath!)),
-          width: 1920,
+          width: 2048,
           policy: ResizeImagePolicy.fit,
+          allowUpscaling: false,
         ),
         fit: BoxFit.contain,
         mode: ExtendedImageMode.gesture,
-        enableMemoryCache: false,
+        enableMemoryCache: true,
         gaplessPlayback: true,
         initGestureConfigHandler: (_) => gestureConfig,
         onDoubleTap: onDoubleTap,

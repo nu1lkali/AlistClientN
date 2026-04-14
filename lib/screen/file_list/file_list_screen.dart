@@ -1229,7 +1229,7 @@ class _FileListScreenState extends State<FileListScreen>
       floatingActionButton: _isMultiSelectMode
           ? null
           : Padding(
-              padding: const EdgeInsets.only(bottom: 60),
+              padding: const EdgeInsets.only(bottom: 24),
               child: AnimatedSlide(
                 duration: const Duration(milliseconds: 250),
                 curve: Curves.easeInOut,
@@ -1501,11 +1501,47 @@ class _FileListScreenState extends State<FileListScreen>
     final index =
         images.indexWhere((element) => element.remotePath == file.path);
 
-    // 对当前点击的 HEIC 文件提前触发转换（fire-and-forget），与页面跳转并行
+    // 判断当前点击的是否是 HEIC 文件
+    final isHeicFile = _isHeicName(file.name);
+
+    if (isHeicFile && Platform.isAndroid) {
+      final heicImages = images.where((e) => _isHeicName(e.name)).toList();
+      final heicIndex = heicImages.indexWhere((e) => e.remotePath == file.path).clamp(0, heicImages.length - 1);
+
+      if (heicImages.isNotEmpty) {
+        final urlFutures = heicImages.map((e) => FileUtils.makeFileLink(e.remotePath, e.sign));
+        final resolvedUrls = await Future.wait(urlFutures)
+            .timeout(const Duration(seconds: 3), onTimeout: () => List.filled(heicImages.length, null));
+
+        final names = heicImages.map((e) => e.name).toList();
+        final urls = resolvedUrls.map((u) => u ?? '').toList();
+        final localPaths = heicImages.map((e) => e.localPath ?? '').toList();
+        final remotePaths = heicImages.map((e) => e.remotePath).toList();
+        final signs = heicImages.map((e) => e.sign ?? '').toList();
+        final sizes = heicImages.map((e) => e.size?.toString() ?? '').toList();
+
+        if (urls[heicIndex].isNotEmpty) {
+          AlistPlugin.openHeicViewer(
+            names: names,
+            urls: urls,
+            localPaths: localPaths,
+            index: heicIndex,
+            remotePaths: remotePaths,
+            signs: signs,
+            sizes: sizes,
+          );
+          return;
+        }
+      }
+    }
+
+    // 非 HEIC 或 iOS：走原有 Flutter gallery
     if (index >= 0) {
       final target = images[index];
-      FileUtils.makeFileLink(target.remotePath, target.sign).then((url) {
-        if (url != null) preWarmHeicConversion(target.localPath, url);
+      Future.delayed(const Duration(milliseconds: 350), () {
+        FileUtils.makeFileLink(target.remotePath, target.sign).then((url) {
+          if (url != null) preWarmHeicConversion(target.localPath, url);
+        });
       });
     }
 
@@ -1513,6 +1549,11 @@ class _FileListScreenState extends State<FileListScreen>
       NamedRouter.gallery,
       arguments: {"files": images, "index": index},
     );
+  }
+
+  bool _isHeicName(String name) {
+    final ext = name.split('.').last.toLowerCase();
+    return ext == 'heic' || ext == 'heif';
   }
 
   @transaction
