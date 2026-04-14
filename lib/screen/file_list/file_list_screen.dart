@@ -243,6 +243,100 @@ class _FileListScreenState extends State<FileListScreen>
 
   bool _isRootPath(String? path) => path == '/' || path == null || path == '';
 
+  void _showPathNavigator(BuildContext context) {
+    if (_isRootPath(path)) return;
+
+    final segments = path.split('/').where((s) => s.isNotEmpty).toList();
+    final crumbs = <Map<String, String>>[];
+    for (int i = 0; i < segments.length; i++) {
+      crumbs.add({
+        'label': segments[i],
+        'fullPath': '/${segments.sublist(0, i + 1).join('/')}',
+      });
+    }
+
+    showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (_) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+              child: Text('跳转到', style: Theme.of(context).textTheme.titleMedium),
+            ),
+            const Divider(height: 1),
+            // 根目录入口（始终显示在最前面）
+            ListTile(
+              leading: Icon(Icons.home_rounded, color: Theme.of(context).colorScheme.primary),
+              title: const Text('根目录'),
+              subtitle: Text('/', style: Theme.of(context).textTheme.bodySmall),
+              onTap: () {
+                Navigator.pop(context);
+                _navigateToPath('/');
+              },
+            ),
+            // 显示所有上级目录（不包括当前目录），倒序显示最近的上级在上面
+            ...crumbs.reversed.skip(1).map((crumb) {
+              return ListTile(
+                leading: Icon(Icons.folder_rounded, color: Theme.of(context).colorScheme.primary),
+                title: Text(crumb['label']!),
+                subtitle: Text(
+                  crumb['fullPath']!,
+                  style: Theme.of(context).textTheme.bodySmall,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                onTap: () {
+                  Navigator.pop(context);
+                  _navigateToPath(crumb['fullPath']!);
+                },
+              );
+            }).toList(),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _navigateToPath(String targetPath) {
+    bool found = false;
+    Get.until((route) {
+      if (route.settings.name == NamedRouter.fileList) {
+        final args = route.settings.arguments as Map<String, dynamic>?;
+        if (args != null) {
+          final routePath = args['path'] as String? ?? '/';
+          if (routePath == targetPath) {
+            found = true;
+            return true;
+          }
+        }
+      }
+      if (route.isFirst) {
+        return true;
+      }
+      return false;
+    }, id: stackId);
+
+    if (!found && targetPath != path) {
+      Get.toNamed(
+        NamedRouter.fileList,
+        arguments: {
+          "path": targetPath,
+          "sortBy": _menuAnchorController.sortBy.value,
+          "sortByUp": _menuAnchorController.sortByUp.value,
+          "backupPassword": _password ?? ""
+        },
+        preventDuplicates: false,
+        id: stackId,
+      );
+    }
+  }
+
   Future<void> _loadFilesInner() async {
     var body = {
       "path": path,
@@ -1107,7 +1201,24 @@ class _FileListScreenState extends State<FileListScreen>
     return AlistScaffold(
       appbarTitle: _isMultiSelectMode 
           ? Text("${_selectedIndices.length} 项")
-          : (_pageName != null ? Text(_pageName!) : null),
+          : (_pageName != null
+              ? GestureDetector(
+                  onTap: () => _showPathNavigator(context),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Flexible(
+                        child: Text(
+                          _pageName!,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                      if (!_isRootPath(path))
+                        const Icon(Icons.arrow_drop_down, size: 20),
+                    ],
+                  ),
+                )
+              : null),
       appbarActions: _isMultiSelectMode
           ? [
               IconButton(
