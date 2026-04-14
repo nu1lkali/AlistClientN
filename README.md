@@ -87,6 +87,29 @@ https://wwanb.lanzoum.com/b016kpl6ub
 - 改进颜色选择器交互体验
 - 音乐播放器支持获取音频封面文件
 
+## UI 截图
+
+### 文件列表界面
+![文件列表](https://img.erpweb.eu.org/imgs/2026/04/2ff3cae272e1915f.jpg)
+
+### 路径导航菜单
+![路径导航](https://img.erpweb.eu.org/imgs/2026/04/aa7518e5d18fbd96.jpg)
+
+### 视频播放器
+![视频播放器](https://img.erpweb.eu.org/imgs/2026/04/ef361608e25743f7.jpg)
+
+### 图片画廊
+![图片画廊](https://img.erpweb.eu.org/imgs/2026/04/7f71f3cf43822283.jpg)
+
+### IPTV 直播
+![IPTV 直播](https://img.erpweb.eu.org/imgs/2026/04/91ca257bb62f2d09.jpg)
+
+### 搜索功能
+![搜索功能](https://img.erpweb.eu.org/imgs/2026/04/c96448889173df98.jpg)
+
+### 收藏夹
+![收藏夹](https://img.erpweb.eu.org/imgs/2026/04/64442e665e6bca3b.jpg)
+
 ## 构建
 
 需要 Flutter 3.13.8：
