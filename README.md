@@ -91,18 +91,15 @@ https://wwanb.lanzoum.com/b016kpl6ub
 
 ### 项目界面预览
 
-| 预览 |
-|------|
-| [![截图1](https://img.erpweb.eu.org/imgs/2026/04/2ff3cae272e1915f.jpg)](https://img.erpweb.eu.org/imgs/2026/04/2ff3cae272e1915f.jpg) |
-| [![截图2](https://img.erpweb.eu.org/imgs/2026/04/aa7518e5d18fbd96.jpg)](https://img.erpweb.eu.org/imgs/2026/04/aa7518e5d18fbd96.jpg) |
-| [![截图3](https://img.erpweb.eu.org/imgs/2026/04/ef361608e25743f7.jpg)](https://img.erpweb.eu.org/imgs/2026/04/ef361608e25743f7.jpg) |
-| [![截图4](https://img.erpweb.eu.org/imgs/2026/04/7f71f3cf43822283.jpg)](https://img.erpweb.eu.org/imgs/2026/04/7f71f3cf43822283.jpg) |
-| [![截图5](https://img.erpweb.eu.org/imgs/2026/04/91ca257bb62f2d09.jpg)](https://img.erpweb.eu.org/imgs/2026/04/91ca257bb62f2d09.jpg) |
-| [![截图6](https://img.erpweb.eu.org/imgs/2026/04/c96448889173df98.jpg)](https://img.erpweb.eu.org/imgs/2026/04/c96448889173df98.jpg) |
-| [![截图7](https://img.erpweb.eu.org/imgs/2026/04/64442e665e6bca3b.jpg)](https://img.erpweb.eu.org/imgs/2026/04/64442e665e6bca3b.jpg) |
-
-* 点击图片可放大查看
-* 标准 GitHub Markdown 格式，确保在 GitHub 上正常显示
+<div align="center">
+    <img src="https://img.erpweb.eu.org/imgs/2026/04/2ff3cae272e1915f.jpg" width="300" />
+    <img src="https://img.erpweb.eu.org/imgs/2026/04/aa7518e5d18fbd96.jpg" width="300" />
+    <img src="https://img.erpweb.eu.org/imgs/2026/04/ef361608e25743f7.jpg" width="300" />
+    <img src="https://img.erpweb.eu.org/imgs/2026/04/7f71f3cf43822283.jpg" width="300" />
+    <img src="https://img.erpweb.eu.org/imgs/2026/04/91ca257bb62f2d09.jpg" width="300" />
+    <img src="https://img.erpweb.eu.org/imgs/2026/04/c96448889173df98.jpg" width="300" />
+    <img src="https://img.erpweb.eu.org/imgs/2026/04/64442e665e6bca3b.jpg" width="300" />
+</div>
 
 ## 构建
 
