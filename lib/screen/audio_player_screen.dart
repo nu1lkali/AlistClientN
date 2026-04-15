@@ -1402,20 +1402,22 @@ class _AudioPlayerScreenV2State extends State<AudioPlayerScreenV2> {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    final bg = scheme.surface;
+    final coverSize = MediaQuery.of(context).size.width - 48.0;
     return Scaffold(
-      backgroundColor: bg,
       body: SafeArea(
         child: Column(
+          crossAxisAlignment: CrossAxisAlignment.center,
           children: [
             _buildTopBar(context),
-            Expanded(child: _buildCoverArea()),
-            _buildTitleArea(),
-            const SizedBox(height: 24),
+            const SizedBox(height: 32),
+            Center(child: _buildCoverArea(coverSize)),
+            const SizedBox(height: 16),
+            _buildTitleArea(scheme),
+            const Spacer(),
             _buildProgressSection(scheme),
-            const SizedBox(height: 8),
+            const SizedBox(height: 4),
             _buildControls(scheme),
-            const SizedBox(height: 20),
+            const SizedBox(height: 16),
           ],
         ),
       ),
@@ -1451,35 +1453,46 @@ class _AudioPlayerScreenV2State extends State<AudioPlayerScreenV2> {
 
   // ── 封面大图（圆角卡片，无唱片/唱针）────────────────────────────────────
 
-  Widget _buildCoverArea() {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 32),
-      child: Obx(() {
-        final bytes = _controller.coverArtBytes.value;
-        return AspectRatio(
-          aspectRatio: 1,
-          child: AnimatedSwitcher(
-            duration: const Duration(milliseconds: 500),
-            child: ClipRRect(
-              key: ValueKey(bytes?.hashCode ?? 'default'),
-              borderRadius: BorderRadius.circular(20),
+  Widget _buildCoverArea(double size) {
+    return Obx(() {
+      final bytes = _controller.coverArtBytes.value;
+      // 核心修复点：外层套一个 Center，防止父容器强制拉伸 SizedBox
+      return Center(
+        child: SizedBox(
+          width: 280,
+          height: 280,
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(20),
+            child: AnimatedSwitcher(
+              duration: const Duration(milliseconds: 500),
               child: bytes != null
-                  ? Image.memory(bytes, fit: BoxFit.cover,
-                      width: double.infinity, height: double.infinity)
-                  : Image.asset('assets/images/cover.jpg', fit: BoxFit.cover,
-                      width: double.infinity, height: double.infinity),
+                  ? Image.memory(
+                      bytes,
+                      key: ValueKey(bytes.hashCode),
+                      width: size,
+                      height: size,
+                      // BoxFit.cover 会填满正方形并裁剪多余部分，不会拉伸
+                      fit: BoxFit.cover, 
+                    )
+                  : Image.asset(
+                      'assets/images/cover.jpg',
+                      key: const ValueKey('v2_cover_default'),
+                      width: size,
+                      height: size,
+                      fit: BoxFit.cover,
+                    ),
             ),
           ),
-        );
-      }),
-    );
+        ),
+      );
+    });
   }
 
   // ── 标题 + 艺术家 ─────────────────────────────────────────────────────────
 
-  Widget _buildTitleArea() {
+  Widget _buildTitleArea(ColorScheme scheme) {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(32, 20, 32, 0),
+      padding: const EdgeInsets.fromLTRB(32, 16, 32, 0),
       child: Obx(() => Column(
             children: [
               Text(
@@ -1496,7 +1509,7 @@ class _AudioPlayerScreenV2State extends State<AudioPlayerScreenV2> {
                   _controller._artist.value,
                   style: TextStyle(
                       fontSize: 14,
-                      color: Theme.of(Get.context!).colorScheme.onSurfaceVariant),
+                      color: scheme.onSurfaceVariant),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   textAlign: TextAlign.center,
@@ -1969,7 +1982,7 @@ class _AudioPlayerScreenV2State extends State<AudioPlayerScreenV2> {
   }
 }
 
-// ── 曲线进度条（仿 bujuan CurvedProgressBar）────────────────────────────────
+// ── 曲线进度条 ────────────────────────────────
 
 class _CurvedProgressBar extends StatefulWidget {
   final double progress;
