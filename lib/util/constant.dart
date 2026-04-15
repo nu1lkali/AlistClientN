@@ -38,6 +38,7 @@ class AlistConstant {
   static const String themeColorValue = 'themeColorValue'; // int color value
   static const String enableAggressiveCache = 'enableAggressiveCache'; // aggressive preload cache
   static const String slideshowIntervalSeconds = 'slideshowIntervalSeconds'; // gallery slideshow interval
+  static const String audioPlayerUiStyle = 'audioPlayerUiStyle'; // 0=classic, 1=bujuan
 
   static const String locale = 'locale';
 }

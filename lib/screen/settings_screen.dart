@@ -44,6 +44,7 @@ class _SettingsContainerState extends State<_SettingsContainer>
   StreamSubscription? _serverStreamSubscription;
   final _userCnt = 0.obs;
   late final RxBool _aggressiveCacheEnabled;
+  late final RxInt _audioPlayerUiStyle;
 
   @override
   void initState() {
@@ -52,6 +53,8 @@ class _SettingsContainerState extends State<_SettingsContainer>
     
     // Initialize aggressive cache setting
     _aggressiveCacheEnabled = (SpUtil.getBool(AlistConstant.enableAggressiveCache, defValue: true) ?? true).obs;
+    // Initialize audio player UI style
+    _audioPlayerUiStyle = (SpUtil.getInt(AlistConstant.audioPlayerUiStyle, defValue: 0) ?? 0).obs;
 
     _serverStreamSubscription =
         _databaseController.serverDao.serverList().listen((event) {
@@ -78,6 +81,7 @@ class _SettingsContainerState extends State<_SettingsContainer>
         m.menuId == MenuId.downloads ||
         m.menuId == MenuId.cacheManager ||
         m.menuId == MenuId.aggressiveCache ||
+        m.menuId == MenuId.audioPlayerUi ||
         m.menuId == MenuId.playerSettings ||
         m.menuId == MenuId.iptvUrl ||
         m.menuId == MenuId.slideshowInterval ||
@@ -185,6 +189,46 @@ class _SettingsContainerState extends State<_SettingsContainer>
         )),
       );
     }
+
+    // 音频播放器 UI 风格切换
+    if (settingsMenu.menuId == MenuId.audioPlayerUi) {
+      return ListTile(
+        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+        leading: Container(
+          width: 44,
+          height: 44,
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              colors: [
+                scheme.primaryContainer.withOpacity(0.8),
+                scheme.primaryContainer.withOpacity(0.5),
+              ],
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+            ),
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Icon(Icons.music_note_rounded, size: 22,
+              color: isDark ? Colors.white.withOpacity(0.9) : scheme.primary),
+        ),
+        title: const Text(
+          '音频播放器风格',
+          style: TextStyle(fontSize: 15, fontWeight: FontWeight.w500, letterSpacing: -0.2),
+        ),
+        subtitle: Obx(() => Text(
+          _audioPlayerUiStyle.value == 0 ? '经典黑胶风格' : '新风格',
+          style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
+        )),
+        trailing: Obx(() => Switch(
+          value: _audioPlayerUiStyle.value == 1,
+          onChanged: (value) {
+            final style = value ? 1 : 0;
+            SpUtil.putInt(AlistConstant.audioPlayerUiStyle, style);
+            _audioPlayerUiStyle.value = style;
+          },
+        )),
+      );
+    }
     
     return ListTile(
       onTap: () => _handleMenuTap(settingsMenu, context),
@@ -244,6 +288,10 @@ class _SettingsContainerState extends State<_SettingsContainer>
       case MenuId.cacheManager:
       case MenuId.playerSettings:
         Get.toNamed(settingsMenu.route!);
+        break;
+      case MenuId.aggressiveCache:
+      case MenuId.audioPlayerUi:
+        // toggle 类型，由 ListTile trailing Switch 处理，无需跳转
         break;
       case MenuId.themeColor:
         _showThemeColorPicker(context);
@@ -489,6 +537,11 @@ class _SettingsContainerState extends State<_SettingsContainer>
           icon: Images.settingsScreenCacheManager,
           iconData: Icons.speed_rounded),
       SettingsMenu(
+          menuId: MenuId.audioPlayerUi,
+          name: "音频播放器风格",
+          icon: Images.settingsScreenPlayer,
+          iconData: Icons.music_note_rounded),
+      SettingsMenu(
           menuId: MenuId.themeColor,
           name: "主题颜色",
           icon: Images.settingsScreenPlayer,
@@ -582,6 +635,7 @@ enum MenuId {
   about,
   cacheManager,
   aggressiveCache,
+  audioPlayerUi,
   playerSettings,
   themeColor,
   iptvUrl,

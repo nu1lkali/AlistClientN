@@ -16,6 +16,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_media_metadata/flutter_media_metadata.dart';
 import 'package:flutter_smart_dialog/flutter_smart_dialog.dart';
 import 'package:get/get.dart';
+import 'package:audio_service/audio_service.dart' show AudioService;
 import 'package:just_audio/just_audio.dart';
 import 'package:just_audio_background/just_audio_background.dart';
 import 'package:permission_handler/permission_handler.dart';
@@ -583,89 +584,138 @@ class _AudioPlayerScreenState extends State<AudioPlayerScreen>
   void _showCustomTimerDialog(BuildContext context) {
     int hours = 0;
     int minutes = 10;
+    const itemH = 44.0;
+    final hourCtrl = FixedExtentScrollController(initialItem: hours);
+    final minCtrl = FixedExtentScrollController(initialItem: minutes);
+
     showDialog(
       context: context,
       builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setDialogState) => AlertDialog(
-          title: const Text('自定义关闭'),
-          content: Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              // 小时滚轮
-              _buildNumberPicker(
-                value: hours,
-                min: 0,
-                max: 23,
-                label: '小时',
-                onChanged: (v) => setDialogState(() => hours = v),
+        builder: (ctx, setDialogState) {
+          final scheme = Theme.of(ctx).colorScheme;
+          return AlertDialog(
+            title: const Text('自定义关闭'),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                // 选中行高亮 + 两个滚轮 + 冒号
+                SizedBox(
+                  height: itemH * 3,
+                  child: Stack(
+                    alignment: Alignment.center,
+                    children: [
+                      // 高亮条
+                      Positioned(
+                        top: itemH,
+                        left: 0,
+                        right: 0,
+                        height: itemH,
+                        child: Container(
+                          decoration: BoxDecoration(
+                            color: scheme.primaryContainer.withOpacity(0.5),
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                        ),
+                      ),
+                      // 滚轮行
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        crossAxisAlignment: CrossAxisAlignment.center,
+                        children: [
+                          // 小时
+                          _buildWheelPicker(
+                            controller: hourCtrl,
+                            min: 0, max: 23,
+                            itemH: itemH,
+                            selectedColor: scheme.primary,
+                            onChanged: (v) => setDialogState(() => hours = v),
+                          ),
+                          // 单位标签
+                          Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 4),
+                            child: Text('时', style: TextStyle(fontSize: 14, color: scheme.onSurfaceVariant)),
+                          ),
+                          // 分钟
+                          _buildWheelPicker(
+                            controller: minCtrl,
+                            min: 0, max: 59,
+                            itemH: itemH,
+                            selectedColor: scheme.primary,
+                            onChanged: (v) => setDialogState(() => minutes = v),
+                          ),
+                          Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 4),
+                            child: Text('分', style: TextStyle(fontSize: 14, color: scheme.onSurfaceVariant)),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 12),
+                // 预览
+                Text(
+                  '${hours.toString().padLeft(2, '0')} 小时 ${minutes.toString().padLeft(2, '0')} 分钟后暂停',
+                  style: TextStyle(fontSize: 13, color: scheme.onSurfaceVariant),
+                ),
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: const Text('取消'),
               ),
-              const Padding(
-                padding: EdgeInsets.symmetric(horizontal: 12),
-                child: Text('|', style: TextStyle(fontSize: 24, color: Colors.grey)),
-              ),
-              // 分钟滚轮
-              _buildNumberPicker(
-                value: minutes,
-                min: 0,
-                max: 59,
-                label: '分钟',
-                onChanged: (v) => setDialogState(() => minutes = v),
+              FilledButton(
+                onPressed: () {
+                  final total = hours * 60 + minutes;
+                  if (total > 0) _controller.startSleepTimer(total);
+                  Navigator.pop(ctx);
+                },
+                child: const Text('确定'),
               ),
             ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(ctx),
-              child: const Text('取消'),
-            ),
-            ElevatedButton(
-              style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
-              onPressed: () {
-                final total = hours * 60 + minutes;
-                if (total > 0) _controller.startSleepTimer(total);
-                Navigator.pop(ctx);
-              },
-              child: const Text('确定', style: TextStyle(color: Colors.white)),
-            ),
-          ],
-        ),
+          );
+        },
       ),
     );
   }
 
-  Widget _buildNumberPicker({
-    required int value,
+  Widget _buildWheelPicker({
+    required FixedExtentScrollController controller,
     required int min,
     required int max,
-    required String label,
+    required double itemH,
+    required Color selectedColor,
     required ValueChanged<int> onChanged,
   }) {
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        SizedBox(
-          height: 120,
-          width: 70,
-          child: ListWheelScrollView.useDelegate(
-            itemExtent: 40,
-            perspective: 0.003,
-            diameterRatio: 1.5,
-            physics: const FixedExtentScrollPhysics(),
-            controller: FixedExtentScrollController(initialItem: value - min),
-            onSelectedItemChanged: (i) => onChanged(min + i),
-            childDelegate: ListWheelChildBuilderDelegate(
-              childCount: max - min + 1,
-              builder: (ctx, i) => Center(
-                child: Text(
-                  (min + i).toString().padLeft(2, '0'),
-                  style: const TextStyle(fontSize: 28),
+    return SizedBox(
+      width: 64,
+      height: itemH * 3,
+      child: ListWheelScrollView.useDelegate(
+        controller: controller,
+        itemExtent: itemH,
+        perspective: 0.003,
+        diameterRatio: 2.0,
+        physics: const FixedExtentScrollPhysics(),
+        onSelectedItemChanged: (i) => onChanged(min + i),
+        childDelegate: ListWheelChildBuilderDelegate(
+          childCount: max - min + 1,
+          builder: (ctx, i) {
+            final selected = controller.hasClients &&
+                controller.selectedItem == i;
+            return Center(
+              child: Text(
+                (min + i).toString().padLeft(2, '0'),
+                style: TextStyle(
+                  fontSize: 26,
+                  fontWeight: selected ? FontWeight.bold : FontWeight.normal,
+                  color: selected ? selectedColor : null,
                 ),
               ),
-            ),
-          ),
+            );
+          },
         ),
-        Text(label, style: const TextStyle(color: Colors.grey, fontSize: 12)),
-      ],
+      ),
     );
   }
 
@@ -947,7 +997,7 @@ class AudioPlayerScreenController extends GetxController {
     }
   }
 
-  /// 封面加载完成后，把图片写到临时文件并替换 playlist source 的 tag，触发通知栏更新
+  /// 封面加载完成后更新通知栏封面
   Future<void> _updateNotificationArt(int index, Uint8List art, AudioItem audio) async {
     try {
       final tmpDir = await getTemporaryDirectory();
@@ -955,32 +1005,54 @@ class AudioPlayerScreenController extends GetxController {
       await artFile.writeAsBytes(art);
       final artUri = artFile.uri;
 
-      // 替换 playlist 里对应 source 的 tag（触发 just_audio_background 更新通知栏）
-      if (index < _playList.length) {
-        final newTag = MediaItem(
-          id: audio.remotePath,
-          title: audio.name,
-          artist: _artistCache[audio.remotePath] ?? '',
-          artUri: artUri,
-        );
-        // 用相同 URI 重建 source，只换 tag
-        AudioSource newSource;
-        if (audio.localPath != null && audio.localPath!.isNotEmpty) {
-          newSource = ProgressiveAudioSource(Uri.file(audio.localPath!), tag: newTag);
-        } else {
-          final uri = await FileUtils.makeFileLink(audio.remotePath, audio.sign);
-          if (uri == null) return;
-          if (audio.provider == "BaiduNetdisk") {
-            newSource = AlistLockCachingAudioSource(Uri.parse(uri),
-                headers: {"User-Agent": "pan.baidu.com"}, tag: newTag);
-          } else {
-            newSource = AudioSource.uri(Uri.parse(uri), tag: newTag);
-          }
+      if (index >= _playList.length) return;
+
+      final newTag = MediaItem(
+        id: audio.remotePath,
+        title: audio.name,
+        artist: _artistCache[audio.remotePath] ?? '',
+        artUri: artUri,
+      );
+
+      if (index == _index) {
+        // 当前曲目：直接通过 AudioService 更新 MediaItem，不动 playlist，不打断播放
+        try {
+          await AudioService.customAction('updateMediaItem', {
+            'id': newTag.id,
+            'title': newTag.title,
+            'artist': newTag.artist ?? '',
+            'artUri': artUri.toString(),
+          });
+        } catch (_) {
+          // customAction 不支持时降级：替换 source 并 seek 回原位
+          final pos = _audioPlayer.position;
+          final playing = _audioPlayer.playing;
+          AudioSource newSource = await _buildSource(audio, newTag);
+          await _playList.removeAt(index);
+          await _playList.insert(index, newSource);
+          await _audioPlayer.seek(pos, index: index);
+          if (playing) _audioPlayer.play();
         }
+      } else {
+        // 非当前曲目：直接替换，不影响播放
+        AudioSource newSource = await _buildSource(audio, newTag);
         await _playList.removeAt(index);
         await _playList.insert(index, newSource);
       }
     } catch (_) {}
+  }
+
+  Future<AudioSource> _buildSource(AudioItem audio, MediaItem tag) async {
+    if (audio.localPath != null && audio.localPath!.isNotEmpty) {
+      return ProgressiveAudioSource(Uri.file(audio.localPath!), tag: tag);
+    }
+    final uri = await FileUtils.makeFileLink(audio.remotePath, audio.sign);
+    if (uri == null) return AudioSource.uri(Uri.parse(''), tag: tag);
+    if (audio.provider == "BaiduNetdisk") {
+      return AlistLockCachingAudioSource(Uri.parse(uri),
+          headers: {"User-Agent": "pan.baidu.com"}, tag: tag);
+    }
+    return AudioSource.uri(Uri.parse(uri), tag: tag);
   }
 
   Future<void> _checkFavoriteStatus(int index) async {    if (index < 0 || index >= _audios.length) return;
@@ -1295,4 +1367,882 @@ class _StashedItem {
   final int originalIndex;
   final AudioItem audio;
   _StashedItem({required this.originalIndex, required this.audio});
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// Bujuan 风格音频播放器 UI（新 UI，复用 AudioPlayerScreenController）
+// ══════════════════════════════════════════════════════════════════════════════
+
+class AudioPlayerScreenV2 extends StatefulWidget {
+  const AudioPlayerScreenV2({Key? key}) : super(key: key);
+
+  @override
+  State<AudioPlayerScreenV2> createState() => _AudioPlayerScreenV2State();
+}
+
+class _AudioPlayerScreenV2State extends State<AudioPlayerScreenV2> {
+  final List<AudioItem> _audios = Get.arguments["audios"] ?? [];
+  final int _index = Get.arguments["index"] ?? 0;
+  late AudioPlayerScreenController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller =
+        Get.put(AudioPlayerScreenController(audios: _audios, index: _index));
+  }
+
+  @override
+  void dispose() {
+    super.dispose();
+  }
+
+  // ── 主体布局 ──────────────────────────────────────────────────────────────
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final bg = scheme.surface;
+    return Scaffold(
+      backgroundColor: bg,
+      body: SafeArea(
+        child: Column(
+          children: [
+            _buildTopBar(context),
+            Expanded(child: _buildCoverArea()),
+            _buildTitleArea(),
+            const SizedBox(height: 24),
+            _buildProgressSection(scheme),
+            const SizedBox(height: 8),
+            _buildControls(scheme),
+            const SizedBox(height: 20),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ── 顶部栏：返回 + 收藏 ───────────────────────────────────────────────────
+
+  Widget _buildTopBar(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
+      child: Row(
+        children: [
+          IconButton(
+            icon: const Icon(Icons.keyboard_arrow_down_rounded, size: 30),
+            onPressed: () => Get.back(),
+          ),
+          const Spacer(),
+          // 收藏
+          Obx(() => IconButton(
+                icon: Icon(
+                  _controller.isFavorite.value
+                      ? Icons.favorite_rounded
+                      : Icons.favorite_border_rounded,
+                  color: _controller.isFavorite.value ? Colors.red : null,
+                ),
+                onPressed: _controller.toggleFavorite,
+              )),
+        ],
+      ),
+    );
+  }
+
+  // ── 封面大图（圆角卡片，无唱片/唱针）────────────────────────────────────
+
+  Widget _buildCoverArea() {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 32),
+      child: Obx(() {
+        final bytes = _controller.coverArtBytes.value;
+        return AspectRatio(
+          aspectRatio: 1,
+          child: AnimatedSwitcher(
+            duration: const Duration(milliseconds: 500),
+            child: ClipRRect(
+              key: ValueKey(bytes?.hashCode ?? 'default'),
+              borderRadius: BorderRadius.circular(20),
+              child: bytes != null
+                  ? Image.memory(bytes, fit: BoxFit.cover,
+                      width: double.infinity, height: double.infinity)
+                  : Image.asset('assets/images/cover.jpg', fit: BoxFit.cover,
+                      width: double.infinity, height: double.infinity),
+            ),
+          ),
+        );
+      }),
+    );
+  }
+
+  // ── 标题 + 艺术家 ─────────────────────────────────────────────────────────
+
+  Widget _buildTitleArea() {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(32, 20, 32, 0),
+      child: Obx(() => Column(
+            children: [
+              Text(
+                _controller._name.value,
+                style: const TextStyle(
+                    fontSize: 20, fontWeight: FontWeight.bold),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                textAlign: TextAlign.center,
+              ),
+              if (_controller._artist.value.isNotEmpty) ...[
+                const SizedBox(height: 4),
+                Text(
+                  _controller._artist.value,
+                  style: TextStyle(
+                      fontSize: 14,
+                      color: Theme.of(Get.context!).colorScheme.onSurfaceVariant),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  textAlign: TextAlign.center,
+                ),
+              ],
+            ],
+          )),
+    );
+  }
+
+  // ── 曲线进度条 ────────────────────────────────────────────────────────────
+
+  Widget _buildProgressSection(ColorScheme scheme) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 32),
+      child: Obx(() {
+        if (!_controller._prepared.value) return const SizedBox(height: 60);
+        final dur = _controller._duration.value.inMilliseconds.toDouble();
+        final cur = _controller._seekPos.value > 0
+            ? _controller._seekPos.value
+            : _controller._currentPos.value.inMilliseconds.toDouble();
+        final progress = dur > 0 ? (cur / dur).clamp(0.0, 1.0) : 0.0;
+
+        return Column(
+          children: [
+            SizedBox(
+              height: 40,
+              child: _CurvedProgressBar(
+                progress: progress,
+                activeColor: scheme.primary,
+                inactiveColor: scheme.primary.withOpacity(0.2),
+                onChanged: (v) {
+                  _controller._seekPos.value = dur * v;
+                },
+                onChangeEnd: (v) {
+                  final pos = Duration(milliseconds: (dur * v).toInt());
+                  _controller._currentPos.value = pos;
+                  _controller._audioPlayer.seek(pos);
+                  _controller._seekPos.value = -1;
+                },
+              ),
+            ),
+            const SizedBox(height: 4),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text(
+                  _dur2Str(_controller._seekPos.value > 0
+                      ? Duration(milliseconds: _controller._seekPos.value.toInt())
+                      : _controller._currentPos.value),
+                  style: TextStyle(
+                      fontSize: 12,
+                      color: scheme.onSurfaceVariant),
+                ),
+                Text(
+                  _dur2Str(_controller._duration.value),
+                  style: TextStyle(
+                      fontSize: 12,
+                      color: scheme.onSurfaceVariant),
+                ),
+              ],
+            ),
+          ],
+        );
+      }),
+    );
+  }
+
+  // ── 控制按钮：循环模式 | 上一首 | 播放/暂停 | 下一首 | 定时关闭 ──────────
+
+  Widget _buildControls(ColorScheme scheme) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          // 循环模式
+          Obx(() => IconButton(
+                iconSize: 26,
+                icon: _playModeIcon(_controller._playMode.value),
+                onPressed: _controller._changePlayMode,
+              )),
+          // 上一首
+          Obx(() => IconButton(
+                iconSize: 36,
+                icon: const Icon(Icons.skip_previous_rounded),
+                onPressed: _controller._playMode.value == PlayMode.single ||
+                        _controller._audios.length <= 1
+                    ? null
+                    : _controller._playPrevious,
+              )),
+          // 播放/暂停 — 大圆按钮，用主题色填充
+          Obx(() => GestureDetector(
+                onTap: _controller._playOrPause,
+                child: Container(
+                  width: 64,
+                  height: 64,
+                  decoration: BoxDecoration(
+                    color: scheme.primary,
+                    shape: BoxShape.circle,
+                  ),
+                  child: Icon(
+                    _controller._playing.value
+                        ? Icons.pause_rounded
+                        : Icons.play_arrow_rounded,
+                    color: scheme.onPrimary,
+                    size: 36,
+                  ),
+                ),
+              )),
+          // 下一首
+          Obx(() => IconButton(
+                iconSize: 36,
+                icon: const Icon(Icons.skip_next_rounded),
+                onPressed: _controller._playMode.value == PlayMode.single ||
+                        _controller._audios.length <= 1
+                    ? null
+                    : _controller._playNext,
+              )),
+          // 播放列表
+          IconButton(
+            iconSize: 26,
+            icon: const Icon(Icons.queue_music_rounded),
+            onPressed: () => _showV2PlayerList(Get.context!),
+          ),
+          // 定时关闭
+          Obx(() {
+            final active = _controller.sleepTimerRemaining.value != null ||
+                _controller.sleepAfterTrack.value;
+            return IconButton(
+              iconSize: 26,
+              color: active ? Colors.orangeAccent : null,
+              icon: const Icon(Icons.bedtime_outlined),
+              onPressed: () => _showV2SleepTimerSheet(Get.context!),
+            );
+          }),
+        ],
+      ),
+    );
+  }
+
+  Widget _playModeIcon(PlayMode mode) {
+    if (mode == PlayMode.list) return const Icon(Icons.repeat);
+    if (mode == PlayMode.single) return const Icon(Icons.repeat_one);
+    return const Icon(Icons.shuffle);
+  }
+
+  String _dur2Str(Duration d) {
+    if (d.inMilliseconds < 0) return "00:00";
+    String two(int n) => n >= 10 ? "$n" : "0$n";
+    final m = two(d.inMinutes.remainder(60));
+    final s = two(d.inSeconds.remainder(60));
+    return d.inHours > 0 ? "${d.inHours}:$m:$s" : "$m:$s";
+  }
+
+  void _showV2PlayerList(BuildContext context) {
+    if (_controller._audios.isEmpty) return;
+    final scrollController = AutoScrollController();
+    showModalBottomSheet(
+        context: context,
+        builder: (context) => Column(children: [
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 15),
+                child: Text(
+                  "${Intl.audioPlayListDialog_title.tr}(${_controller._audios.length})",
+                  style: Theme.of(context).textTheme.titleMedium,
+                ),
+              ),
+              Expanded(
+                  child: Obx(() => ListView.separated(
+                        controller: scrollController,
+                        itemCount: _controller._audios.length,
+                        separatorBuilder: (_, __) => const Divider(),
+                        itemBuilder: (ctx, i) {
+                          final isPlaying = _controller._index == i;
+                          return AutoScrollTag(
+                            key: ValueKey(_controller._audios[i]),
+                            controller: scrollController,
+                            index: i,
+                            child: ListTile(
+                              title: Text(_controller._audios[i].name,
+                                  style: isPlaying
+                                      ? TextStyle(
+                                          color: Theme.of(ctx)
+                                              .colorScheme
+                                              .primary)
+                                      : null),
+                              onTap: () {
+                                Navigator.pop(context);
+                                if (_controller._index == i) {
+                                  _controller._playOrPause();
+                                } else {
+                                  _controller._play(i);
+                                }
+                              },
+                              trailing: IconButton(
+                                icon: const Icon(Icons.close),
+                                onPressed: () => _controller._remove(i),
+                              ),
+                            ),
+                          );
+                        },
+                      ))),
+            ]));
+    Future.delayed(const Duration(milliseconds: 200)).then((_) {
+      scrollController.scrollToIndex(_controller._index,
+          duration: const Duration(milliseconds: 50),
+          preferPosition: AutoScrollPosition.begin);
+    });
+  }
+
+  void _showV2SleepTimerSheet(BuildContext context) {
+    showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setSheetState) => Padding(
+          padding: const EdgeInsets.fromLTRB(20, 20, 20, 12),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(children: [
+                Text('定时关闭', style: Theme.of(ctx).textTheme.titleMedium),
+                const Spacer(),
+                Obx(() {
+                  final r = _controller.sleepTimerRemaining.value;
+                  if (r != null) {
+                    return Text(
+                        '${r.inHours.toString().padLeft(2, '0')}:${(r.inMinutes % 60).toString().padLeft(2, '0')}:${(r.inSeconds % 60).toString().padLeft(2, '0')}',
+                        style: Theme.of(ctx)
+                            .textTheme
+                            .titleLarge
+                            ?.copyWith(fontWeight: FontWeight.bold));
+                  }
+                  if (_controller.sleepAfterTrack.value) {
+                    return Text('播完停止',
+                        style: Theme.of(ctx)
+                            .textTheme
+                            .titleMedium
+                            ?.copyWith(color: Colors.orangeAccent));
+                  }
+                  return const SizedBox.shrink();
+                }),
+                Obx(() {
+                  final active =
+                      _controller.sleepTimerRemaining.value != null ||
+                          _controller.sleepAfterTrack.value;
+                  if (!active) return const SizedBox.shrink();
+                  return Switch(
+                      value: true,
+                      activeColor: Colors.red,
+                      onChanged: (_) {
+                        _controller.cancelSleepTimer();
+                        setSheetState(() {});
+                      });
+                }),
+              ]),
+              const SizedBox(height: 16),
+              Obx(() {
+                final presets = [10, 20, 30, 45, 60, 90];
+                final r = _controller.sleepTimerRemaining.value;
+                return Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: presets.map((min) {
+                    final sel = r != null &&
+                        (r.inMinutes - min).abs() <= 1 &&
+                        !_controller.sleepAfterTrack.value;
+                    return GestureDetector(
+                      onTap: () {
+                        _controller.startSleepTimer(min);
+                        setSheetState(() {});
+                      },
+                      child: Container(
+                        width: 46,
+                        height: 46,
+                        decoration: BoxDecoration(
+                          color: sel
+                              ? Colors.red
+                              : Theme.of(ctx).colorScheme.surfaceVariant,
+                          shape: BoxShape.circle,
+                        ),
+                        alignment: Alignment.center,
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Text('$min',
+                                style: TextStyle(
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.bold,
+                                    color: sel ? Colors.white : null)),
+                            Text('min',
+                                style: TextStyle(
+                                    fontSize: 9,
+                                    color: sel ? Colors.white70 : null)),
+                          ],
+                        ),
+                      ),
+                    );
+                  }).toList(),
+                );
+              }),
+              const SizedBox(height: 12),
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                  onPressed: () {
+                    Navigator.pop(ctx);
+                    _showV2CustomTimerDialog(context);
+                  },
+                  icon: const Icon(Icons.tune_rounded, size: 18),
+                  label: const Text('自定义时长'),
+                  style: OutlinedButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12)),
+                  ),
+                ),
+              ),
+              const Divider(),
+              Obx(() => CheckboxListTile(
+                    contentPadding: EdgeInsets.zero,
+                    title: const Text('播完整首歌再停止播放'),
+                    value: _controller.sleepAfterTrack.value,
+                    onChanged: (v) {
+                      _controller.toggleSleepAfterTrack(v ?? false);
+                      setSheetState(() {});
+                    },
+                  )),
+              const SizedBox(height: 8),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _showV2CustomTimerDialog(BuildContext context) {
+    int hours = 0;
+    int minutes = 10;
+    const itemH = 44.0;
+    final hourCtrl = FixedExtentScrollController(initialItem: hours);
+    final minCtrl = FixedExtentScrollController(initialItem: minutes);
+    showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, set) {
+          final scheme = Theme.of(ctx).colorScheme;
+          return AlertDialog(
+            title: const Text('自定义关闭'),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                SizedBox(
+                  height: itemH * 3,
+                  child: Stack(alignment: Alignment.center, children: [
+                    Positioned(
+                      top: itemH,
+                      left: 0,
+                      right: 0,
+                      height: itemH,
+                      child: Container(
+                        decoration: BoxDecoration(
+                          color: scheme.primaryContainer.withOpacity(0.5),
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                      ),
+                    ),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        _v2WheelPicker(
+                            controller: hourCtrl,
+                            min: 0,
+                            max: 23,
+                            itemH: itemH,
+                            selectedColor: scheme.primary,
+                            onChanged: (v) => set(() => hours = v)),
+                        Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 4),
+                          child: Text('时',
+                              style: TextStyle(
+                                  fontSize: 14,
+                                  color: scheme.onSurfaceVariant)),
+                        ),
+                        _v2WheelPicker(
+                            controller: minCtrl,
+                            min: 0,
+                            max: 59,
+                            itemH: itemH,
+                            selectedColor: scheme.primary,
+                            onChanged: (v) => set(() => minutes = v)),
+                        Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 4),
+                          child: Text('分',
+                              style: TextStyle(
+                                  fontSize: 14,
+                                  color: scheme.onSurfaceVariant)),
+                        ),
+                      ],
+                    ),
+                  ]),
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  '${hours.toString().padLeft(2, '0')} 小时 ${minutes.toString().padLeft(2, '0')} 分钟后暂停',
+                  style: TextStyle(
+                      fontSize: 13, color: scheme.onSurfaceVariant),
+                ),
+              ],
+            ),
+            actions: [
+              TextButton(
+                  onPressed: () => Navigator.pop(ctx),
+                  child: const Text('取消')),
+              FilledButton(
+                onPressed: () {
+                  final total = hours * 60 + minutes;
+                  if (total > 0) _controller.startSleepTimer(total);
+                  Navigator.pop(ctx);
+                },
+                child: const Text('确定'),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _v2WheelPicker({
+    required FixedExtentScrollController controller,
+    required int min,
+    required int max,
+    required double itemH,
+    required Color selectedColor,
+    required ValueChanged<int> onChanged,
+  }) {
+    return SizedBox(
+      width: 64,
+      height: itemH * 3,
+      child: ListWheelScrollView.useDelegate(
+        controller: controller,
+        itemExtent: itemH,
+        perspective: 0.003,
+        diameterRatio: 2.0,
+        physics: const FixedExtentScrollPhysics(),
+        onSelectedItemChanged: (i) => onChanged(min + i),
+        childDelegate: ListWheelChildBuilderDelegate(
+          childCount: max - min + 1,
+          builder: (ctx, i) {
+            final sel =
+                controller.hasClients && controller.selectedItem == i;
+            return Center(
+              child: Text(
+                (min + i).toString().padLeft(2, '0'),
+                style: TextStyle(
+                  fontSize: 26,
+                  fontWeight: sel ? FontWeight.bold : FontWeight.normal,
+                  color: sel ? selectedColor : null,
+                ),
+              ),
+            );
+          },
+        ),
+      ),
+    );
+  }
+}
+
+// ── 曲线进度条（仿 bujuan CurvedProgressBar）────────────────────────────────
+
+class _CurvedProgressBar extends StatefulWidget {
+  final double progress;
+  final Color activeColor;
+  final Color inactiveColor;
+  final ValueChanged<double>? onChanged;
+  final ValueChanged<double> onChangeEnd;
+
+  const _CurvedProgressBar({
+    required this.progress,
+    required this.activeColor,
+    required this.inactiveColor,
+    this.onChanged,
+    required this.onChangeEnd,
+  });
+
+  @override
+  State<_CurvedProgressBar> createState() => _CurvedProgressBarState();
+}
+
+class _CurvedProgressBarState extends State<_CurvedProgressBar> {
+  double _local = 0;
+  bool _dragging = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _local = widget.progress;
+  }
+
+  @override
+  void didUpdateWidget(covariant _CurvedProgressBar old) {
+    super.didUpdateWidget(old);
+    if (!_dragging && old.progress != widget.progress) {
+      setState(() => _local = widget.progress);
+    }
+  }
+
+  void _update(Offset pos, Size size) {
+    final v = (pos.dx / size.width).clamp(0.0, 1.0);
+    setState(() => _local = v);
+    widget.onChanged?.call(v);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final prog = _dragging ? _local : widget.progress;
+    return GestureDetector(
+      behavior: HitTestBehavior.translucent,
+      onTapDown: (d) {
+        final box = context.findRenderObject() as RenderBox;
+        setState(() { _dragging = true; });
+        _update(d.localPosition, box.size);
+      },
+      onTapUp: (d) {
+        final v = _local;
+        setState(() => _dragging = false);
+        widget.onChangeEnd(v);
+      },
+      onHorizontalDragStart: (d) => setState(() => _dragging = true),
+      onHorizontalDragUpdate: (d) {
+        final box = context.findRenderObject() as RenderBox;
+        _update(d.localPosition, box.size);
+      },
+      onHorizontalDragEnd: (_) {
+        final v = _local;
+        setState(() => _dragging = false);
+        widget.onChangeEnd(v);
+      },
+      child: CustomPaint(
+        size: Size(double.infinity, 40),
+        painter: _CurvedProgressPainter(
+          progress: prog,
+          activeColor: widget.activeColor,
+          inactiveColor: widget.inactiveColor,
+        ),
+      ),
+    );
+  }
+}
+
+class _CurvedProgressPainter extends CustomPainter {
+  final double progress;
+  final Color activeColor;
+  final Color inactiveColor;
+
+  _CurvedProgressPainter({
+    required this.progress,
+    required this.activeColor,
+    required this.inactiveColor,
+  });
+
+  Path _wavePath(Size size) {
+    final path = Path();
+    path.moveTo(0, size.height / 2);
+    path.quadraticBezierTo(
+        size.width / 4, -size.height / 3, size.width / 2, size.height / 2);
+    path.quadraticBezierTo(
+        3 * size.width / 4, size.height + size.height / 3, size.width, size.height / 2);
+    return path;
+  }
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final prog = progress.clamp(0.0, 1.0);
+    final fullPath = _wavePath(size);
+
+    // 背景轨道
+    canvas.drawPath(
+      fullPath,
+      Paint()
+        ..color = inactiveColor
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 2.5
+        ..strokeCap = StrokeCap.round,
+    );
+
+    // 已播放部分
+    final metrics = fullPath.computeMetrics().toList();
+    if (metrics.isNotEmpty) {
+      final metric = metrics.first;
+      final activePath = metric.extractPath(0, metric.length * prog);
+      canvas.drawPath(
+        activePath,
+        Paint()
+          ..color = activeColor
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 2.5
+          ..strokeCap = StrokeCap.round,
+      );
+
+      // 拖动圆点
+      if (prog > 0) {
+        final tangent = metric.getTangentForOffset(metric.length * prog);
+        if (tangent != null) {
+          canvas.drawCircle(tangent.position, 6,
+              Paint()..color = Colors.white..style = PaintingStyle.fill);
+          canvas.drawCircle(tangent.position, 6,
+              Paint()..color = activeColor..style = PaintingStyle.stroke..strokeWidth = 2);
+        }
+      }
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _CurvedProgressPainter old) =>
+      old.progress != progress || old.activeColor != activeColor;
+}
+
+// ── 波形进度条（内联，无需额外依赖）──────────────────────────────────────────
+
+class _WaveformProgressWidget extends StatefulWidget {
+  final double progress;
+  final Color playedColor;
+  final Color unplayedColor;
+  final Color? thumbColor;
+  final ValueChanged<double> onChangeEnd;
+
+  const _WaveformProgressWidget({
+    required this.progress,
+    required this.playedColor,
+    required this.unplayedColor,
+    this.thumbColor,
+    required this.onChangeEnd,
+  });
+
+  @override
+  State<_WaveformProgressWidget> createState() =>
+      _WaveformProgressWidgetState();
+}
+
+class _WaveformProgressWidgetState extends State<_WaveformProgressWidget> {
+  late final List<double> _samples;
+  bool _dragging = false;
+  double _local = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    final rnd = Random();
+    _samples = List.generate(150, (_) => 0.1 + rnd.nextDouble() * 0.8);
+    _local = widget.progress;
+  }
+
+  @override
+  void didUpdateWidget(covariant _WaveformProgressWidget old) {
+    super.didUpdateWidget(old);
+    if (!_dragging && old.progress != widget.progress) {
+      setState(() => _local = widget.progress);
+    }
+  }
+
+  double _toProgress(double dx, double w) => (dx / w).clamp(0.0, 1.0);
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(builder: (_, c) {
+      final w = c.maxWidth;
+      final h = c.maxHeight;
+      final prog = _dragging ? _local : widget.progress;
+      return GestureDetector(
+        behavior: HitTestBehavior.translucent,
+        onTapDown: (d) =>
+            setState(() { _dragging = true; _local = _toProgress(d.localPosition.dx, w); }),
+        onTapUp: (_) { final v = _local; setState(() => _dragging = false); widget.onChangeEnd(v); },
+        onPanStart: (d) =>
+            setState(() { _dragging = true; _local = _toProgress(d.localPosition.dx, w); }),
+        onPanUpdate: (d) =>
+            setState(() => _local = _toProgress(d.localPosition.dx, w)),
+        onPanEnd: (_) { final v = _local; setState(() => _dragging = false); widget.onChangeEnd(v); },
+        child: CustomPaint(
+          size: Size(w, h),
+          painter: _WaveformPainter(
+            progress: prog,
+            playedColor: widget.playedColor,
+            unplayedColor: widget.unplayedColor,
+            thumbColor: widget.thumbColor,
+            samples: _samples,
+          ),
+        ),
+      );
+    });
+  }
+}
+
+class _WaveformPainter extends CustomPainter {
+  final double progress;
+  final Color playedColor;
+  final Color unplayedColor;
+  final Color? thumbColor;
+  final List<double> samples;
+
+  _WaveformPainter({
+    required this.progress,
+    required this.playedColor,
+    required this.unplayedColor,
+    required this.samples,
+    this.thumbColor,
+  });
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    const bw = 2.0, sp = 4.0, total = bw + sp;
+    final maxBars = (size.width / total).floor();
+    final count = samples.length.clamp(0, maxBars);
+    final prog = progress.clamp(0.0, 1.0);
+    for (int i = 0; i < count; i++) {
+      final bh = samples[i] * size.height * 0.8;
+      final left = i * total;
+      final top = (size.height - bh) / 2;
+      canvas.drawRRect(
+        RRect.fromRectAndRadius(
+            Rect.fromLTWH(left, top, bw, bh), const Radius.circular(3)),
+        Paint()
+          ..color =
+              i <= (count * prog).floor() ? playedColor : unplayedColor
+          ..style = PaintingStyle.fill,
+      );
+    }
+    if (prog > 0 && prog < 1) {
+      final px = (count * prog) * total;
+      canvas.drawRRect(
+        RRect.fromRectAndRadius(
+            Rect.fromLTWH(px - 1.5, 0, 3, size.height),
+            const Radius.circular(3)),
+        Paint()
+          ..color = thumbColor ?? playedColor
+          ..style = PaintingStyle.fill,
+      );
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _WaveformPainter old) =>
+      old.progress != progress || old.playedColor != playedColor;
 }

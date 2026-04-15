@@ -22,12 +22,20 @@ import 'package:alist/screen/txt_reader_screen.dart';
 import 'package:alist/screen/uploading_files_screen.dart';
 import 'package:alist/screen/video_player_screen.dart';
 import 'package:alist/screen/web_screen.dart';
+import 'package:alist/util/constant.dart';
 import 'package:alist/util/named_router.dart';
+import 'package:flustars/flustars.dart';
+import 'package:flutter/material.dart';
 import 'package:get/get_navigation/src/routes/get_route.dart';
 
 class AlistRouter {
   static const fileListRouterStackId = 1;
   static const fileListCopyMoveRouterStackId = 2;
+
+  static Widget _audioPlayerPage() {
+    final style = SpUtil.getInt(AlistConstant.audioPlayerUiStyle, defValue: 0) ?? 0;
+    return style == 1 ? const AudioPlayerScreenV2() : AudioPlayerScreen();
+  }
 
   static final List<GetPage> screens = [
     GetPage(name: NamedRouter.root, page: () => const SplashScreen()),
@@ -38,7 +46,7 @@ class AlistRouter {
     GetPage(
         name: NamedRouter.videoPlayer, page: () => const VideoPlayerScreen()),
     GetPage(
-        name: NamedRouter.audioPlayer, page: () => AudioPlayerScreen()),
+        name: NamedRouter.audioPlayer, page: () => _audioPlayerPage()),
     GetPage(name: NamedRouter.donate, page: () => const DonateScreen()),
     GetPage(name: NamedRouter.about, page: () => const AboutScreen()),
     GetPage(name: NamedRouter.gallery, page: () => GalleryScreen()),
