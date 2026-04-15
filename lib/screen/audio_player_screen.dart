@@ -544,12 +544,21 @@ class _AudioPlayerScreenState extends State<AudioPlayerScreen>
                 }),
                 const SizedBox(height: 12),
                 // 自定义按钮
-                TextButton(
-                  onPressed: () {
-                    Navigator.pop(ctx);
-                    _showCustomTimerDialog(context);
-                  },
-                  child: const Text('自定义'),
+                SizedBox(
+                  width: double.infinity,
+                  child: OutlinedButton.icon(
+                    onPressed: () {
+                      Navigator.pop(ctx);
+                      _showCustomTimerDialog(context);
+                    },
+                    icon: const Icon(Icons.tune_rounded, size: 18),
+                    label: const Text('自定义时长'),
+                    style: OutlinedButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12)),
+                    ),
+                  ),
                 ),
                 const Divider(),
                 // 播完整首再停
