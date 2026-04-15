@@ -18,6 +18,7 @@ import 'package:flutter_smart_dialog/flutter_smart_dialog.dart';
 import 'package:get/get.dart';
 import 'package:just_audio/just_audio.dart';
 import 'package:just_audio_background/just_audio_background.dart';
+import 'package:permission_handler/permission_handler.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:scroll_to_index/scroll_to_index.dart';
 import 'dart:io' as io;
@@ -751,6 +752,8 @@ class AudioPlayerScreenController extends GetxController {
   void onInit() {
     super.onInit();
     if (_index < 0 || _index >= _audios.length) _index = 0;
+    // Android 13+ 需要运行时申请通知权限，才能显示媒体通知栏
+    Permission.notification.request();
     _createPlayListAndPlay();
 
     streamSubscriptions.add(_audioPlayer.durationStream.listen((event) {
