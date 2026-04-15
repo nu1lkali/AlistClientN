@@ -365,6 +365,18 @@ class _AudioPlayerScreenState extends State<AudioPlayerScreen>
             icon: const Icon(Icons.queue_music_rounded),
             onPressed: () => _showPlayerList(context),
           ),
+          // 定时暂停
+          Obx(() {
+            final active = _controller.sleepTimerRemaining.value != null ||
+                _controller.sleepAfterTrack.value;
+            return IconButton(
+              iconSize: 28,
+              color: active ? Colors.orangeAccent : Colors.white,
+              icon: const Icon(Icons.bedtime_outlined),
+              tooltip: '定时暂停',
+              onPressed: () => _showSleepTimerSheet(context),
+            );
+          }),
         ],
       ),
     );
@@ -429,6 +441,222 @@ class _AudioPlayerScreenState extends State<AudioPlayerScreen>
           duration: const Duration(milliseconds: 50),
           preferPosition: AutoScrollPosition.begin);
     });
+  }
+
+  void _showSleepTimerSheet(BuildContext context) {
+    showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setSheetState) {
+          return Padding(
+            padding: const EdgeInsets.fromLTRB(20, 20, 20, 12),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // 标题 + 倒计时
+                Row(
+                  children: [
+                    Text('定时关闭', style: Theme.of(ctx).textTheme.titleMedium),
+                    const Spacer(),
+                    Obx(() {
+                      final remaining = _controller.sleepTimerRemaining.value;
+                      final afterTrack = _controller.sleepAfterTrack.value;
+                      if (remaining != null) {
+                        final h = remaining.inHours.toString().padLeft(2, '0');
+                        final m = (remaining.inMinutes % 60).toString().padLeft(2, '0');
+                        final s = (remaining.inSeconds % 60).toString().padLeft(2, '0');
+                        return Text('$h:$m:$s',
+                            style: Theme.of(ctx).textTheme.titleLarge?.copyWith(
+                                fontWeight: FontWeight.bold));
+                      }
+                      if (afterTrack) {
+                        return Text('播完停止',
+                            style: Theme.of(ctx).textTheme.titleMedium?.copyWith(
+                                color: Colors.orangeAccent));
+                      }
+                      return const SizedBox.shrink();
+                    }),
+                    // 开关：有定时时显示，点击取消
+                    Obx(() {
+                      final active = _controller.sleepTimerRemaining.value != null ||
+                          _controller.sleepAfterTrack.value;
+                      if (!active) return const SizedBox.shrink();
+                      return Switch(
+                        value: true,
+                        activeColor: Colors.red,
+                        onChanged: (_) {
+                          _controller.cancelSleepTimer();
+                          setSheetState(() {});
+                        },
+                      );
+                    }),
+                  ],
+                ),
+                const SizedBox(height: 16),
+                // 快捷分钟选项（一行均匀分布）
+                Obx(() {
+                  final presets = [10, 20, 30, 45, 60, 90];
+                  final remaining = _controller.sleepTimerRemaining.value;
+                  return Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: presets.map((min) {
+                      final isSelected = remaining != null &&
+                          (remaining.inMinutes - min).abs() <= 1 &&
+                          !_controller.sleepAfterTrack.value;
+                      return GestureDetector(
+                        onTap: () {
+                          _controller.startSleepTimer(min);
+                          setSheetState(() {});
+                        },
+                        child: Container(
+                          width: 46,
+                          height: 46,
+                          decoration: BoxDecoration(
+                            color: isSelected
+                                ? Colors.red
+                                : Theme.of(ctx).colorScheme.surfaceVariant,
+                            shape: BoxShape.circle,
+                          ),
+                          alignment: Alignment.center,
+                          child: Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Text('$min',
+                                  style: TextStyle(
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.bold,
+                                      color: isSelected ? Colors.white : null)),
+                              Text('min',
+                                  style: TextStyle(
+                                      fontSize: 9,
+                                      color: isSelected ? Colors.white70 : null)),
+                            ],
+                          ),
+                        ),
+                      );
+                    }).toList(),
+                  );
+                }),
+                const SizedBox(height: 12),
+                // 自定义按钮
+                TextButton(
+                  onPressed: () {
+                    Navigator.pop(ctx);
+                    _showCustomTimerDialog(context);
+                  },
+                  child: const Text('自定义'),
+                ),
+                const Divider(),
+                // 播完整首再停
+                Obx(() => CheckboxListTile(
+                      contentPadding: EdgeInsets.zero,
+                      title: const Text('播完整首歌再停止播放'),
+                      value: _controller.sleepAfterTrack.value,
+                      onChanged: (v) {
+                        _controller.toggleSleepAfterTrack(v ?? false);
+                        setSheetState(() {});
+                      },
+                    )),
+                const SizedBox(height: 8),
+              ],
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  void _showCustomTimerDialog(BuildContext context) {
+    int hours = 0;
+    int minutes = 10;
+    showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) => AlertDialog(
+          title: const Text('自定义关闭'),
+          content: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              // 小时滚轮
+              _buildNumberPicker(
+                value: hours,
+                min: 0,
+                max: 23,
+                label: '小时',
+                onChanged: (v) => setDialogState(() => hours = v),
+              ),
+              const Padding(
+                padding: EdgeInsets.symmetric(horizontal: 12),
+                child: Text('|', style: TextStyle(fontSize: 24, color: Colors.grey)),
+              ),
+              // 分钟滚轮
+              _buildNumberPicker(
+                value: minutes,
+                min: 0,
+                max: 59,
+                label: '分钟',
+                onChanged: (v) => setDialogState(() => minutes = v),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('取消'),
+            ),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+              onPressed: () {
+                final total = hours * 60 + minutes;
+                if (total > 0) _controller.startSleepTimer(total);
+                Navigator.pop(ctx);
+              },
+              child: const Text('确定', style: TextStyle(color: Colors.white)),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildNumberPicker({
+    required int value,
+    required int min,
+    required int max,
+    required String label,
+    required ValueChanged<int> onChanged,
+  }) {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        SizedBox(
+          height: 120,
+          width: 70,
+          child: ListWheelScrollView.useDelegate(
+            itemExtent: 40,
+            perspective: 0.003,
+            diameterRatio: 1.5,
+            physics: const FixedExtentScrollPhysics(),
+            controller: FixedExtentScrollController(initialItem: value - min),
+            onSelectedItemChanged: (i) => onChanged(min + i),
+            childDelegate: ListWheelChildBuilderDelegate(
+              childCount: max - min + 1,
+              builder: (ctx, i) => Center(
+                child: Text(
+                  (min + i).toString().padLeft(2, '0'),
+                  style: const TextStyle(fontSize: 28),
+                ),
+              ),
+            ),
+          ),
+        ),
+        Text(label, style: const TextStyle(color: Colors.grey, fontSize: 12)),
+      ],
+    );
   }
 
   ListView _playList(AutoScrollController scrollController) {
@@ -502,6 +730,15 @@ class AudioPlayerScreenController extends GetxController {
   // 收藏状态
   final isFavorite = false.obs;
 
+  // 定时暂停
+  final sleepTimerRemaining = Rx<Duration?>(null);
+  final sleepAfterTrack = false.obs;
+  Timer? _sleepTimer;
+  bool _pendingPauseAfterTrack = false; // 倒计时到0且勾了播完停止，等曲目结束
+
+  // 播完停止：暂存被移除的其他曲目（index -> AudioItem），key 为原始位置
+  List<_StashedItem>? _stashedItems;
+
   // 静态封面缓存，跨页面实例保留，key = remotePath
   static final Map<String, Uint8List> _coverCache = {};
   // 静态艺术家缓存，与封面缓存同步
@@ -542,7 +779,7 @@ class AudioPlayerScreenController extends GetxController {
           var item = event.currentSource?.tag as MediaItem?;
           if (item?.id == _audios[_index].remotePath) {
             _name.value = _audios[_index].name;
-            _artist.value = ''; // 切歌时先清空，等元数据加载
+            _artist.value = '';
             final cached = _coverCache[_audios[_index].remotePath];
             if (cached != null) {
               coverArtBytes.value = cached.isNotEmpty ? cached : null;
@@ -569,9 +806,15 @@ class AudioPlayerScreenController extends GetxController {
       } else {
         _playing.value = false;
       }
-      // list模式播完最后一首循环回第一首，single/random由LoopMode处理
-      if (state.processingState == ProcessingState.completed &&
-          _playMode.value == PlayMode.list) {
+      // 曲目播完（processingState == completed 是切歌前的最后时机）
+      if (state.processingState == ProcessingState.completed) {
+        if (_playMode.value == PlayMode.single) return; // 单曲循环交给 LoopMode.one
+        // sleepAfterTrack 勾选时列表只剩当前一首，completed 后不会切歌，直接 pause 即可
+        if (sleepAfterTrack.value || _pendingPauseAfterTrack) {
+          _pendingPauseAfterTrack = false;
+          _audioPlayer.pause();
+          return;
+        }
         _playNext();
       }
     }));
@@ -677,13 +920,13 @@ class AudioPlayerScreenController extends GetxController {
           ? artists.join(' / ')
           : '';
       _artist.value = artistStr;
-      // 同步存入艺术家缓存（无论有没有封面都缓存，避免重复请求）
       _artistCache[audio.remotePath] = artistStr;
       if (art != null) {
         _coverCache[audio.remotePath] = art;
         coverArtBytes.value = art;
+        // 把封面写到临时文件，更新通知栏 MediaItem 的 artUri
+        _updateNotificationArt(index, art, audio);
       } else {
-        // 没有封面也标记已查询过，下次直接用缓存
         _coverCache[audio.remotePath] = Uint8List(0);
         coverArtBytes.value = null;
       }
@@ -692,8 +935,43 @@ class AudioPlayerScreenController extends GetxController {
     }
   }
 
-  Future<void> _checkFavoriteStatus(int index) async {
-    if (index < 0 || index >= _audios.length) return;
+  /// 封面加载完成后，把图片写到临时文件并替换 playlist source 的 tag，触发通知栏更新
+  Future<void> _updateNotificationArt(int index, Uint8List art, AudioItem audio) async {
+    try {
+      final tmpDir = await getTemporaryDirectory();
+      final artFile = io.File('${tmpDir.path}/cover_${audio.remotePath.hashCode.abs()}.jpg');
+      await artFile.writeAsBytes(art);
+      final artUri = artFile.uri;
+
+      // 替换 playlist 里对应 source 的 tag（触发 just_audio_background 更新通知栏）
+      if (index < _playList.length) {
+        final newTag = MediaItem(
+          id: audio.remotePath,
+          title: audio.name,
+          artist: _artistCache[audio.remotePath] ?? '',
+          artUri: artUri,
+        );
+        // 用相同 URI 重建 source，只换 tag
+        AudioSource newSource;
+        if (audio.localPath != null && audio.localPath!.isNotEmpty) {
+          newSource = ProgressiveAudioSource(Uri.file(audio.localPath!), tag: newTag);
+        } else {
+          final uri = await FileUtils.makeFileLink(audio.remotePath, audio.sign);
+          if (uri == null) return;
+          if (audio.provider == "BaiduNetdisk") {
+            newSource = AlistLockCachingAudioSource(Uri.parse(uri),
+                headers: {"User-Agent": "pan.baidu.com"}, tag: newTag);
+          } else {
+            newSource = AudioSource.uri(Uri.parse(uri), tag: newTag);
+          }
+        }
+        await _playList.removeAt(index);
+        await _playList.insert(index, newSource);
+      }
+    } catch (_) {}
+  }
+
+  Future<void> _checkFavoriteStatus(int index) async {    if (index < 0 || index >= _audios.length) return;
     final audio = _audios[index];
     final user = Get.find<UserController>().user.value;
     final db = Get.find<AlistDatabaseController>();
@@ -801,12 +1079,12 @@ class AudioPlayerScreenController extends GetxController {
     if (_playMode.value == PlayMode.single) {
       _playMode.value = PlayMode.list;
       SmartDialog.showToast(Intl.audioPlayerScreen_btn_sequence.tr);
-      _audioPlayer.setLoopMode(LoopMode.all); // list模式：循环播放
+      _audioPlayer.setLoopMode(LoopMode.all);
       _audioPlayer.setShuffleModeEnabled(false);
     } else if (_playMode.value == PlayMode.list) {
       _playMode.value = PlayMode.random;
       SmartDialog.showToast(Intl.audioPlayerScreen_btn_shuffle.tr);
-      _audioPlayer.setLoopMode(LoopMode.all); // random模式：循环
+      _audioPlayer.setLoopMode(LoopMode.all);
       _audioPlayer.setShuffleModeEnabled(true);
     } else {
       _playMode.value = PlayMode.single;
@@ -866,11 +1144,117 @@ class AudioPlayerScreenController extends GetxController {
     super.onClose();
     _cancelToken.cancel();
     _saveProgress(_index);
+    _sleepTimer?.cancel();
     _audioPlayer.stop().then((_) => _audioPlayer.dispose());
     for (var s in streamSubscriptions) {
       s.cancel();
     }
     streamSubscriptions = [];
+  }
+
+  // ── 定时暂停 ──────────────────────────────────────────────────────────────
+
+  /// 开启定时暂停，[minutes] 分钟后暂停（不影响 sleepAfterTrack）
+  void startSleepTimer(int minutes) {
+    _sleepTimer?.cancel();
+    final total = Duration(minutes: minutes);
+    sleepTimerRemaining.value = total;
+
+    _sleepTimer = Timer.periodic(const Duration(seconds: 1), (t) {
+      final remaining = sleepTimerRemaining.value;
+      if (remaining == null || remaining.inSeconds <= 0) {
+        t.cancel();
+        sleepTimerRemaining.value = null;
+        if (sleepAfterTrack.value) {
+          // 勾了播完停止：设标记，等当前曲目播完再暂停
+          _pendingPauseAfterTrack = true;
+        } else {
+          // 没勾：立即暂停
+          _audioPlayer.pause();
+        }
+        return;
+      }
+      sleepTimerRemaining.value = remaining - const Duration(seconds: 1);
+    });
+  }
+
+  /// 切换"播完整首再停"（独立于倒计时）
+  void toggleSleepAfterTrack(bool value) {
+    sleepAfterTrack.value = value;
+    if (value) {
+      // 勾选：把当前项以外的所有曲目从播放列表移除并暂存
+      _stashOtherTracks();
+    } else {
+      // 取消：恢复暂存的曲目
+      _restoreStashedTracks();
+    }
+  }
+
+  /// 把当前播放项以外的曲目暂存并从列表移除
+  void _stashOtherTracks() {
+    if (_audios.length <= 1) return;
+    final stashed = <_StashedItem>[];
+    // 从后往前移除，避免 index 偏移
+    for (int i = _audios.length - 1; i >= 0; i--) {
+      if (i != _index) {
+        stashed.add(_StashedItem(originalIndex: i, audio: _audios[i]));
+        _playList.removeAt(i);
+        _audios.removeAt(i);
+      }
+    }
+    // 移除后当前项一定在 index 0
+    _index = 0;
+    _stashedItems = stashed;
+    // 切到 LoopMode.off，防止单首播完后循环
+    _audioPlayer.setLoopMode(LoopMode.off);
+  }
+
+  /// 恢复暂存的曲目（按原始位置插回）
+  void _restoreStashedTracks() async {
+    final stashed = _stashedItems;
+    if (stashed == null || stashed.isEmpty) return;
+    _stashedItems = null;
+
+    // 记住当前正在播放的曲目，恢复后重新找它的 index
+    final currentAudio = _audios.isNotEmpty ? _audios[_index] : null;
+
+    // 按 originalIndex 升序排列，依次插回
+    stashed.sort((a, b) => a.originalIndex.compareTo(b.originalIndex));
+    for (final item in stashed) {
+      final audio = item.audio;
+      final uri = await FileUtils.makeFileLink(audio.remotePath, audio.sign);
+      if (uri == null) continue;
+      final source = await _audioToUri(uri, audio);
+      final insertAt = item.originalIndex.clamp(0, _audios.length);
+      _audios.insert(insertAt, audio);
+      await _playList.insert(insertAt, source);
+    }
+
+    // 恢复后重新定位当前曲目的 index
+    if (currentAudio != null) {
+      final newIndex = _audios.indexWhere(
+          (a) => a.remotePath == currentAudio.remotePath);
+      if (newIndex >= 0) _index = newIndex;
+    }
+    // 恢复 LoopMode
+    if (_playMode.value == PlayMode.single) {
+      _audioPlayer.setLoopMode(LoopMode.one);
+    } else {
+      _audioPlayer.setLoopMode(LoopMode.all);
+    }
+  }
+
+  /// 取消所有定时（倒计时 + 播完停止）
+  void cancelSleepTimer() {
+    _sleepTimer?.cancel();
+    _sleepTimer = null;
+    sleepTimerRemaining.value = null;
+    if (sleepAfterTrack.value) {
+      sleepAfterTrack.value = false;
+      _restoreStashedTracks();
+    }
+    sleepAfterTrack.value = false;
+    _pendingPauseAfterTrack = false;
   }
 }
 
@@ -892,4 +1276,11 @@ class AudioItem {
     this.provider,
     this.size = 0,
   });
+}
+
+/// 暂存被移除的曲目，记录原始位置
+class _StashedItem {
+  final int originalIndex;
+  final AudioItem audio;
+  _StashedItem({required this.originalIndex, required this.audio});
 }
