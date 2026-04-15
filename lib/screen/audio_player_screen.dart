@@ -554,7 +554,7 @@ class _AudioPlayerScreenState extends State<AudioPlayerScreen>
                 // 播完整首再停
                 Obx(() => CheckboxListTile(
                       contentPadding: EdgeInsets.zero,
-                      title: const Text('播完整首歌再停止播放'),
+                      title: const Text('播完整首音频再停止播放'),
                       value: _controller.sleepAfterTrack.value,
                       onChanged: (v) {
                         _controller.toggleSleepAfterTrack(v ?? false);
