@@ -838,25 +838,22 @@ class AudioPlayerScreenController extends GetxController {
         if (newIndex != prevIndex) {
           _saveProgress(prevIndex);
           _index = newIndex;
-          var item = event.currentSource?.tag as MediaItem?;
-          if (item?.id == _audios[_index].remotePath) {
-            _name.value = _audios[_index].name;
+          _name.value = _audios[_index].name;
+          // 先查缓存，有缓存直接显示，不闪烁默认封面
+          final cached = _coverCache[_audios[_index].remotePath];
+          if (cached != null) {
+            coverArtBytes.value = cached.isNotEmpty ? cached : null;
+            _artist.value = _artistCache[_audios[_index].remotePath] ?? '';
+          } else {
+            // 没缓存才清空，触发加载
             _artist.value = '';
-            final cached = _coverCache[_audios[_index].remotePath];
-            if (cached != null) {
-              coverArtBytes.value = cached.isNotEmpty ? cached : null;
-              _artist.value = _artistCache[_audios[_index].remotePath] ?? '';
-            } else {
-              _fetchCoverArt(_index);
-            }
-            _checkFavoriteStatus(_index);
+            coverArtBytes.value = null;
+            _fetchCoverArt(_index);
           }
+          _checkFavoriteStatus(_index);
         } else {
           _index = newIndex;
-          var item = event.currentSource?.tag as MediaItem?;
-          if (item?.id == _audios[_index].remotePath) {
-            _name.value = _audios[_index].name;
-          }
+          _name.value = _audios[_index].name;
         }
       }
     }));
@@ -993,7 +990,11 @@ class AudioPlayerScreenController extends GetxController {
         coverArtBytes.value = null;
       }
     } catch (_) {
-      if (_coverFetchIndex == index) coverArtBytes.value = null;
+      // 加载失败时才清空，不要在加载中途清空
+      if (_coverFetchIndex == index) {
+        _coverCache[audio.remotePath] = Uint8List(0);
+        coverArtBytes.value = null;
+      }
     }
   }
 
@@ -1144,9 +1145,24 @@ class AudioPlayerScreenController extends GetxController {
   }
 
   void _play(int index) {
+    final prevIndex = _index;
     _index = index;
     _currentPos.value = const Duration(milliseconds: 0);
     _audioPlayer.seek(Duration.zero, index: index);
+    // 主动更新封面，不依赖 sequenceStateStream
+    if (index != prevIndex) {
+      _name.value = _audios[index].name;
+      final cached = _coverCache[_audios[index].remotePath];
+      if (cached != null) {
+        coverArtBytes.value = cached.isNotEmpty ? cached : null;
+        _artist.value = _artistCache[_audios[index].remotePath] ?? '';
+      } else {
+        _artist.value = '';
+        coverArtBytes.value = null;
+        _fetchCoverArt(index);
+      }
+      _checkFavoriteStatus(index);
+    }
   }
 
   void _remove(int index) {
