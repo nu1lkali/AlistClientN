@@ -349,6 +349,12 @@ class PlayerActivity : AppCompatActivity(), GSYVideoProgressListener {
         isPause = true
         handler.removeMessages(messageRecordWatchTime)
         saveCurrentTime()
+        // 保存当前亮度
+        val brightness = window.attributes.screenBrightness
+        if (brightness >= 0f) {
+            getSharedPreferences("player_prefs", MODE_PRIVATE)
+                .edit().putFloat("last_brightness", brightness).apply()
+        }
     }
 
     private fun saveCurrentTime() {
@@ -368,6 +374,14 @@ class PlayerActivity : AppCompatActivity(), GSYVideoProgressListener {
         gsyVideoPlayer.currentPlayer.onVideoResume(false)
         super.onResume()
         isPause = false
+        // 恢复上次保存的亮度
+        val savedBrightness = getSharedPreferences("player_prefs", MODE_PRIVATE)
+            .getFloat("last_brightness", -1f)
+        if (savedBrightness >= 0f) {
+            val lp = window.attributes
+            lp.screenBrightness = savedBrightness
+            window.attributes = lp
+        }
         if (gsyVideoPlayer.currentPlayer.currentState == GSYVideoView.CURRENT_STATE_PLAYING
             || gsyVideoPlayer.currentPlayer.currentState == GSYVideoView.CURRENT_STATE_PLAYING_BUFFERING_START
             || gsyVideoPlayer.currentPlayer.currentState == GSYVideoView.CURRENT_STATE_PREPAREING
