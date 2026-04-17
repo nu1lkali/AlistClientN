@@ -34,6 +34,7 @@ import com.shuyu.gsyvideoplayer.listener.GSYVideoProgressListener
 import com.shuyu.gsyvideoplayer.player.IjkPlayerManager
 import com.shuyu.gsyvideoplayer.player.PlayerFactory
 import com.shuyu.gsyvideoplayer.utils.Debuger
+import tv.danmaku.ijk.media.player.IjkMediaPlayer
 import com.shuyu.gsyvideoplayer.utils.OrientationUtils
 import com.shuyu.gsyvideoplayer.video.NormalGSYVideoPlayer
 import com.shuyu.gsyvideoplayer.video.base.GSYVideoView
@@ -94,6 +95,21 @@ class PlayerActivity : AppCompatActivity(), GSYVideoProgressListener {
         }
     }
 
+    private fun configureIjkPlayer() {
+        IjkPlayerManager.setLogLevel(if (BuildConfig.DEBUG) IjkMediaPlayer.IJK_LOG_DEBUG else IjkMediaPlayer.IJK_LOG_SILENT)
+        // 开启硬件解码（mediacodec），大幅降低 CPU 占用，解决卡顿
+        IjkPlayerManager.setOption(IjkMediaPlayer.OPT_CATEGORY_PLAYER, "mediacodec", 1)
+        IjkPlayerManager.setOption(IjkMediaPlayer.OPT_CATEGORY_PLAYER, "mediacodec-auto-rotate", 1)
+        IjkPlayerManager.setOption(IjkMediaPlayer.OPT_CATEGORY_PLAYER, "mediacodec-handle-resolution-change", 1)
+        // 减少起播延迟
+        IjkPlayerManager.setOption(IjkMediaPlayer.OPT_CATEGORY_FORMAT, "analyzeduration", 100000L)
+        IjkPlayerManager.setOption(IjkMediaPlayer.OPT_CATEGORY_FORMAT, "probesize", 10240L)
+        // 丢帧策略：跟不上时丢帧而不是卡住
+        IjkPlayerManager.setOption(IjkMediaPlayer.OPT_CATEGORY_PLAYER, "framedrop", 5)
+        // 开启 OpenSL ES 音频输出，降低音频延迟
+        IjkPlayerManager.setOption(IjkMediaPlayer.OPT_CATEGORY_PLAYER, "opensles", 1)
+    }
+
     private fun initData(args: Bundle?) {
         headersStr = args?.getString("headers") ?: headersStr
         videosStr = args?.getString("videos") ?: videosStr
@@ -110,6 +126,7 @@ class PlayerActivity : AppCompatActivity(), GSYVideoProgressListener {
         if (playerType == "ijkplayer") {
             Debuger.printfError("player = $playerType")
             PlayerFactory.setPlayManager(IjkPlayerManager::class.java)
+            configureIjkPlayer()
         } else {
             Debuger.printfError("player = $playerType")
             PlayerFactory.setPlayManager(Exo2PlayerManager::class.java)
@@ -235,6 +252,7 @@ class PlayerActivity : AppCompatActivity(), GSYVideoProgressListener {
                         Debuger.printfError("ExoPlayer failed, switching to ijkplayer")
                         playerType = "ijkplayer"
                         PlayerFactory.setPlayManager(IjkPlayerManager::class.java)
+                        configureIjkPlayer()
                         val seekPos = if (totalTime > 0) currentTime else 0L
                         gsyVideoPlayer.currentPlayer.seekOnStart = seekPos
                         startPlay(index, videos[index])
