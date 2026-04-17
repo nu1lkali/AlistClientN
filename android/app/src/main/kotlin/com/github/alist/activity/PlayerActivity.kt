@@ -29,6 +29,7 @@ import com.github.alist.utils.GsonUtils
 import com.github.alist.widget.AlistClientVideoPlayer
 import com.shuyu.gsyvideoplayer.GSYVideoManager
 import com.shuyu.gsyvideoplayer.builder.GSYVideoOptionBuilder
+import com.shuyu.gsyvideoplayer.model.VideoOptionModel
 import com.shuyu.gsyvideoplayer.listener.GSYSampleCallBack
 import com.shuyu.gsyvideoplayer.listener.GSYVideoProgressListener
 import com.shuyu.gsyvideoplayer.player.IjkPlayerManager
@@ -96,18 +97,16 @@ class PlayerActivity : AppCompatActivity(), GSYVideoProgressListener {
     }
 
     private fun configureIjkPlayer() {
-        IjkPlayerManager.setLogLevel(if (BuildConfig.DEBUG) IjkMediaPlayer.IJK_LOG_DEBUG else IjkMediaPlayer.IJK_LOG_SILENT)
-        // 开启硬件解码（mediacodec），大幅降低 CPU 占用，解决卡顿
-        IjkPlayerManager.setOption(IjkMediaPlayer.OPT_CATEGORY_PLAYER, "mediacodec", 1)
-        IjkPlayerManager.setOption(IjkMediaPlayer.OPT_CATEGORY_PLAYER, "mediacodec-auto-rotate", 1)
-        IjkPlayerManager.setOption(IjkMediaPlayer.OPT_CATEGORY_PLAYER, "mediacodec-handle-resolution-change", 1)
-        // 减少起播延迟
-        IjkPlayerManager.setOption(IjkMediaPlayer.OPT_CATEGORY_FORMAT, "analyzeduration", 100000L)
-        IjkPlayerManager.setOption(IjkMediaPlayer.OPT_CATEGORY_FORMAT, "probesize", 10240L)
-        // 丢帧策略：跟不上时丢帧而不是卡住
-        IjkPlayerManager.setOption(IjkMediaPlayer.OPT_CATEGORY_PLAYER, "framedrop", 5)
-        // 开启 OpenSL ES 音频输出，降低音频延迟
-        IjkPlayerManager.setOption(IjkMediaPlayer.OPT_CATEGORY_PLAYER, "opensles", 1)
+        // ijkplayer 硬解参数通过 VideoOptionModel 设置
+        val optionModelList = ArrayList<VideoOptionModel>()
+        optionModelList.add(VideoOptionModel(IjkMediaPlayer.OPT_CATEGORY_PLAYER, "mediacodec", 1))
+        optionModelList.add(VideoOptionModel(IjkMediaPlayer.OPT_CATEGORY_PLAYER, "mediacodec-auto-rotate", 1))
+        optionModelList.add(VideoOptionModel(IjkMediaPlayer.OPT_CATEGORY_PLAYER, "mediacodec-handle-resolution-change", 1))
+        optionModelList.add(VideoOptionModel(IjkMediaPlayer.OPT_CATEGORY_FORMAT, "analyzeduration", "100000"))
+        optionModelList.add(VideoOptionModel(IjkMediaPlayer.OPT_CATEGORY_FORMAT, "probesize", "10240"))
+        optionModelList.add(VideoOptionModel(IjkMediaPlayer.OPT_CATEGORY_PLAYER, "framedrop", 5))
+        optionModelList.add(VideoOptionModel(IjkMediaPlayer.OPT_CATEGORY_PLAYER, "opensles", 1))
+        GSYVideoManager.instance().optionModelList = optionModelList
     }
 
     private fun initData(args: Bundle?) {
@@ -261,6 +260,11 @@ class PlayerActivity : AppCompatActivity(), GSYVideoProgressListener {
                 }
             }).setLockClickListener { _, lock ->
                 orientationUtils.isEnable = !lock
+            }.apply {
+                // ijkplayer 硬件解码配置（仅在使用 ijkplayer 时生效）
+                if (playerType == "ijkplayer") {
+                    configureIjkPlayer()
+                }
             }.build(gsyVideoPlayer)
 
         gsyVideoPlayer.fullscreenButton.setOnClickListener { //直接横屏
