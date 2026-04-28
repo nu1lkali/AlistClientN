@@ -117,6 +117,9 @@ class _FileListScreenState extends State<FileListScreen>
   bool _fabExpanded = false;
   final ScrollController _fabScrollController = ScrollController();
 
+  // toolbar expand state
+  bool _toolbarExpanded = false;
+
   // multi-select state
   bool _isMultiSelectMode = false;
   final Set<int> _selectedIndices = {};
@@ -1218,6 +1221,8 @@ class _FileListScreenState extends State<FileListScreen>
                         child: Text(
                           _pageName!,
                           overflow: TextOverflow.ellipsis,
+                          maxLines: 2,
+                          style: const TextStyle(fontSize: 16, height: 1.2),
                         ),
                       ),
                       if (!_isRootPath(path))
@@ -1271,35 +1276,68 @@ class _FileListScreenState extends State<FileListScreen>
               ),
             ]
           : [
-              Obx(() => _userController.searchIndex.isNotEmpty
-                  ? IconButton(
-                      onPressed: () {
-                        final args = {"folder": path};
-                        Get.toNamed(NamedRouter.fileSearch, arguments: args);
-                      },
-                      icon: const Icon(Icons.search_rounded))
-                  : const SizedBox()),
-              Obx(() => IconButton(
-                    tooltip:
-                        _filterTooltip(_menuAnchorController.filterMode.value),
-                    onPressed: _cycleFilter,
-                    icon: _filterIcon(_menuAnchorController.filterMode.value),
-                  )),
-              Obx(() => IconButton(
-                    onPressed: () {
-                      final newVal = !_menuAnchorController.isGridView.value;
-                      _menuAnchorController.isGridView.value = newVal;
-                      SpUtil.putBool(AlistConstant.fileViewMode, newVal);
-                      // load folder thumbs when switching to grid view
-                      if (newVal && _files.isNotEmpty) {
-                        _loadFolderThumbs(_files.toList());
-                      }
-                    },
-                    icon: Icon(_menuAnchorController.isGridView.value
-                        ? Icons.list_rounded
-                        : Icons.grid_view_rounded),
-                  )),
-              _menuMoreIcon()
+              // 搜索/过滤/视图按钮，用 AnimatedSize 从右侧展开/收起
+              AnimatedSize(
+                duration: const Duration(milliseconds: 200),
+                curve: Curves.easeInOut,
+                alignment: Alignment.centerRight,
+                child: _toolbarExpanded
+                    ? Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Obx(() => _userController.searchIndex.isNotEmpty
+                              ? IconButton(
+                                  onPressed: () {
+                                    final args = {"folder": path};
+                                    Get.toNamed(NamedRouter.fileSearch,
+                                        arguments: args);
+                                  },
+                                  icon: const Icon(Icons.search_rounded))
+                              : const SizedBox()),
+                          Obx(() => IconButton(
+                                tooltip: _filterTooltip(
+                                    _menuAnchorController.filterMode.value),
+                                onPressed: _cycleFilter,
+                                icon: _filterIcon(
+                                    _menuAnchorController.filterMode.value),
+                              )),
+                          Obx(() => IconButton(
+                                onPressed: () {
+                                  final newVal =
+                                      !_menuAnchorController.isGridView.value;
+                                  _menuAnchorController.isGridView.value =
+                                      newVal;
+                                  SpUtil.putBool(
+                                      AlistConstant.fileViewMode, newVal);
+                                  if (newVal && _files.isNotEmpty) {
+                                    _loadFolderThumbs(_files.toList());
+                                  }
+                                },
+                                icon: Icon(
+                                    _menuAnchorController.isGridView.value
+                                        ? Icons.list_rounded
+                                        : Icons.grid_view_rounded),
+                              )),
+                        ],
+                      )
+                    : const SizedBox.shrink(),
+              ),
+              // tune 按钮：切换展开/收起
+              IconButton(
+                icon: AnimatedSwitcher(
+                  duration: const Duration(milliseconds: 200),
+                  child: _toolbarExpanded
+                      ? const Icon(Icons.tune_rounded,
+                          key: ValueKey('expanded'))
+                      : const Icon(Icons.tune_rounded,
+                          key: ValueKey('collapsed')),
+                ),
+                tooltip: _toolbarExpanded ? "收起" : "展开工具栏",
+                onPressed: () =>
+                    setState(() => _toolbarExpanded = !_toolbarExpanded),
+              ),
+              // ⋮ 菜单保持不动
+              _menuMoreIcon(),
             ],
       onLeadingDoubleTap: () =>
           Get.until((route) => route.isFirst, id: stackId),
