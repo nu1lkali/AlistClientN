@@ -222,7 +222,10 @@ public class AlistClientVideoPlayer extends NormalGSYVideoPlayer {
     public void onPrepared() {
         super.onPrepared();
         isEnableSeek = getDuration() > 0L;
-        if (!isEnableSeek) {
+        if (isEnableSeek) {
+            btnRewind.setVisibility(View.VISIBLE);
+            btnFfwd.setVisibility(View.VISIBLE);
+        } else {
             btnRewind.setVisibility(View.GONE);
             btnFfwd.setVisibility(View.GONE);
         }

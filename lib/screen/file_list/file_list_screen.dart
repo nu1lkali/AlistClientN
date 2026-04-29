@@ -814,6 +814,9 @@ class _FileListScreenState extends State<FileListScreen>
     
     final random = Random();
     final randomVideo = videos[random.nextInt(videos.length)];
+    // 随机选中的视频置顶，保证 index=0
+    videos.remove(randomVideo);
+    videos.insert(0, randomVideo);
     _goVideoPlayerScreen(context, randomVideo, videos, false);
   }
 
@@ -844,7 +847,9 @@ class _FileListScreenState extends State<FileListScreen>
       // Pick a random video from the found directory
       final random = Random();
       final randomVideo = videoFiles[random.nextInt(videoFiles.length)];
-      
+      // 随机选中的视频置顶，保证 index=0
+      videoFiles.remove(randomVideo);
+      videoFiles.insert(0, randomVideo);
       _goVideoPlayerScreen(context, randomVideo, videoFiles, false);
     } catch (e) {
       SmartDialog.dismiss();
