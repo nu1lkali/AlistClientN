@@ -817,12 +817,12 @@ class _FileListScreenState extends State<FileListScreen>
     _goVideoPlayerScreen(context, randomVideo, videos, false);
   }
 
-  void _randomPlayVideoRecursive() async {
+  void _randomPlayVideoRecursive([String? fromPath]) async {
     SmartDialog.showLoading(msg: '随机探索中…', backDismiss: false, clickMaskDismiss: false);
-    
+    final targetPath = fromPath ?? path;
     try {
       // Random walk to find a directory with videos
-      final result = await _randomWalkToFindVideos(path, maxDepth: 10);
+      final result = await _randomWalkToFindVideos(targetPath, maxDepth: 10);
       
       SmartDialog.dismiss();
       
@@ -1368,6 +1368,7 @@ class _FileListScreenState extends State<FileListScreen>
             }
           },
           onFileMoreIconButtonTap: _onFileMoreIconButtonTap,
+          onFolderShufflePlay: (folderPath) => _randomPlayVideoRecursive(folderPath),
           refreshCallback: _loadFiles,
           fileDeleteCallback: (context, index) {
             _tryDeleteFile(_filteredFiles[index]);
@@ -2593,6 +2594,7 @@ class _FileListView extends StatelessWidget {
     this.selectedIndices = const {},
     required this.refreshController,
     this.onFileMoreIconButtonTap,
+    this.onFolderShufflePlay,
     this.fileDeleteCallback,
     this.onFileLongPress,
     required this.refreshCallback,
@@ -2608,6 +2610,7 @@ class _FileListView extends StatelessWidget {
   final Set<int> selectedIndices;
   final FileItemClickCallback onFileItemClick;
   final FileMoreIconClickCallback? onFileMoreIconButtonTap;
+  final void Function(String folderPath)? onFolderShufflePlay;
   final FileDeleteCallback? fileDeleteCallback;
   final FileItemClickCallback? onFileLongPress;
   final RefreshController refreshController;
@@ -2782,6 +2785,10 @@ class _FileListView extends StatelessWidget {
                       onLongPress: onFileLongPress != null
                           ? () => onFileLongPress!(context, index)
                           : null,
+                      showShuffleButton: true,
+                      onShufflePlayTap: file.isDir && onFolderShufflePlay != null
+                          ? () => onFolderShufflePlay!(file.path)
+                          : null,
                       onMoreIconButtonTap: () {
                         if (onFileMoreIconButtonTap != null) {
                           onFileMoreIconButtonTap!(context, index);
@@ -2913,6 +2920,10 @@ class _FileListView extends StatelessWidget {
         onTap: () => onFileItemClick(context, index),
         onLongPress: onFileLongPress != null
             ? () => onFileLongPress!(context, index)
+            : null,
+        showShuffleButton: true,
+        onShufflePlayTap: file.isDir && onFolderShufflePlay != null
+            ? () => onFolderShufflePlay!(file.path)
             : null,
         onMoreIconButtonTap: () {
           if (onFileMoreIconButtonTap != null) {

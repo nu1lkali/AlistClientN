@@ -19,6 +19,8 @@ class FileListItemView extends StatelessWidget {
     this.thumbnail,
     required this.onTap,
     this.onMoreIconButtonTap,
+    this.onShufflePlayTap,
+    this.showShuffleButton = false,
     this.fileNameMaxLines,
     this.highlightKeyword,
     this.watchProgress,
@@ -26,6 +28,8 @@ class FileListItemView extends StatelessWidget {
   }) : super(key: key);
   final GestureTapCallback onTap;
   final GestureTapCallback? onMoreIconButtonTap;
+  final GestureTapCallback? onShufflePlayTap;
+  final bool showShuffleButton; // 是否显示shuffle按钮（非文件夹时显示但禁用）
   final GestureTapCallback? onLongPress;
   final String icon;
   final String? thumbnail;
@@ -70,7 +74,7 @@ class FileListItemView extends StatelessWidget {
                 )
             ],
           ),
-          trailing: _moreIconButton(isDarkMode, scheme),
+          trailing: _trailingWidget(isDarkMode, scheme),
           title: Obx(() {
             int globalFileNameMaxLines = Global.fileNameMaxLines.value;
             int fileNameMaxLines = this.fileNameMaxLines ?? globalFileNameMaxLines;
@@ -160,6 +164,59 @@ class FileListItemView extends StatelessWidget {
         style: DefaultTextStyle.of(Get.context!).style,
         children: spans,
       ),
+    );
+  }
+
+  Widget _trailingWidget(bool isDarkMode, ColorScheme scheme) {
+    // 只有传了 showShuffleButton=true 才显示 shuffle 按钮
+    if (!showShuffleButton) {
+      return _moreIconButton(isDarkMode, scheme);
+    }
+
+    final shuffleEnabled = onShufflePlayTap != null;
+    final shuffleBtn = IconButton(
+      onPressed: onShufflePlayTap,
+      tooltip: shuffleEnabled ? "随机播放" : null,
+      icon: Opacity(
+        opacity: shuffleEnabled ? 1.0 : 0.25,
+        child: Container(
+          width: 32,
+          height: 32,
+          decoration: BoxDecoration(
+            color: scheme.primaryContainer.withOpacity(shuffleEnabled ? 0.6 : 0.3),
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Icon(
+            Icons.shuffle_rounded,
+            size: 16,
+            color: scheme.primary,
+          ),
+        ),
+      ),
+    );
+
+    if (onMoreIconButtonTap == null) {
+      return Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          shuffleBtn,
+          Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(Icons.chevron_right_rounded,
+                  color: scheme.outlineVariant, size: 20)
+            ],
+          ),
+        ],
+      );
+    }
+
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        shuffleBtn,
+        _moreIconButton(isDarkMode, scheme),
+      ],
     );
   }
 
