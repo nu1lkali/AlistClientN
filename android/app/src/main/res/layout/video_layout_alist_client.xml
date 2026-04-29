@@ -66,6 +66,14 @@
             android:textColor="#ffffff" />
 
         <ImageView
+            android:id="@+id/btn_playlist"
+            android:layout_width="40dp"
+            android:layout_height="40dp"
+            android:padding="8dp"
+            android:scaleType="centerInside"
+            android:src="@drawable/ic_playlist" />
+
+        <ImageView
             android:id="@+id/fullscreen"
             android:layout_width="40dp"
             android:layout_height="40dp"
@@ -124,14 +132,6 @@
             android:textSize="18sp"
             android:ellipsize="end"
             android:maxLines="1" />
-
-        <ImageView
-            android:id="@+id/btn_playlist"
-            android:layout_width="48dp"
-            android:layout_height="48dp"
-            android:padding="12dp"
-            android:scaleType="centerInside"
-            android:src="@drawable/ic_playlist" />
 
         <ImageView
             android:id="@+id/btn_favorite"

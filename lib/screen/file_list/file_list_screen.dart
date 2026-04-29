@@ -263,8 +263,14 @@ class _FileListScreenState extends State<FileListScreen>
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
       ),
-      builder: (_) => SafeArea(
-        child: Column(
+      isScrollControlled: true,
+      constraints: BoxConstraints(
+        maxHeight: MediaQuery.of(context).size.height * 0.75,
+      ),
+      builder: (sheetContext) {
+        final bottomPadding = MediaQuery.of(sheetContext).viewInsets.bottom +
+            MediaQuery.of(sheetContext).padding.bottom;
+        return Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -273,36 +279,42 @@ class _FileListScreenState extends State<FileListScreen>
               child: Text('跳转到', style: Theme.of(context).textTheme.titleMedium),
             ),
             const Divider(height: 1),
-            // 根目录入口（始终显示在最前面）
-            ListTile(
-              leading: Icon(Icons.home_rounded, color: Theme.of(context).colorScheme.primary),
-              title: const Text('根目录'),
-              subtitle: Text('/', style: Theme.of(context).textTheme.bodySmall),
-              onTap: () {
-                Navigator.pop(context);
-                _navigateToPath('/');
-              },
+            Flexible(
+              child: ListView(
+                padding: EdgeInsets.only(bottom: bottomPadding + 8),
+                children: [
+                  // 根目录入口（始终显示在最前面）
+                  ListTile(
+                    leading: Icon(Icons.home_rounded, color: Theme.of(context).colorScheme.primary),
+                    title: const Text('根目录'),
+                    subtitle: Text('/', style: Theme.of(context).textTheme.bodySmall),
+                    onTap: () {
+                      Navigator.pop(context);
+                      _navigateToPath('/');
+                    },
+                  ),
+                  // 显示所有上级目录（不包括当前目录），倒序显示最近的上级在上面
+                  ...crumbs.reversed.skip(1).map((crumb) {
+                    return ListTile(
+                      leading: Icon(Icons.folder_rounded, color: Theme.of(context).colorScheme.primary),
+                      title: Text(crumb['label']!),
+                      subtitle: Text(
+                        crumb['fullPath']!,
+                        style: Theme.of(context).textTheme.bodySmall,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      onTap: () {
+                        Navigator.pop(context);
+                        _navigateToPath(crumb['fullPath']!);
+                      },
+                    );
+                  }).toList(),
+                ],
+              ),
             ),
-            // 显示所有上级目录（不包括当前目录），倒序显示最近的上级在上面
-            ...crumbs.reversed.skip(1).map((crumb) {
-              return ListTile(
-                leading: Icon(Icons.folder_rounded, color: Theme.of(context).colorScheme.primary),
-                title: Text(crumb['label']!),
-                subtitle: Text(
-                  crumb['fullPath']!,
-                  style: Theme.of(context).textTheme.bodySmall,
-                  overflow: TextOverflow.ellipsis,
-                ),
-                onTap: () {
-                  Navigator.pop(context);
-                  _navigateToPath(crumb['fullPath']!);
-                },
-              );
-            }).toList(),
-            const SizedBox(height: 8),
           ],
-        ),
-      ),
+        );
+      },
     );
   }
 
