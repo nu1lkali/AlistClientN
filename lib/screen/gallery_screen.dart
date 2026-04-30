@@ -508,6 +508,8 @@ class GalleryController extends GetxController {
     name ??= Uri.parse(url).path.substringAfterLast("/")!;
 
     name = _makeSavedFileName(name);
+
+    // 有本地路径，直接保存原始文件
     if (files?[index].localPath != null &&
         files![index].localPath!.isNotEmpty) {
       await ImageGallerySaver.saveFile(files![index].localPath!, name: name)
@@ -515,6 +517,26 @@ class GalleryController extends GetxController {
               SmartDialog.showToast(Intl.galleryScreen_savePhotoSucceed.tr));
       return;
     }
+
+    // HEIC/HEIF：getCachedImageFile 返回的是转换后的 jpg，不是原图
+    // 需要重新下载原始文件保存
+    final originalName = files?[index].name ?? Uri.parse(url).path.substringAfterLast("/") ?? "image.heic";
+    if (_isHeic(originalName)) {
+      SmartDialog.showToast('正在保存原图...');
+      try {
+        final tmpDir = await getTemporaryDirectory();
+        final tmpFile = File('${tmpDir.path}/${originalName.hashCode}_orig.heic');
+        if (!tmpFile.existsSync()) {
+          await dio_pkg.Dio().download(url, tmpFile.path);
+        }
+        await ImageGallerySaver.saveFile(tmpFile.path, name: name)
+            .then((_) => SmartDialog.showToast(Intl.galleryScreen_savePhotoSucceed.tr));
+      } catch (e) {
+        SmartDialog.showToast(Intl.galleryScreen_loadPhotoFailed.tr);
+      }
+      return;
+    }
+
     File? cacheFile = await getCachedImageFile(url);
     if (cacheFile == null) {
       SmartDialog.showToast(Intl.galleryScreen_loadPhotoFailed.tr);

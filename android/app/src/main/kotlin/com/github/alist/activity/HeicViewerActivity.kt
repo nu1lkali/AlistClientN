@@ -13,6 +13,7 @@ import android.os.Handler
 import android.os.Looper
 import android.provider.MediaStore
 import android.util.DisplayMetrics
+import android.util.LruCache
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
@@ -44,7 +45,6 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.io.File
 import java.io.FileOutputStream
-import java.io.OutputStream
 
 class HeicViewerActivity : AppCompatActivity() {
 
@@ -237,19 +237,28 @@ class HeicViewerActivity : AppCompatActivity() {
         val localPath = localPaths.getOrNull(currentIndex)?.takeIf { it.isNotEmpty() }
         val name = names.getOrNull(currentIndex) ?: "image.heic"
 
+        // 显示 Loading 对话框，避免用户无感等待
+        val loadingDialog = AlertDialog.Builder(this)
+            .setMessage("正在保存...")
+            .setCancelable(false)
+            .create()
+        loadingDialog.show()
+
         scope.launch {
-            toast("正在保存...")
             val success = withContext(Dispatchers.IO) {
                 try {
-                    // 优先用本地文件，否则下载
                     val sourceFile = if (localPath != null && File(localPath).exists()) {
                         File(localPath)
                     } else {
-                        val cacheFile = File(cacheDir, "heic_${url.hashCode()}.heic")
+                        val ext = name.substringAfterLast('.', "heic").lowercase()
+                        val cacheFile = File(cacheDir, "img_${url.hashCode()}.$ext")
                         if (!cacheFile.exists()) {
                             val resp = httpClient.newCall(Request.Builder().url(url).build()).execute()
-                            if (!resp.isSuccessful) return@withContext false
-                            FileOutputStream(cacheFile).use { it.write(resp.body!!.bytes()) }
+                            if (!resp.isSuccessful) { resp.close(); return@withContext false }
+                            // 流式写入，避免大文件一次性读入内存
+                            resp.body?.byteStream()?.use { input ->
+                                FileOutputStream(cacheFile).use { output -> input.copyTo(output) }
+                            } ?: run { resp.close(); return@withContext false }
                             resp.close()
                         }
                         cacheFile
@@ -260,15 +269,24 @@ class HeicViewerActivity : AppCompatActivity() {
                     false
                 }
             }
+            loadingDialog.dismiss()
             toast(if (success) "已保存到相册" else "保存失败")
         }
     }
 
     private fun saveFileToGallery(file: File, name: String): Boolean {
+        val mimeType = when (name.substringAfterLast('.', "").lowercase()) {
+            "heic", "heif" -> "image/heic"
+            "jpg", "jpeg"  -> "image/jpeg"
+            "png"          -> "image/png"
+            "webp"         -> "image/webp"
+            "gif"          -> "image/gif"
+            else           -> "image/*"
+        }
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             val values = ContentValues().apply {
                 put(MediaStore.Images.Media.DISPLAY_NAME, name)
-                put(MediaStore.Images.Media.MIME_TYPE, "image/heic")
+                put(MediaStore.Images.Media.MIME_TYPE, mimeType)
                 put(MediaStore.Images.Media.RELATIVE_PATH, "DCIM/AListClient")
                 put(MediaStore.Images.Media.IS_PENDING, 1)
             }
@@ -284,7 +302,6 @@ class HeicViewerActivity : AppCompatActivity() {
             val dir = android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DCIM)
             val dest = File(File(dir, "AListClient").also { it.mkdirs() }, name)
             file.copyTo(dest, overwrite = true)
-            // 通知媒体库扫描
             sendBroadcast(android.content.Intent(android.content.Intent.ACTION_MEDIA_SCANNER_SCAN_FILE,
                 android.net.Uri.fromFile(dest)))
             true
@@ -307,31 +324,89 @@ class HeicViewerActivity : AppCompatActivity() {
     private fun buildExifText(localPath: String?, url: String, name: String, size: String): String {
         val sb = StringBuilder()
         sb.appendLine("文件名：$name")
-        if (size.isNotEmpty()) sb.appendLine("大小：${formatSize(size.toLongOrNull() ?: 0L)}")
+
         val filePath = try { resolveFilePath(localPath, url, cacheDir) } catch (_: Exception) { null }
-        if (filePath != null && File(filePath).exists()) {
+        val file = filePath?.let { File(it) }?.takeIf { it.exists() }
+
+        // 文件大小：优先从磁盘读，其次用传入的 size
+        val diskSize = file?.length() ?: 0L
+        val displaySize = if (diskSize > 0) diskSize else size.toLongOrNull() ?: 0L
+        if (displaySize > 0) sb.appendLine("大小：${formatSize(displaySize)}")
+
+        // 文件修改时间
+        if (file != null) {
+            val lastModified = file.lastModified()
+            if (lastModified > 0) {
+                val sdf = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.getDefault())
+                sb.appendLine("修改时间：${sdf.format(java.util.Date(lastModified))}")
+            }
+        }
+
+        // 实际分辨率（用 ImageDecoder 解码 header，比 EXIF 更准确）
+        if (file != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
             try {
-                val exif = ExifInterface(filePath)
+                val source = ImageDecoder.createSource(file)
+                // onHeaderDecoded 只读 header，不完整解码，速度快
+                var actualW = 0; var actualH = 0
+                ImageDecoder.decodeBitmap(source) { decoder, info, _ ->
+                    actualW = info.size.width; actualH = info.size.height
+                    decoder.setTargetSize(1, 1) // 最小尺寸，只为拿到 info
+                }.recycle()
+                if (actualW > 0 && actualH > 0) sb.appendLine("分辨率：${actualW} × ${actualH}")
+            } catch (_: Exception) {}
+        }
+
+        if (file != null) {
+            try {
+                val exif = ExifInterface(file.absolutePath)
                 listOf(
-                    "分辨率" to run {
-                        val w = exif.getAttribute(ExifInterface.TAG_IMAGE_WIDTH)
-                        val h = exif.getAttribute(ExifInterface.TAG_IMAGE_LENGTH)
-                        if (w != null && h != null) "${w} × ${h}" else null
-                    },
-                    "拍摄时间" to (exif.getAttribute(ExifInterface.TAG_DATETIME_ORIGINAL) ?: exif.getAttribute(ExifInterface.TAG_DATETIME)),
+                    "拍摄时间" to (exif.getAttribute(ExifInterface.TAG_DATETIME_ORIGINAL)
+                        ?: exif.getAttribute(ExifInterface.TAG_DATETIME)),
                     "相机品牌" to exif.getAttribute(ExifInterface.TAG_MAKE),
                     "相机型号" to exif.getAttribute(ExifInterface.TAG_MODEL),
+                    "镜头型号" to exif.getAttribute(ExifInterface.TAG_LENS_MODEL),
                     "光圈" to exif.getAttribute(ExifInterface.TAG_F_NUMBER)?.let { "f/$it" },
-                    "快门速度" to exif.getAttribute(ExifInterface.TAG_EXPOSURE_TIME)?.let { "${it}s" },
-                    "ISO" to exif.getAttribute(ExifInterface.TAG_PHOTOGRAPHIC_SENSITIVITY),
-                    "焦距" to exif.getAttribute(ExifInterface.TAG_FOCAL_LENGTH)?.let { "${it}mm" },
+                    "快门速度" to exif.getAttribute(ExifInterface.TAG_EXPOSURE_TIME)?.let {
+                        // 转成更易读的分数形式，如 1/125s
+                        val v = it.toDoubleOrNull()
+                        if (v != null && v > 0 && v < 1.0) "1/${(1.0 / v).toInt()}s" else "${it}s"
+                    },
+                    "ISO" to exif.getAttribute(ExifInterface.TAG_PHOTOGRAPHIC_SENSITIVITY)?.let { "ISO $it" },
+                    "焦距" to exif.getAttribute(ExifInterface.TAG_FOCAL_LENGTH)?.let {
+                        // EXIF 焦距格式是 "xx/yy"，转成小数
+                        val parts = it.split("/")
+                        if (parts.size == 2) {
+                            val mm = parts[0].toDoubleOrNull()?.div(parts[1].toDoubleOrNull() ?: 1.0)
+                            if (mm != null) "%.1fmm".format(mm) else "${it}mm"
+                        } else "${it}mm"
+                    },
+                    "曝光补偿" to exif.getAttribute(ExifInterface.TAG_EXPOSURE_BIAS_VALUE)?.let {
+                        val parts = it.split("/")
+                        if (parts.size == 2) {
+                            val ev = parts[0].toDoubleOrNull()?.div(parts[1].toDoubleOrNull() ?: 1.0)
+                            if (ev != null) "%.1f EV".format(ev) else it
+                        } else it
+                    },
+                    "白平衡" to exif.getAttribute(ExifInterface.TAG_WHITE_BALANCE)?.let {
+                        if (it == "0") "自动" else if (it == "1") "手动" else it
+                    },
+                    "闪光灯" to exif.getAttribute(ExifInterface.TAG_FLASH)?.let {
+                        val v = it.toIntOrNull() ?: 0
+                        if (v and 0x1 == 0) "未触发" else "已触发"
+                    },
                     "软件" to exif.getAttribute(ExifInterface.TAG_SOFTWARE),
                     "GPS" to run {
+                        val latRef = exif.getAttribute(ExifInterface.TAG_GPS_LATITUDE_REF)
+                        val lonRef = exif.getAttribute(ExifInterface.TAG_GPS_LONGITUDE_REF)
                         val lat = exif.getAttribute(ExifInterface.TAG_GPS_LATITUDE)
                         val lon = exif.getAttribute(ExifInterface.TAG_GPS_LONGITUDE)
-                        if (lat != null && lon != null) "$lat, $lon" else null
+                        if (lat != null && lon != null) {
+                            "${latRef ?: ""}$lat, ${lonRef ?: ""}$lon"
+                        } else null
                     }
-                ).forEach { (label, value) -> if (!value.isNullOrEmpty()) sb.appendLine("$label：$value") }
+                ).forEach { (label, value) ->
+                    if (!value.isNullOrEmpty()) sb.appendLine("$label：$value")
+                }
             } catch (_: Exception) {}
         }
         return sb.toString().trimEnd()
@@ -346,6 +421,24 @@ class HeicViewerActivity : AppCompatActivity() {
     }
 
     private fun toast(msg: String) = Toast.makeText(this, msg, Toast.LENGTH_SHORT).show()
+
+    override fun onPause() {
+        super.onPause()
+        // 后台时停止幻灯片，避免资源浪费
+        if (slideshowActive) {
+            slideshowHandler.removeCallbacks(slideshowRunnable)
+        }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        // 回到前台时恢复幻灯片
+        if (slideshowActive) {
+            val prefs = getSharedPreferences("FlutterSharedPreferences", MODE_PRIVATE)
+            val seconds = prefs.getLong("flutter.slideshowIntervalSeconds", 3L).toInt().coerceIn(1, 60)
+            slideshowHandler.postDelayed(slideshowRunnable, seconds * 1000L)
+        }
+    }
 
     override fun onDestroy() {
         super.onDestroy()
@@ -363,10 +456,17 @@ class HeicPagerAdapter(
     private val scope: CoroutineScope,
 ) : RecyclerView.Adapter<HeicPagerAdapter.VH>() {
 
-    private val bitmapCache = mutableMapOf<Int, Bitmap>()
+    // 问题1修复：用 LruCache 替代 MutableMap，限制最多缓存 4 张，移除时 recycle
+    private val bitmapCache = object : LruCache<Int, Bitmap>(4) {
+        override fun entryRemoved(evicted: Boolean, key: Int, oldValue: Bitmap, newValue: Bitmap?) {
+            if (evicted && !oldValue.isRecycled) oldValue.recycle()
+        }
+    }
     private val loadingJobs = mutableMapOf<Int, Job>()
     // 每页的旋转角度（0/90/180/270）
     private val rotations = mutableMapOf<Int, Int>()
+    // 问题4修复：持有 VH 弱引用，旋转时直接操作 PhotoView 而不 notifyItemChanged
+    private val holderRefs = mutableMapOf<Int, java.lang.ref.WeakReference<VH>>()
 
     inner class VH(view: View) : RecyclerView.ViewHolder(view) {
         val photoView: PhotoView = view.findViewById(R.id.photo_view)
@@ -383,8 +483,9 @@ class HeicPagerAdapter(
     override fun onBindViewHolder(holder: VH, position: Int) {
         holder.currentIndex = position
         holder.tvError.visibility = View.GONE
+        holderRefs[position] = java.lang.ref.WeakReference(holder)
 
-        val cached = bitmapCache[position]
+        val cached = bitmapCache.get(position)
         if (cached != null && !cached.isRecycled) {
             showBitmap(holder, cached, rotations[position] ?: 0)
             return
@@ -402,7 +503,7 @@ class HeicPagerAdapter(
             val bitmap = withContext(Dispatchers.IO) { decodeHeic(localPath, url, screenLongEdge, cacheDir) }
             if (holder.currentIndex == position) {
                 if (bitmap != null) {
-                    bitmapCache[position] = bitmap
+                    bitmapCache.put(position, bitmap)
                     showBitmap(holder, bitmap, rotations[position] ?: 0)
                 } else {
                     holder.progress.visibility = View.GONE
@@ -420,11 +521,15 @@ class HeicPagerAdapter(
         holder.photoView.visibility = View.VISIBLE
     }
 
-    /** 旋转指定页 90 度 */
+    /** 问题4修复：旋转时直接操作当前 PhotoView，不触发 onBindViewHolder */
     fun rotatePage(index: Int) {
-        val current = rotations[index] ?: 0
-        rotations[index] = (current + 90) % 360
-        notifyItemChanged(index)
+        val newRotation = ((rotations[index] ?: 0) + 90) % 360
+        rotations[index] = newRotation
+        holderRefs[index]?.get()?.let { holder ->
+            if (holder.currentIndex == index) {
+                holder.photoView.rotation = newRotation.toFloat()
+            }
+        }
     }
 
     override fun getItemCount() = urls.size
@@ -432,6 +537,7 @@ class HeicPagerAdapter(
     override fun onViewRecycled(holder: VH) {
         super.onViewRecycled(holder)
         loadingJobs[holder.currentIndex]?.cancel()
+        holderRefs.remove(holder.currentIndex)
         holder.photoView.setImageBitmap(null)
     }
 }
@@ -447,21 +553,27 @@ fun decodeHeic(localPath: String?, url: String, screenLongEdge: Int, cacheDir: F
         if (!file.exists()) return null
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
             val source = ImageDecoder.createSource(file)
-            val bitmap = ImageDecoder.decodeBitmap(source) { decoder, info, _ ->
+            // 问题3修复：保留 HARDWARE 配置，不强制 copy 到 ARGB_8888，避免双倍内存
+            ImageDecoder.decodeBitmap(source) { decoder, info, _ ->
                 val srcW = info.size.width; val srcH = info.size.height
                 val longEdge = maxOf(srcW, srcH)
                 if (longEdge > screenLongEdge && srcW > 0 && srcH > 0) {
                     val scale = longEdge.toFloat() / screenLongEdge
-                    decoder.setTargetSize((srcW / scale).toInt().coerceAtLeast(1), (srcH / scale).toInt().coerceAtLeast(1))
+                    decoder.setTargetSize(
+                        (srcW / scale).toInt().coerceAtLeast(1),
+                        (srcH / scale).toInt().coerceAtLeast(1)
+                    )
                 }
-                decoder.allocator = ImageDecoder.ALLOCATOR_SOFTWARE
+                // 不强制 ALLOCATOR_SOFTWARE，让系统选择最优分配器
             }
-            if (bitmap.config != Bitmap.Config.ARGB_8888) { val c = bitmap.copy(Bitmap.Config.ARGB_8888, false); bitmap.recycle(); c } else bitmap
         } else {
             val opts = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
             android.graphics.BitmapFactory.decodeFile(filePath, opts)
             var s = 1; while (maxOf(opts.outWidth, opts.outHeight) / (s * 2) > screenLongEdge) s *= 2
-            android.graphics.BitmapFactory.decodeFile(filePath, android.graphics.BitmapFactory.Options().apply { inSampleSize = s; inPreferredConfig = Bitmap.Config.ARGB_8888 })
+            android.graphics.BitmapFactory.decodeFile(filePath, android.graphics.BitmapFactory.Options().apply {
+                inSampleSize = s
+                inPreferredConfig = Bitmap.Config.ARGB_8888
+            })
         }
     } catch (e: Exception) { android.util.Log.e("HeicViewer", "decode failed: $e"); null }
 }
@@ -469,14 +581,19 @@ fun decodeHeic(localPath: String?, url: String, screenLongEdge: Int, cacheDir: F
 fun resolveFilePath(localPath: String?, url: String, cacheDir: File): String? {
     if (!localPath.isNullOrEmpty() && File(localPath).exists()) return localPath
     if (url.isEmpty()) return null
-    val cacheFile = File(cacheDir, "heic_${url.hashCode()}.heic")
+    val ext = url.substringAfterLast('.', "heic").substringBefore('?').lowercase()
+        .let { if (it.length > 5) "heic" else it }
+    val cacheFile = File(cacheDir, "img_${url.hashCode()}.$ext")
     if (cacheFile.exists()) return cacheFile.absolutePath
     return try {
         val response = httpClient.newCall(Request.Builder().url(url).build()).execute()
-        if (!response.isSuccessful) return null
-        val body = response.body ?: return null
+        if (!response.isSuccessful) { response.close(); return null }
+        val body = response.body ?: run { response.close(); return null }
         cacheDir.mkdirs()
-        FileOutputStream(cacheFile).use { it.write(body.bytes()) }
+        // 问题6修复：流式写入，避免大文件一次性 bytes() 读入内存
+        body.byteStream().use { input ->
+            FileOutputStream(cacheFile).use { output -> input.copyTo(output) }
+        }
         response.close()
         cacheFile.absolutePath
     } catch (e: Exception) { android.util.Log.e("HeicViewer", "download failed: $e"); null }
