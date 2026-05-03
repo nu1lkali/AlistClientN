@@ -10,6 +10,7 @@ import android.os.Looper
 import android.os.Message
 import android.view.View
 import android.view.ViewGroup.MarginLayoutParams
+import android.widget.ImageView
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.ViewCompat
@@ -222,20 +223,14 @@ class PlayerActivity : AppCompatActivity(), GSYVideoProgressListener {
 
                 override fun onEnterFullscreen(url: String?, vararg objects: Any?) {
                     super.onEnterFullscreen(url, *objects)
-                    Debuger.printfError("***** onEnterFullscreen **** ${playerWrapper.btnPrevious.isVisible}")
                 }
 
                 override fun onQuitFullscreen(url: String, vararg objects: Any) {
                     super.onQuitFullscreen(url, *objects)
-                    Debuger.printfError("***** onQuitFullscreen **** " + objects[0]) //title
-                    Debuger.printfError("***** onQuitFullscreen **** " + objects[1]) //当前非全屏player
                     orientationUtils.backToProtVideo()
                     gsyVideoPlayer.post {
                         windowInsetsControllerCompat.show(WindowInsetsCompat.Type.statusBars())
                         windowInsetsControllerCompat.show(WindowInsetsCompat.Type.navigationBars())
-                    }
-                    playerWrapper.btnBack.setOnClickListener {
-                        finish()
                     }
                 }
 
@@ -267,25 +262,9 @@ class PlayerActivity : AppCompatActivity(), GSYVideoProgressListener {
                 }
             }.build(gsyVideoPlayer)
 
-        gsyVideoPlayer.fullscreenButton.setOnClickListener { //直接横屏
+        gsyVideoPlayer.fullscreenButton.setOnClickListener {
             orientationUtils.resolveByClick()
-            gsyVideoPlayer.startWindowFullscreen(this@PlayerActivity, true, true)?.let {
-                val fullPlayer = it as AlistClientVideoPlayer
-                val wrapper = PlayerWrapper(fullPlayer)
-                wrapper.initViews()
-                // Re-attach listeners for fullscreen instance
-                fullPlayer.setOnPlaylistClickListener { 
-                    // Exit fullscreen first, then show playlist
-                    gsyVideoPlayer.fullscreenButton.performClick()
-                    gsyVideoPlayer.postDelayed({ togglePlaylist() }, 300)
-                }
-                fullPlayer.setOnDeleteClickListener { confirmDelete() }
-                fullPlayer.setOnInfoClickListener { showVideoInfo() }
-                fullPlayer.setOnFavoriteClickListener { toggleFavorite() }
-                
-                // Sync favorite icon state to fullscreen player
-                checkFavoriteStatus()
-            }
+            gsyVideoPlayer.startWindowFullscreen(this@PlayerActivity, true, true)
         }
 
         ViewCompat.setOnApplyWindowInsetsListener(gsyVideoPlayer) { _, insets ->
@@ -425,7 +404,6 @@ class PlayerActivity : AppCompatActivity(), GSYVideoProgressListener {
 
     override fun onConfigurationChanged(newConfig: Configuration) {
         super.onConfigurationChanged(newConfig)
-        //如果旋转了就全屏
         if (isPlay && !isPause) {
             gsyVideoPlayer.onConfigurationChanged(this, newConfig, orientationUtils, true, true)
         }
@@ -546,26 +524,10 @@ class PlayerActivity : AppCompatActivity(), GSYVideoProgressListener {
     }
 
     private fun updateFavoriteIcon(isFavorite: Boolean) {
-        // Update normal player favorite button
-        val btnFavorite = findViewById<android.widget.ImageView>(R.id.btn_favorite)
-        if (isFavorite) {
-            btnFavorite.setImageResource(R.drawable.ic_favorite_filled)
-        } else {
-            btnFavorite.setImageResource(R.drawable.ic_favorite)
-        }
-        
-        // Update fullscreen player favorite button if in fullscreen mode
-        if (gsyVideoPlayer.isIfCurrentIsFullscreen) {
-            val fullscreenPlayer = gsyVideoPlayer.fullWindowPlayer as? AlistClientVideoPlayer
-            fullscreenPlayer?.let { player ->
-                val fullscreenBtnFavorite = player.findViewById<android.widget.ImageView>(R.id.btn_favorite)
-                if (isFavorite) {
-                    fullscreenBtnFavorite?.setImageResource(R.drawable.ic_favorite_filled)
-                } else {
-                    fullscreenBtnFavorite?.setImageResource(R.drawable.ic_favorite)
-                }
-            }
-        }
+        val btnFavorite = gsyVideoPlayer.findViewById<ImageView>(R.id.btn_favorite)
+        btnFavorite?.setImageResource(
+            if (isFavorite) R.drawable.ic_favorite_filled else R.drawable.ic_favorite
+        )
     }
 
     private object SmartToast {

@@ -48,6 +48,9 @@ public class AlistClientVideoPlayer extends NormalGSYVideoPlayer {
     protected View btnInfo;
     protected View btnFavorite;
     private View llPlayingAtDoubleSpeed;
+    private View llQuickNav;
+    private View btnQuickPrevious;
+    private View btnQuickNext;
     protected boolean isEnableSeek;
     private boolean isLongPressing;
     private ValueAnimator ffwdIconAnimator;
@@ -128,6 +131,9 @@ public class AlistClientVideoPlayer extends NormalGSYVideoPlayer {
         gestureDetector = new GestureDetectorCompat(context, gestureListener);
         gestureDetector.setIsLongpressEnabled(true);
         llPlayingAtDoubleSpeed = findViewById(R.id.ll_playing_at_double_speed);
+        llQuickNav = findViewById(R.id.ll_quick_nav);
+        btnQuickPrevious = findViewById(R.id.btn_quick_previous);
+        btnQuickNext = findViewById(R.id.btn_quick_next);
         btnPrevious = findViewById(R.id.btn_previous);
         btnNext = findViewById(R.id.btn_next);
         btnRewind = findViewById(R.id.btn_rewind);
@@ -159,6 +165,10 @@ public class AlistClientVideoPlayer extends NormalGSYVideoPlayer {
                 getGSYVideoManager().seekTo(targetPosition);
             }
         });
+        // 悬浮快捷按钮转发给中间按钮
+        btnQuickPrevious.setOnClickListener(v -> btnPrevious.performClick());
+        btnQuickNext.setOnClickListener(v -> btnNext.performClick());
+
         llPlayingAtDoubleSpeed.setOutlineProvider(new ViewOutlineProvider() {
             @Override
             public void getOutline(View view, Outline outline) {
@@ -238,6 +248,8 @@ public class AlistClientVideoPlayer extends NormalGSYVideoPlayer {
             btnRewind.setVisibility(visibility);
             btnFfwd.setVisibility(visibility);
         }
+        // 悬浮快捷按钮跟随控制栏
+        llQuickNav.setVisibility(visibility);
     }
 
     @Override
@@ -318,58 +330,42 @@ public class AlistClientVideoPlayer extends NormalGSYVideoPlayer {
 
     @Override
     public GSYBaseVideoPlayer startWindowFullscreen(Context context, boolean actionBar, boolean statusBar) {
-        AlistClientVideoPlayer videoPlayer = (AlistClientVideoPlayer) super.startWindowFullscreen(context, actionBar, statusBar);
-        if (videoPlayer != null) {
-            videoPlayer.isEnableSeek = this.isEnableSeek;
-
-            if (isEnableSeek && videoPlayer.getStartButton() != null && videoPlayer.getStartButton().getVisibility() == View.VISIBLE) {
-                videoPlayer.setCenterButtonsVisibility(View.VISIBLE);
+        AlistClientVideoPlayer fullPlayer = (AlistClientVideoPlayer) super.startWindowFullscreen(context, actionBar, statusBar);
+        if (fullPlayer != null) {
+            // 同步 seek 状态，确保全屏下 rewind/ffwd 按钮正常显示
+            fullPlayer.isEnableSeek = this.isEnableSeek;
+            if (this.isEnableSeek) {
+                fullPlayer.btnRewind.setVisibility(View.VISIBLE);
+                fullPlayer.btnFfwd.setVisibility(View.VISIBLE);
             }
-            videoPlayer.btnScreenshot.setOnClickListener(v -> videoPlayer.takeScreenshot());
-            // propagate listeners to fullscreen instance
-            videoPlayer.deleteClickListener = this.deleteClickListener;
-            videoPlayer.playlistClickListener = this.playlistClickListener;
-            videoPlayer.infoClickListener = this.infoClickListener;
-            videoPlayer.favoriteClickListener = this.favoriteClickListener;
-            
-            // Re-attach click listeners to the fullscreen buttons
-            if (videoPlayer.btnDelete != null && this.deleteClickListener != null) {
-                videoPlayer.btnDelete.setOnClickListener(v -> {
-                    if (videoPlayer.deleteClickListener != null) {
-                        videoPlayer.deleteClickListener.onDeleteClick();
-                    }
+            // 同步其他监听器
+            fullPlayer.deleteClickListener = this.deleteClickListener;
+            fullPlayer.playlistClickListener = this.playlistClickListener;
+            fullPlayer.infoClickListener = this.infoClickListener;
+            fullPlayer.favoriteClickListener = this.favoriteClickListener;
+            fullPlayer.btnScreenshot.setOnClickListener(v -> fullPlayer.takeScreenshot());
+            if (fullPlayer.btnDelete != null && fullPlayer.deleteClickListener != null) {
+                fullPlayer.btnDelete.setOnClickListener(v -> {
+                    if (fullPlayer.deleteClickListener != null) fullPlayer.deleteClickListener.onDeleteClick();
                 });
             }
-            if (videoPlayer.btnPlaylist != null && this.playlistClickListener != null) {
-                videoPlayer.btnPlaylist.setOnClickListener(v -> {
-                    // Exit fullscreen first, then trigger playlist
-                    if (videoPlayer.playlistClickListener != null) {
-                        videoPlayer.backFromFull(context);
-                        // Delay to ensure fullscreen exit completes
-                        videoPlayer.postDelayed(() -> {
-                            if (this.playlistClickListener != null) {
-                                this.playlistClickListener.onPlaylistClick();
-                            }
-                        }, 300);
-                    }
+            if (fullPlayer.btnPlaylist != null && fullPlayer.playlistClickListener != null) {
+                fullPlayer.btnPlaylist.setOnClickListener(v -> {
+                    if (fullPlayer.playlistClickListener != null) fullPlayer.playlistClickListener.onPlaylistClick();
                 });
             }
-            if (videoPlayer.btnInfo != null && this.infoClickListener != null) {
-                videoPlayer.btnInfo.setOnClickListener(v -> {
-                    if (videoPlayer.infoClickListener != null) {
-                        videoPlayer.infoClickListener.onInfoClick();
-                    }
+            if (fullPlayer.btnInfo != null && fullPlayer.infoClickListener != null) {
+                fullPlayer.btnInfo.setOnClickListener(v -> {
+                    if (fullPlayer.infoClickListener != null) fullPlayer.infoClickListener.onInfoClick();
                 });
             }
-            if (videoPlayer.btnFavorite != null && this.favoriteClickListener != null) {
-                videoPlayer.btnFavorite.setOnClickListener(v -> {
-                    if (videoPlayer.favoriteClickListener != null) {
-                        videoPlayer.favoriteClickListener.onFavoriteClick();
-                    }
+            if (fullPlayer.btnFavorite != null && fullPlayer.favoriteClickListener != null) {
+                fullPlayer.btnFavorite.setOnClickListener(v -> {
+                    if (fullPlayer.favoriteClickListener != null) fullPlayer.favoriteClickListener.onFavoriteClick();
                 });
             }
         }
-        return videoPlayer;
+        return fullPlayer;
     }
 
     public View getBtnScreenshot() {
@@ -485,6 +481,8 @@ public class AlistClientVideoPlayer extends NormalGSYVideoPlayer {
     public int getLayoutId() {
         return R.layout.video_layout_alist_client;
     }
+
+
 
     private class VideoPlayerGestureListener extends GestureDetector.SimpleOnGestureListener {
 
