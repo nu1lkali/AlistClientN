@@ -12,6 +12,7 @@ import 'package:alist/screen/home_screen.dart';
 import 'package:alist/screen/iptv/iptv_player_screen.dart';
 import 'package:alist/screen/iptv/iptv_screen.dart';
 import 'package:alist/screen/login_screen.dart';
+import 'package:alist/screen/media_kit_player_screen.dart';
 import 'package:alist/screen/markdown_reader_screen.dart';
 import 'package:alist/screen/office_reader_screen.dart';
 import 'package:alist/screen/pdf_reader_screen.dart';
@@ -64,5 +65,7 @@ class AlistRouter {
     GetPage(name: NamedRouter.markdownReader, page: () => MarkdownReaderScreen()),
     GetPage(name: NamedRouter.iptv, page: () => const IptvScreen()),
     GetPage(name: NamedRouter.iptvPlayer, page: () => const IptvPlayerScreen()),
+    // WMV 播放器 (media_kit / libmpv)
+    GetPage(name: NamedRouter.mediaKitPlayer, page: () => const MediaKitPlayerScreen()),
   ];
 }

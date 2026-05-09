@@ -70,4 +70,7 @@ class NamedRouter {
 
   // iptv playlist
   static const iptv = "/iptv";
+
+  // media_kit player (WMV support)
+  static const mediaKitPlayer = "/mediaKitPlayer";
 }

@@ -100,13 +100,31 @@ class PlayerActivity : AppCompatActivity(), GSYVideoProgressListener {
     private fun configureIjkPlayer() {
         // ijkplayer 硬解参数通过 VideoOptionModel 设置
         val optionModelList = ArrayList<VideoOptionModel>()
-        optionModelList.add(VideoOptionModel(IjkMediaPlayer.OPT_CATEGORY_PLAYER, "mediacodec", 1))
-        optionModelList.add(VideoOptionModel(IjkMediaPlayer.OPT_CATEGORY_PLAYER, "mediacodec-auto-rotate", 1))
-        optionModelList.add(VideoOptionModel(IjkMediaPlayer.OPT_CATEGORY_PLAYER, "mediacodec-handle-resolution-change", 1))
-        optionModelList.add(VideoOptionModel(IjkMediaPlayer.OPT_CATEGORY_FORMAT, "analyzeduration", "100000"))
-        optionModelList.add(VideoOptionModel(IjkMediaPlayer.OPT_CATEGORY_FORMAT, "probesize", "10240"))
+        
+        // 强制使用软解模式 - WMV/ASF 需要软件解码
+        optionModelList.add(VideoOptionModel(IjkMediaPlayer.OPT_CATEGORY_PLAYER, "mediacodec", 0))  // 关闭硬解，软解兼容性更好
+        optionModelList.add(VideoOptionModel(IjkMediaPlayer.OPT_CATEGORY_PLAYER, "mediacodec-auto-rotate", 0))
+        optionModelList.add(VideoOptionModel(IjkMediaPlayer.OPT_CATEGORY_PLAYER, "mediacodec-handle-resolution-change", 0))
+        
+        // WMV/ASF 格式需要更长的分析时间
+        optionModelList.add(VideoOptionModel(IjkMediaPlayer.OPT_CATEGORY_FORMAT, "analyzeduration", "500000"))  // 500ms
+        optionModelList.add(VideoOptionModel(IjkMediaPlayer.OPT_CATEGORY_FORMAT, "probesize", "204800"))        // 200KB
+        
+        // 缓冲优化 - 减少前几秒卡顿
+        optionModelList.add(VideoOptionModel(IjkMediaPlayer.OPT_CATEGORY_FORMAT, "max-buffer-size", "4194304"))    // 4MB
+        optionModelList.add(VideoOptionModel(IjkMediaPlayer.OPT_CATEGORY_FORMAT, "min-buffer-duration", "1000")) // 1s
+        optionModelList.add(VideoOptionModel(IjkMediaPlayer.OPT_CATEGORY_FORMAT, "max-buffer-duration", "3000")) // 3s
+        
+        // 丢帧策略
         optionModelList.add(VideoOptionModel(IjkMediaPlayer.OPT_CATEGORY_PLAYER, "framedrop", 5))
-        optionModelList.add(VideoOptionModel(IjkMediaPlayer.OPT_CATEGORY_PLAYER, "opensles", 1))
+        optionModelList.add(VideoOptionModel(IjkMediaPlayer.OPT_CATEGORY_PLAYER, "infbuf", 1))  // 无限缓冲
+        
+        // 音频配置
+        optionModelList.add(VideoOptionModel(IjkMediaPlayer.OPT_CATEGORY_PLAYER, "opensles", 0))  // 关闭 OpenSL，使用 AAudio
+        
+        // ASF/WMV 特定配置
+        optionModelList.add(VideoOptionModel(IjkMediaPlayer.OPT_CATEGORY_FORMAT, "rtsp_transport", "tcp"))
+        
         GSYVideoManager.instance().optionModelList = optionModelList
     }
 

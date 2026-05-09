@@ -41,20 +41,23 @@ class VideoPlayerUtil {
     }
   }
 
-  static void _playUrlWithInternalPlayer(List<VideoItem> videos, int index,
-      {String? playerType}) async {
+    static void _playUrlWithInternalPlayer(List<VideoItem> videos, int index,
+        {String? playerType}) async {
     if (Platform.isAndroid) {
       // auto-select ijkplayer for formats ExoPlayer handles poorly
       if (playerType == null) {
         playerType = SpUtil.getString(AlistConstant.playerType);
       }
-      // wmv/asf 强制用 ijkplayer，ExoPlayer 不支持 VC-1 解码会黑屏
+      // wmv/asf/msvideo 等格式强制用 media_kit(libmpv)，ijkplayer 可能不支持 VC-1 编码
       final ext = videos[index].name
           .substringAfterLast(".")
           ?.toLowerCase() ?? "";
-      const forceIjkFormats = {"wmv", "asf", "asx", "wmx", "wvx"};
-      if (forceIjkFormats.contains(ext)) {
-        playerType = "ijkplayer";
+      // WMV 系列格式（Windows Media Video）- libmpv 兼容性更好
+      const forceMediaKitFormats = {
+        "wmv", "asf", "asx", "wmx", "wvx",    // WMV 容器
+      };
+      if (forceMediaKitFormats.contains(ext)) {
+        playerType = "media_kit";  // 使用 libmpv (media_kit)
       } else if (playerType == null || playerType.isEmpty) {
         const ijkFormats = {
           "rmvb", "rm", "vob", "dat", "divx", "xvid",
@@ -90,8 +93,21 @@ class VideoPlayerUtil {
           headers["User-Agent"] = "pan.baidu.com";
         }
       }
-      AlistPlugin.playVideoWithInternalPlayer(
-          videosParams, index, headers, playerType);
+      // WMV 等格式使用 media_kit (libmpv)，其他使用原生播放器
+      if (playerType == "media_kit") {
+        // 使用 media_kit 播放器（基于 libmpv，兼容 WMV）
+        Get.toNamed(
+          NamedRouter.mediaKitPlayer,
+          arguments: {
+            "videos": videosParams,
+            "index": index,
+            "headers": headers,
+          },
+        );
+      } else {
+        AlistPlugin.playVideoWithInternalPlayer(
+            videosParams, index, headers, playerType);
+      }
     } else {
       Get.toNamed(
         NamedRouter.videoPlayer,
