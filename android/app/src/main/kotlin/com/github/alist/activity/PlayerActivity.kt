@@ -293,6 +293,8 @@ class PlayerActivity : AppCompatActivity(), GSYVideoProgressListener {
             totalTime = 0
             startPlay(index, videos[index])
             FlutterMethods.addFileViewingRecord(videos[index])
+        } else {
+            SmartToast.show(this, "已经是第一个视频了")
         }
     }
 
@@ -306,6 +308,8 @@ class PlayerActivity : AppCompatActivity(), GSYVideoProgressListener {
             totalTime = 0
             startPlay(index, videos[index])
             FlutterMethods.addFileViewingRecord(videos[index])
+        } else {
+            SmartToast.show(this, "已经是最后一个视频了")
         }
     }
 

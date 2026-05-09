@@ -13,7 +13,6 @@ import android.os.Handler
 import android.os.Looper
 import android.provider.MediaStore
 import android.util.DisplayMetrics
-import android.util.LruCache
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
@@ -94,7 +93,8 @@ class HeicViewerActivity : AppCompatActivity() {
 
         @Suppress("DEPRECATION")
         val dm = DisplayMetrics().also { windowManager.defaultDisplay.getMetrics(it) }
-        screenLongEdge = maxOf(dm.widthPixels, dm.heightPixels)
+        // 限制最大边为 1024，减少内存占用，防止闪退
+        screenLongEdge = minOf(maxOf(dm.widthPixels, dm.heightPixels), 1024)
 
         names = intent.getStringArrayListExtra("names") ?: arrayListOf()
         urls = intent.getStringArrayListExtra("urls") ?: arrayListOf()
@@ -119,6 +119,8 @@ class HeicViewerActivity : AppCompatActivity() {
 
         adapter = HeicPagerAdapter(urls, localPaths, screenLongEdge, scope)
         viewPager.adapter = adapter
+        // 限制预加载数量，减少内存占用
+        viewPager.offscreenPageLimit = 1
         viewPager.setCurrentItem(initialIndex, false)
         updateHeader(initialIndex)
 
@@ -456,16 +458,10 @@ class HeicPagerAdapter(
     private val scope: CoroutineScope,
 ) : RecyclerView.Adapter<HeicPagerAdapter.VH>() {
 
-    // 问题1修复：用 LruCache 替代 MutableMap，限制最多缓存 4 张，移除时 recycle
-    private val bitmapCache = object : LruCache<Int, Bitmap>(4) {
-        override fun entryRemoved(evicted: Boolean, key: Int, oldValue: Bitmap, newValue: Bitmap?) {
-            if (evicted && !oldValue.isRecycled) oldValue.recycle()
-        }
-    }
+    // 关键修复：完全不缓存 bitmap，每次只加载当前页
     private val loadingJobs = mutableMapOf<Int, Job>()
     // 每页的旋转角度（0/90/180/270）
     private val rotations = mutableMapOf<Int, Int>()
-    // 问题4修复：持有 VH 弱引用，旋转时直接操作 PhotoView 而不 notifyItemChanged
     private val holderRefs = mutableMapOf<Int, java.lang.ref.WeakReference<VH>>()
 
     inner class VH(view: View) : RecyclerView.ViewHolder(view) {
@@ -473,6 +469,15 @@ class HeicPagerAdapter(
         val progress: ProgressBar = view.findViewById(R.id.item_progress)
         val tvError: TextView = view.findViewById(R.id.tv_error)
         var currentIndex: Int = -1
+        // 存储当前正在显示的 bitmap，以便在回收时释放
+        var displayedBitmap: Bitmap? = null
+            set(value) {
+                // 如果有旧的 bitmap 且与新的是不同对象，则回收
+                if (field != null && field !== value && !field!!.isRecycled) {
+                    field!!.recycle()
+                }
+                field = value
+            }
     }
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): VH {
@@ -485,15 +490,12 @@ class HeicPagerAdapter(
         holder.tvError.visibility = View.GONE
         holderRefs[position] = java.lang.ref.WeakReference(holder)
 
-        val cached = bitmapCache.get(position)
-        if (cached != null && !cached.isRecycled) {
-            showBitmap(holder, cached, rotations[position] ?: 0)
-            return
-        }
-
         holder.photoView.visibility = View.INVISIBLE
         holder.progress.visibility = View.VISIBLE
+        
+        // 取消之前的加载任务，防止加载旧的图片
         loadingJobs[position]?.cancel()
+        loadingJobs.remove(position)
 
         val localPath = localPaths.getOrNull(position)?.takeIf { it.isNotEmpty() }
         val url = urls.getOrNull(position) ?: return
@@ -501,16 +503,21 @@ class HeicPagerAdapter(
 
         loadingJobs[position] = scope.launch {
             val bitmap = withContext(Dispatchers.IO) { decodeHeic(localPath, url, screenLongEdge, cacheDir) }
-            if (holder.currentIndex == position) {
+            // 只有当 holder 还绑定到同一个位置时才显示
+            if (holder.currentIndex == position && holderRefs[position]?.get() === holder) {
                 if (bitmap != null) {
-                    bitmapCache.put(position, bitmap)
+                    holder.displayedBitmap = bitmap
                     showBitmap(holder, bitmap, rotations[position] ?: 0)
                 } else {
                     holder.progress.visibility = View.GONE
                     holder.tvError.text = "加载失败"
                     holder.tvError.visibility = View.VISIBLE
                 }
+            } else {
+                // 位置已改变，回收这个 bitmap
+                bitmap?.recycle()
             }
+            loadingJobs.remove(position)
         }
     }
 
@@ -537,7 +544,13 @@ class HeicPagerAdapter(
     override fun onViewRecycled(holder: VH) {
         super.onViewRecycled(holder)
         loadingJobs[holder.currentIndex]?.cancel()
+        loadingJobs.remove(holder.currentIndex)
         holderRefs.remove(holder.currentIndex)
+        // 关键修复：回收当前显示的 bitmap
+        holder.displayedBitmap?.let { bitmap ->
+            if (!bitmap.isRecycled) bitmap.recycle()
+        }
+        holder.displayedBitmap = null
         holder.photoView.setImageBitmap(null)
     }
 }

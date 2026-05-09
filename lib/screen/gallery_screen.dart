@@ -291,6 +291,10 @@ class GalleryScreen extends StatelessWidget {
               },
               itemCount: controller.urls.length,
               scrollDirection: Axis.horizontal,
+              // 使用 BouncingScrollPhysics 提供更灵敏的滑动体验
+              physics: const BouncingScrollPhysics(
+                parent: AlwaysScrollableScrollPhysics(),
+              ),
             ),
     );
   }
@@ -417,9 +421,27 @@ class GalleryController extends GetxController {
   }
 
   final Set<int> _preloadedIndices = {};
+  static const int _maxPreloadCount = 3; // 限制预加载数量，防止内存溢出
 
   void _preloadAround(int index) {
-    const preloadCount = 5; // Increased to 5 for very smooth experience
+    // 清理超出范围的旧缓存
+    final toRemove = _preloadedIndices
+        .where((i) => (i - index).abs() > _maxPreloadCount * 2)
+        .toSet();
+    for (final i in toRemove) {
+      _preloadedIndices.remove(i);
+      // 清理 HEIC 转换缓存（避免内存积累）
+      if (files != null && files!.length > i) {
+        final localPath = files![i].localPath;
+        if (localPath != null && localPath.isNotEmpty && _isHeic(localPath)) {
+          HeicConvertCache.instance.remove(localPath);
+        } else if (i < urls.length && _isHeic(urls[i])) {
+          HeicConvertCache.instance.remove(urls[i]);
+        }
+      }
+    }
+    
+    const preloadCount = _maxPreloadCount;
     for (int i = 1; i <= preloadCount; i++) {
       final next = index + i;
       final prev = index - i;
