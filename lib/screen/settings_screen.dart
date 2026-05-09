@@ -45,6 +45,7 @@ class _SettingsContainerState extends State<_SettingsContainer>
   final _userCnt = 0.obs;
   late final RxBool _aggressiveCacheEnabled;
   late final RxInt _audioPlayerUiStyle;
+  late final RxBool _groupedRandomSort;
 
   @override
   void initState() {
@@ -55,6 +56,8 @@ class _SettingsContainerState extends State<_SettingsContainer>
     _aggressiveCacheEnabled = (SpUtil.getBool(AlistConstant.enableAggressiveCache, defValue: true) ?? true).obs;
     // Initialize audio player UI style
     _audioPlayerUiStyle = (SpUtil.getInt(AlistConstant.audioPlayerUiStyle, defValue: 0) ?? 0).obs;
+    // Initialize grouped random sort
+    _groupedRandomSort = (SpUtil.getBool(AlistConstant.groupedRandomSort, defValue: false) ?? false).obs;
 
     _serverStreamSubscription =
         _databaseController.serverDao.serverList().listen((event) {
@@ -82,6 +85,7 @@ class _SettingsContainerState extends State<_SettingsContainer>
         m.menuId == MenuId.cacheManager ||
         m.menuId == MenuId.aggressiveCache ||
         m.menuId == MenuId.audioPlayerUi ||
+        m.menuId == MenuId.groupedRandomSort ||
         m.menuId == MenuId.playerSettings ||
         m.menuId == MenuId.iptvUrl ||
         m.menuId == MenuId.slideshowInterval ||
@@ -229,6 +233,45 @@ class _SettingsContainerState extends State<_SettingsContainer>
         )),
       );
     }
+
+    // 随机排序按类型分组
+    if (settingsMenu.menuId == MenuId.groupedRandomSort) {
+      return ListTile(
+        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+        leading: Container(
+          width: 44,
+          height: 44,
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              colors: [
+                scheme.primaryContainer.withOpacity(0.8),
+                scheme.primaryContainer.withOpacity(0.5),
+              ],
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+            ),
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Icon(Icons.shuffle_rounded, size: 22,
+              color: isDark ? Colors.white.withOpacity(0.9) : scheme.primary),
+        ),
+        title: const Text(
+          '随机排序按类型分组',
+          style: TextStyle(fontSize: 15, fontWeight: FontWeight.w500, letterSpacing: -0.2),
+        ),
+        subtitle: Text(
+          '随机排序时同类文件聚在一起',
+          style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
+        ),
+        trailing: Obx(() => Switch(
+          value: _groupedRandomSort.value,
+          onChanged: (value) {
+            SpUtil.putBool(AlistConstant.groupedRandomSort, value);
+            _groupedRandomSort.value = value;
+          },
+        )),
+      );
+    }
     
     return ListTile(
       onTap: () => _handleMenuTap(settingsMenu, context),
@@ -291,6 +334,7 @@ class _SettingsContainerState extends State<_SettingsContainer>
         break;
       case MenuId.aggressiveCache:
       case MenuId.audioPlayerUi:
+      case MenuId.groupedRandomSort:
         // toggle 类型，由 ListTile trailing Switch 处理，无需跳转
         break;
       case MenuId.themeColor:
@@ -542,6 +586,11 @@ class _SettingsContainerState extends State<_SettingsContainer>
           icon: Images.settingsScreenPlayer,
           iconData: Icons.music_note_rounded),
       SettingsMenu(
+          menuId: MenuId.groupedRandomSort,
+          name: "随机排序按类型分组",
+          icon: Images.settingsScreenPlayer,
+          iconData: Icons.shuffle_rounded),
+      SettingsMenu(
           menuId: MenuId.themeColor,
           name: "主题颜色",
           icon: Images.settingsScreenPlayer,
@@ -636,6 +685,7 @@ enum MenuId {
   cacheManager,
   aggressiveCache,
   audioPlayerUi,
+  groupedRandomSort,
   playerSettings,
   themeColor,
   iptvUrl,

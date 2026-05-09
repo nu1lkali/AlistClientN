@@ -1993,7 +1993,30 @@ class _FileListScreenState extends State<FileListScreen>
     }
     // random sort: shuffle and return immediately, no dir/file separation
     if (_menuAnchorController.sortBy.value == MenuId.random) {
-      files.shuffle();
+      final grouped = SpUtil.getBool(AlistConstant.groupedRandomSort, defValue: false) ?? false;
+      if (grouped) {
+        // 顺序：文件夹 → 视频 → 其他类型（各组内 shuffle，其他类型组间顺序 shuffle）
+        final videoTypeInt = FileType.video.index;
+        final dirs = files.where((f) => f.isDir).toList()..shuffle();
+        final videos = files.where((f) => !f.isDir && f.typeInt == videoTypeInt).toList()..shuffle();
+        final others = files.where((f) => !f.isDir && f.typeInt != videoTypeInt).toList();
+        // 其他类型按 typeInt 分组，各组内 shuffle，组间顺序 shuffle
+        final Map<int, List<FileItemVO>> groups = {};
+        for (final f in others) {
+          groups.putIfAbsent(f.typeInt, () => []).add(f);
+        }
+        final otherGroups = groups.values.toList()
+          ..forEach((g) => g.shuffle())
+          ..shuffle();
+        files.clear();
+        files.addAll(dirs);
+        files.addAll(videos);
+        for (final g in otherGroups) {
+          files.addAll(g);
+        }
+      } else {
+        files.shuffle();
+      }
       return;
     }
     files.sort((a, b) {

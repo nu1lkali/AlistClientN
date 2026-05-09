@@ -39,6 +39,7 @@ class AlistConstant {
   static const String enableAggressiveCache = 'enableAggressiveCache'; // aggressive preload cache
   static const String slideshowIntervalSeconds = 'slideshowIntervalSeconds'; // gallery slideshow interval
   static const String audioPlayerUiStyle = 'audioPlayerUiStyle'; // 0=classic, 1=bujuan
+  static const String groupedRandomSort = 'groupedRandomSort'; // 随机排序时按类型分组
 
   static const String locale = 'locale';
 }
