@@ -1998,14 +1998,13 @@ class _FileListScreenState extends State<FileListScreen>
       final grouped = SpUtil.getBool(AlistConstant.groupedRandomSort, defValue: false) ?? false;
       if (grouped) {
         // 顺序：文件夹 → 视频 → 其他类型（各组内 shuffle，其他类型组间顺序 shuffle）
-        final videoTypeInt = FileType.video.index;
         final dirs = files.where((f) => f.isDir).toList()..shuffle();
-        final videos = files.where((f) => !f.isDir && f.typeInt == videoTypeInt).toList()..shuffle();
-        final others = files.where((f) => !f.isDir && f.typeInt != videoTypeInt).toList();
-        // 其他类型按 typeInt 分组，各组内 shuffle，组间顺序 shuffle
-        final Map<int, List<FileItemVO>> groups = {};
+        final videos = files.where((f) => !f.isDir && f.type == FileType.video).toList()..shuffle();
+        final others = files.where((f) => !f.isDir && f.type != FileType.video).toList();
+        // 其他类型按 type 分组，各组内 shuffle，组间顺序 shuffle
+        final Map<FileType, List<FileItemVO>> groups = {};
         for (final f in others) {
-          groups.putIfAbsent(f.typeInt, () => []).add(f);
+          groups.putIfAbsent(f.type, () => []).add(f);
         }
         final otherGroups = groups.values.toList()
           ..forEach((g) => g.shuffle())
