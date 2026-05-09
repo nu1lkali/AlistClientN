@@ -41,9 +41,12 @@ class VideoPlayerUtil {
     }
   }
 
-    static void _playUrlWithInternalPlayer(List<VideoItem> videos, int index,
-        {String? playerType}) async {
+  static void _playUrlWithInternalPlayer(List<VideoItem> videos, int index,
+      {String? playerType}) async {
     if (Platform.isAndroid) {
+      // 检查是否启用全局 MPV 播放器开关
+      final enableMediaKit = SpUtil.getBool(AlistConstant.enableMediaKitPlayer, defValue: false) ?? false;
+      
       // auto-select ijkplayer for formats ExoPlayer handles poorly
       if (playerType == null) {
         playerType = SpUtil.getString(AlistConstant.playerType);
@@ -56,7 +59,8 @@ class VideoPlayerUtil {
       const forceMediaKitFormats = {
         "wmv", "asf", "asx", "wmx", "wvx",    // WMV 容器
       };
-      if (forceMediaKitFormats.contains(ext)) {
+      // 如果全局开关启用，或者格式强制需要，则使用 media_kit
+      if (enableMediaKit || forceMediaKitFormats.contains(ext)) {
         playerType = "media_kit";  // 使用 libmpv (media_kit)
       } else if (playerType == null || playerType.isEmpty) {
         const ijkFormats = {
