@@ -152,7 +152,45 @@ class GalleryScreen extends StatelessWidget {
             top: 0,
             right: 0,
             child: _buildAppBar(controller),
-          )
+          ),
+          // 左下角悬浮切图按钮
+          Positioned(
+            left: 12,
+            bottom: 0,
+            child: Obx(() {
+              if (controller.urls.length <= 1) return const SizedBox();
+              if (!controller.showNavButtons.value) return const SizedBox();
+              return SafeArea(
+                child: Padding(
+                  padding: const EdgeInsets.only(bottom: 12),
+                  child: Container(
+                    decoration: BoxDecoration(
+                      color: Colors.black.withOpacity(0.4),
+                      borderRadius: BorderRadius.circular(24),
+                    ),
+                    padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        IconButton(
+                          icon: const Icon(Icons.skip_previous_rounded, color: Colors.white, size: 28),
+                          onPressed: controller.goPrev,
+                          padding: const EdgeInsets.all(8),
+                          constraints: const BoxConstraints(),
+                        ),
+                        IconButton(
+                          icon: const Icon(Icons.skip_next_rounded, color: Colors.white, size: 28),
+                          onPressed: controller.goNext,
+                          padding: const EdgeInsets.all(8),
+                          constraints: const BoxConstraints(),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              );
+            }),
+          ),
         ],
       ),
     );
@@ -172,6 +210,9 @@ class GalleryScreen extends StatelessWidget {
               break;
             case GalleryMenuId.imageInfo:
               controller.showImageInfo(controller.index.value);
+              break;
+            case GalleryMenuId.toggleNavButtons:
+              controller.showNavButtons.value = !controller.showNavButtons.value;
               break;
           }
         });
@@ -285,6 +326,7 @@ class GalleryController extends GetxController {
   var menuWidth = 120.0;
   final rotation = 0.obs; // 0, 90, 180, 270
   final slideshowActive = false.obs;
+  final showNavButtons = true.obs; // 是否显示悬浮切图按钮
   Timer? _slideshowTimer;
 
   Duration get slideshowInterval {
@@ -356,6 +398,22 @@ class GalleryController extends GetxController {
     rotation.value = 0; // reset rotation on page change
     LogUtil.d("update index=$index");
     _preloadAround(index);
+  }
+
+  void goNext() {
+    if (index.value >= urls.length - 1) {
+      SmartDialog.showToast('已经是最后一张了');
+      return;
+    }
+    pageController.nextPage(duration: const Duration(milliseconds: 300), curve: Curves.easeInOut);
+  }
+
+  void goPrev() {
+    if (index.value <= 0) {
+      SmartDialog.showToast('已经是第一张了');
+      return;
+    }
+    pageController.previousPage(duration: const Duration(milliseconds: 300), curve: Curves.easeInOut);
   }
 
   final Set<int> _preloadedIndices = {};
@@ -932,6 +990,9 @@ class GalleryMenuAnchor extends StatelessWidget {
     var infoButton = MenuItemButton(
         onPressed: () => onMenuClickCallback?.call(GalleryMenuId.imageInfo),
         child: const Text("图片信息"));
+    var navButton = Obx(() => MenuItemButton(
+        onPressed: () => onMenuClickCallback?.call(GalleryMenuId.toggleNavButtons),
+        child: Text(controller.showNavButtons.value ? "隐藏切图按钮" : "显示切图按钮")));
     return [
       SizedBox(width: menuWidth),
       copyButton,
@@ -939,11 +1000,13 @@ class GalleryMenuAnchor extends StatelessWidget {
       saveButton,
       const Divider(),
       infoButton,
+      const Divider(),
+      navButton,
     ];
   }
 }
 
-enum GalleryMenuId { copyLink, saveToAlbum, imageInfo }
+enum GalleryMenuId { copyLink, saveToAlbum, imageInfo, toggleNavButtons }
 
 class PhotoItem {
   final String name;
