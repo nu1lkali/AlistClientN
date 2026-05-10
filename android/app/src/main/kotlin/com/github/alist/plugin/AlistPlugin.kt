@@ -104,12 +104,31 @@ class AlistPlugin(private val activity: Activity, private val scope: CoroutineSc
                 val headers = call.argument<String?>("headers")
                 val playerType = call.argument<String>("playerType")
 
+                // Set up PiP callback for Flutter to trigger PiP mode
+                FlutterMethods.pipCallback = {
+                    if (activity is PlayerActivity) {
+                        activity.startPictureInPictureMode()
+                    }
+                }
+
                 val intent = Intent(activity, PlayerActivity::class.java)
                 intent.putExtra("videos", videos)
                 intent.putExtra("index", index)
                 intent.putExtra("headers", headers)
                 intent.putExtra("playerType", playerType)
                 activity.startActivity(intent)
+            }
+
+            "enterPictureInPicture" -> {
+                if (activity is PlayerActivity) {
+                    activity.startPictureInPictureMode()
+                }
+                result.success(null)
+            }
+
+            "playVideoWithMpvPlayer" -> {
+                // mpvEx 播放器已移除，使用内置播放器
+                result.error("-1", "MpvEx player is not available", null)
             }
 
             "playVideoWithExternalPlayer" -> {

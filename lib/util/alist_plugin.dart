@@ -157,4 +157,46 @@ class AlistPlugin {
       'sizes': sizes ?? List.filled(urls.length, ''),
     });
   }
+
+  /// 进入画中画模式（Android only）
+  static Future<void> enterPictureInPicture() async {
+    await _methodChannel.invokeMethod('enterPictureInPicture');
+  }
+
+  /// 使用 MPV 播放器播放视频（支持 PiP）
+  static Future<bool> playVideoWithMpvPlayer({
+    required List<Map<String, String?>> videos,
+    required int index,
+    Map<String, String>? headers,
+  }) async {
+    String? headersStr = headers != null ? jsonEncode(headers) : null;
+    
+    final videosJson = jsonEncode(videos.map((v) {
+      return {
+        "name": v["name"] ?? "",
+        "url": v["url"] ?? "",
+        "localPath": v["localPath"],
+        "remotePath": v["remotePath"],
+        "sign": v["sign"],
+        "provider": v["provider"],
+        "thumb": v["thumb"],
+        "size": v["size"],
+        "modifiedMilliseconds": v["modifiedMilliseconds"],
+      };
+    }).toList());
+    
+    try {
+      final result = await _methodChannel.invokeMethod<bool>(
+        'playVideoWithMpvPlayer',
+        {
+          'videos': videosJson,
+          'index': index,
+          'headers': headersStr,
+        },
+      );
+      return result ?? false;
+    } catch (e) {
+      return false;
+    }
+  }
 }

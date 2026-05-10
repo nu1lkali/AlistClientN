@@ -3,11 +3,14 @@ package com.github.alist.activity
 import android.animation.Animator
 import android.animation.AnimatorListenerAdapter
 import android.animation.ObjectAnimator
+import android.app.PictureInPictureParams
 import android.content.res.Configuration
+import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.os.Message
+import android.util.Rational
 import android.view.View
 import android.view.ViewGroup.MarginLayoutParams
 import android.widget.ImageView
@@ -657,6 +660,56 @@ class PlayerActivity : AppCompatActivity(), GSYVideoProgressListener {
         playlistAdapter.updateVideos(sortedVideos)
         playlistAdapter.updateCurrentIndex(getCurrentSortedIndex())
         SmartToast.show(this, "已打乱顺序")
+    }
+
+    // Picture-in-Picture mode support
+    fun startPictureInPictureMode() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            // Get video aspect ratio for PiP window
+            val width = gsyVideoPlayer.currentPlayer.currentVideoWidth
+            val height = gsyVideoPlayer.currentPlayer.currentVideoHeight
+            
+            val aspectRatio = if (width > 0 && height > 0) {
+                Rational(width, height)
+            } else {
+                Rational(16, 9) // Default fallback
+            }
+            
+            val pipParams = PictureInPictureParams.Builder()
+                .setAspectRatio(aspectRatio)
+                .build()
+            
+            enterPictureInPictureMode(pipParams)
+        }
+    }
+
+    override fun onPictureInPictureModeChanged(isInPictureInPictureMode: Boolean, newConfig: Configuration) {
+        super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig)
+        
+        if (isInPictureInPictureMode) {
+            // Hide controls when in PiP mode
+            playerWrapper.layoutTop.visibility = View.GONE
+            playerWrapper.layoutBottom.visibility = View.GONE
+            playerWrapper.bottomProgressbar.visibility = View.GONE
+            playlistDrawer.visibility = View.GONE
+            playlistScrim.visibility = View.GONE
+            isPlaylistVisible = false
+        } else {
+            // Show controls when exiting PiP mode
+            playerWrapper.layoutTop.visibility = View.VISIBLE
+            playerWrapper.layoutBottom.visibility = View.VISIBLE
+            playerWrapper.bottomProgressbar.visibility = View.VISIBLE
+        }
+    }
+
+    override fun onUserLeaveHint() {
+        super.onUserLeaveHint()
+        // Auto-enter PiP when user presses home button during playback
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            if (gsyVideoPlayer.currentPlayer.currentState == GSYVideoView.CURRENT_STATE_PLAYING) {
+                startPictureInPictureMode()
+            }
+        }
     }
 
 

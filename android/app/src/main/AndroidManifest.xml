@@ -58,6 +58,8 @@
             android:name="com.github.alist.activity.PlayerActivity"
             android:theme="@style/PlayerTheme"
             android:configChanges="keyboard|keyboardHidden|orientation|screenSize|screenLayout|smallestScreenSize|uiMode"
+            android:supportsPictureInPicture="true"
+            android:launchMode="singleTask"
             android:screenOrientation="portrait" />
 
         <activity

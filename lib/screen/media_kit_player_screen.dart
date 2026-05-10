@@ -5,6 +5,7 @@ import 'dart:typed_data';
 import 'package:alist/database/alist_database_controller.dart';
 import 'package:alist/database/table/favorite.dart';
 import 'package:alist/screen/video_player_screen.dart';
+import 'package:alist/util/alist_plugin.dart';
 import 'package:alist/util/user_controller.dart';
 import 'package:alist/util/video_player_util.dart';
 import 'package:flutter/material.dart';
@@ -53,6 +54,9 @@ class _MediaKitPlayerScreenState extends State<MediaKitPlayerScreen>
   Duration _seekStartPos = Duration.zero;
   double _horizontalDragStartX = 0;
   
+  // 视频切换时的遮罩状态 - 用于消除闪烁
+  bool _isSwitching = false;
+  
   // 播放列表抽屉动画控制器
   late final AnimationController _playlistAnimationController;
   late final Animation<Offset> _playlistSlideAnimation;
@@ -75,6 +79,12 @@ class _MediaKitPlayerScreenState extends State<MediaKitPlayerScreen>
   // 排序状态：true=升序，false=降序
   bool _nameSortAscending = true;
   bool _sizeSortAscending = false;
+
+  // 双击快进状态
+  int _doubleTapSeekAmount = 0;
+  bool _isDoubleTapSeekingLeft = false;
+  bool _isDoubleTapSeekingRight = false;
+  Timer? _doubleTapResetTimer;
 
   bool _isWmvFormat(String name) {
     final ext = name.contains('.') ? name.split('.').last.toLowerCase() : '';
@@ -179,6 +189,7 @@ class _MediaKitPlayerScreenState extends State<MediaKitPlayerScreen>
   @override
   void dispose() {
     _hideTimer?.cancel();
+    _doubleTapResetTimer?.cancel();
     _posSub?.cancel();
     _durSub?.cancel();
     _playSub?.cancel();
@@ -203,14 +214,34 @@ class _MediaKitPlayerScreenState extends State<MediaKitPlayerScreen>
 
   void _playAt(int index) {
     if (index < 0 || index >= _videos.length) return;
-    setState(() => _index = index);
-    final video = _videos[index];
-    final url = video["url"] ?? "";
-    if (url.isNotEmpty) {
-      _player.open(Media(url), play: true);
-    }
-    _hidePlaylist();
-    _checkFavoriteStatus();
+    setState(() {
+      _index = index;
+      _isSwitching = true;
+      _buffering = true;
+    });
+    
+    // 延迟执行视频切换，让遮罩先显示
+    Future.delayed(const Duration(milliseconds: 50), () {
+      if (!mounted) return;
+      final video = _videos[index];
+      final url = video["url"] ?? "";
+      if (url.isNotEmpty) {
+        _player.open(Media(url), play: true);
+      }
+      _hidePlaylist();
+      _checkFavoriteStatus();
+      
+      // 新视频开始播放后移除遮罩
+      _player.stream.playing.listen((playing) {
+        if (playing && mounted) {
+          Future.delayed(const Duration(milliseconds: 300), () {
+            if (mounted) {
+              setState(() => _isSwitching = false);
+            }
+          });
+        }
+      });
+    });
   }
 
   void _togglePlaylist() {
@@ -529,6 +560,40 @@ class _MediaKitPlayerScreenState extends State<MediaKitPlayerScreen>
     _startHideTimer();
   }
 
+  // 双击快进/快退处理
+  void _handleDoubleTapSeek(bool isRight) {
+    _doubleTapResetTimer?.cancel();
+    
+    setState(() {
+      if (isRight) {
+        _doubleTapSeekAmount += 10;
+        _isDoubleTapSeekingRight = true;
+        _isDoubleTapSeekingLeft = false;
+      } else {
+        _doubleTapSeekAmount -= 10;
+        _isDoubleTapSeekingLeft = true;
+        _isDoubleTapSeekingRight = false;
+      }
+    });
+
+    // 执行快进/快退
+    final newPos = _position + Duration(seconds: _doubleTapSeekAmount > 0 ? 10 : -10);
+    _player.seek(newPos.isNegative ? Duration.zero : (newPos > _duration ? _duration : newPos));
+    
+    _startHideTimer();
+
+    // 重置双击状态
+    _doubleTapResetTimer = Timer(const Duration(milliseconds: 800), () {
+      if (mounted) {
+        setState(() {
+          _doubleTapSeekAmount = 0;
+          _isDoubleTapSeekingLeft = false;
+          _isDoubleTapSeekingRight = false;
+        });
+      }
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     final video = _videos[_index];
@@ -539,6 +604,9 @@ class _MediaKitPlayerScreenState extends State<MediaKitPlayerScreen>
     _screenHeight = screenSize.height;
     _isFullscreen = screenSize.width > screenSize.height;
     final playlistWidth = _screenWidth * 0.75;
+    
+    // 计算按钮区域
+    final buttonAreaWidth = _screenWidth * 0.25; // 25% 宽度用于快进/快退区域
 
     return WillPopScope(
       onWillPop: () async {
@@ -565,7 +633,13 @@ class _MediaKitPlayerScreenState extends State<MediaKitPlayerScreen>
                 ),
               ),
 
-              // 手势层
+              // 视频切换遮罩 - 消除切换时的闪烁
+              if (_isSwitching)
+                Positioned.fill(
+                  child: Container(color: Colors.black),
+                ),
+
+              // 手势层 - 双击快进/快退区域
               Positioned.fill(
                 child: GestureDetector(
                   onVerticalDragStart: _onVerticalDragStart,
@@ -603,58 +677,100 @@ class _MediaKitPlayerScreenState extends State<MediaKitPlayerScreen>
                 ),
               ),
 
+              // 双击快进/快退指示器
+              if (_isDoubleTapSeekingLeft)
+                Positioned(
+                  left: 0,
+                  top: 0,
+                  bottom: 0,
+                  width: buttonAreaWidth,
+                  child: _DoubleTapSeekIndicator(isForward: false, seekAmount: _doubleTapSeekAmount.abs()),
+                ),
+              
+              if (_isDoubleTapSeekingRight)
+                Positioned(
+                  right: 0,
+                  top: 0,
+                  bottom: 0,
+                  width: buttonAreaWidth,
+                  child: _DoubleTapSeekIndicator(isForward: true, seekAmount: _doubleTapSeekAmount.abs()),
+                ),
+
               // 加载指示器 - 显示在播放按钮下方
               if (_buffering && !_seeking && !_playing)
                 Positioned(
                   left: 0,
                   right: 0,
-                  top: _screenHeight * 0.5 + 40, // 播放按钮下方
-                  child: const Center(
-                    child: CircularProgressIndicator(color: Colors.white),
-                  ),
-                ),
-
-              // 拖动指示器
-              if (_seeking)
-                Center(
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-                    decoration: BoxDecoration(
-                      color: Colors.black.withOpacity(0.7),
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(
-                          _seekTarget < _seekStartPos
-                              ? Icons.fast_rewind_rounded
-                              : Icons.fast_forward_rounded,
-                          color: Colors.white,
-                          size: 28,
-                        ),
-                        const SizedBox(width: 8),
-                        Text(
-                          _fmt(_seekTarget),
-                          style: const TextStyle(
+                  top: _screenHeight * 0.5 + 60, // 播放按钮下方
+                  child: Center(
+                    child: Container(
+                      width: 48,
+                      height: 48,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: Colors.black54,
+                      ),
+                      child: const Center(
+                        child: SizedBox(
+                          width: 24,
+                          height: 24,
+                          child: CircularProgressIndicator(
                             color: Colors.white,
-                            fontSize: 20,
-                            fontWeight: FontWeight.w600,
+                            strokeWidth: 2,
                           ),
                         ),
-                      ],
+                      ),
                     ),
                   ),
                 ),
 
-              // 垂直滑动指示器
-              if (_verticalDragging && _verticalDragType != null)
+              // 拖动指示器 - 显示在顶部偏下位置
+              if (_seeking)
                 Positioned(
                   top: _screenHeight * 0.3,
                   left: 0,
                   right: 0,
                   child: Center(
-                    child: _VerticalDragIndicator(
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                      decoration: BoxDecoration(
+                        color: Colors.black.withOpacity(0.7),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            _seekTarget < _seekStartPos
+                                ? Icons.fast_rewind_rounded
+                                : Icons.fast_forward_rounded,
+                            color: Colors.white,
+                            size: 28,
+                          ),
+                          const SizedBox(width: 8),
+                          Text(
+                            _fmt(_seekTarget),
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 20,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+
+              // 垂直滑动指示器 - mpvEx风格的滑块
+              if (_verticalDragging && _verticalDragType != null)
+                Positioned(
+                  left: _verticalDragType == VerticalDragType.brightness ? 20 : null,
+                  right: _verticalDragType == VerticalDragType.volume ? 20 : null,
+                  top: 0,
+                  bottom: 0,
+                  child: Center(
+                    child: _VerticalSliderIndicator(
                       type: _verticalDragType!,
                       value: _verticalDragType == VerticalDragType.brightness 
                           ? _systemBrightnessValue 
@@ -663,7 +779,7 @@ class _MediaKitPlayerScreenState extends State<MediaKitPlayerScreen>
                   ),
                 ),
 
-              // 控制面板层（包括悬浮切换按钮）
+              // 控制面板层
               AnimatedOpacity(
                 opacity: _showControls ? 1.0 : 0.0,
                 duration: const Duration(milliseconds: 200),
@@ -674,19 +790,23 @@ class _MediaKitPlayerScreenState extends State<MediaKitPlayerScreen>
                       children: [
                         Column(
                           children: [
-                            // 顶部栏
+                            // 顶部栏 - mpvEx风格
                             Container(
-                              decoration: const BoxDecoration(
+                              decoration: BoxDecoration(
                                 gradient: LinearGradient(
                                   begin: Alignment.topCenter,
                                   end: Alignment.bottomCenter,
-                                  colors: [Colors.black87, Colors.transparent],
+                                  colors: [
+                                    Colors.black.withOpacity(0.8),
+                                    Colors.transparent,
+                                  ],
                                 ),
                               ),
                               child: Row(
                                 children: [
-                                  IconButton(
-                                    icon: const Icon(Icons.arrow_back, color: Colors.white),
+                                  // 返回按钮 - 圆形设计
+                                  _CircularButton(
+                                    icon: Icons.arrow_back,
                                     onPressed: () {
                                       if (_isFullscreen) {
                                         _toggleFullscreen();
@@ -695,37 +815,76 @@ class _MediaKitPlayerScreenState extends State<MediaKitPlayerScreen>
                                       }
                                     },
                                   ),
+                                  
+                                  // 播放列表信息和标题 - 简化为只显示文件名
                                   Expanded(
-                                    child: Text(
-                                      title,
-                                      style: const TextStyle(color: Colors.white, fontSize: 16),
-                                      overflow: TextOverflow.ellipsis,
+                                    child: Container(
+                                      height: 36,
+                                      margin: const EdgeInsets.symmetric(vertical: 4),
+                                      padding: const EdgeInsets.symmetric(horizontal: 12),
+                                      decoration: BoxDecoration(
+                                        color: Colors.white.withOpacity(0.15),
+                                        borderRadius: BorderRadius.circular(18),
+                                      ),
+                                      child: Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          if (_videos.length > 1) ...[
+                                            GestureDetector(
+                                              onTap: _showVideoInfo,
+                                              child: Container(
+                                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                                margin: const EdgeInsets.only(right: 8),
+                                                decoration: BoxDecoration(
+                                                  color: Colors.blue.withOpacity(0.5),
+                                                  borderRadius: BorderRadius.circular(8),
+                                                ),
+                                                child: Text(
+                                                  '${_index + 1}/${_videos.length}',
+                                                  style: const TextStyle(
+                                                    color: Colors.white,
+                                                    fontSize: 10,
+                                                    fontWeight: FontWeight.bold,
+                                                    fontFamily: 'monospace',
+                                                  ),
+                                                ),
+                                              ),
+                                            ),
+                                          ],
+                                          Flexible(
+                                            child: Text(
+                                              title,
+                                              style: const TextStyle(
+                                                color: Colors.white,
+                                                fontSize: 14,
+                                                fontFamily: 'monospace',
+                                              ),
+                                              overflow: TextOverflow.ellipsis,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
                                     ),
                                   ),
-                                  IconButton(
-                                    icon: Icon(
-                                      _isFavorite ? Icons.favorite : Icons.favorite_border,
-                                      color: _isFavorite ? Colors.red : Colors.white,
-                                    ),
+                                  
+                                  // 收藏按钮
+                                  _CircularButton(
+                                    icon: _isFavorite ? Icons.favorite : Icons.favorite_border,
+                                    iconColor: _isFavorite ? Colors.red : Colors.white,
                                     onPressed: _toggleFavorite,
-                                    tooltip: '收藏',
                                   ),
-                                  IconButton(
-                                    icon: const Icon(Icons.info_outline, color: Colors.white),
-                                    onPressed: _showVideoInfo,
-                                    tooltip: '视频信息',
-                                  ),
-                                  IconButton(
-                                    icon: _isCapturing
-                                        ? const SizedBox(width: 24, height: 24, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
-                                        : const Icon(Icons.photo_camera, color: Colors.white),
+                                  
+                                  // 截图按钮
+                                  _CircularButton(
+                                    icon: _isCapturing ? Icons.hourglass_empty : Icons.photo_camera,
                                     onPressed: _isCapturing ? null : _captureFrame,
-                                    tooltip: '截图',
                                   ),
-                                  IconButton(
-                                    icon: Icon(Icons.playlist_play, color: _showPlaylist ? Colors.blue : Colors.white),
+                                  
+                                  // 播放列表按钮
+                                  _CircularButton(
+                                    icon: Icons.playlist_play,
+                                    iconColor: _showPlaylist ? Colors.blue : Colors.white,
                                     onPressed: _togglePlaylist,
-                                    tooltip: '播放列表',
                                   ),
                                 ],
                               ),
@@ -736,83 +895,130 @@ class _MediaKitPlayerScreenState extends State<MediaKitPlayerScreen>
                               child: Center(
                                 child: Row(
                                   mainAxisSize: MainAxisSize.min,
+                                  mainAxisAlignment: MainAxisAlignment.center,
                                   children: [
-                                    IconButton(
-                                      iconSize: 48,
-                                      icon: Icon(Icons.skip_previous_rounded, color: _index > 0 ? Colors.white : Colors.white.withOpacity(0.3)),
-                                      onPressed: _index > 0 ? () { _playAt(_index - 1); _startHideTimer(); } : null,
-                                    ),
+                                    // 上一首
+                                    if (_videos.length > 1)
+                                      _PlaybackButton(
+                                        icon: Icons.skip_previous_rounded,
+                                        size: 48,
+                                        enabled: _index > 0,
+                                        onPressed: () {
+                                          _playAt(_index - 1);
+                                          _startHideTimer();
+                                        },
+                                      ),
+                                    
                                     const SizedBox(width: 16),
-                                    IconButton(
-                                      iconSize: 64,
-                                      icon: Icon(_playing ? Icons.pause_circle_outline_rounded : Icons.play_circle_outline_rounded, color: Colors.white),
+                                    
+                                    // 后退10秒
+                                    _PlaybackButton(
+                                      icon: Icons.replay_10_rounded,
+                                      size: 40,
+                                      onPressed: () {
+                                        final newPos = _position - const Duration(seconds: 10);
+                                        _player.seek(newPos.isNegative ? Duration.zero : newPos);
+                                        _startHideTimer();
+                                      },
+                                    ),
+                                    
+                                    const SizedBox(width: 8),
+                                    
+                                    // 播放/暂停按钮 - 大圆形按钮，带阴影
+                                    _PlayPauseButton(
+                                      isPlaying: _playing,
                                       onPressed: () {
                                         _player.playOrPause();
                                         _startHideTimer();
                                       },
                                     ),
-                                    const SizedBox(width: 16),
-                                    IconButton(
-                                      iconSize: 48,
-                                      icon: Icon(Icons.skip_next_rounded, color: _index < _videos.length - 1 ? Colors.white : Colors.white.withOpacity(0.3)),
-                                      onPressed: _index < _videos.length - 1 ? () { _playAt(_index + 1); _startHideTimer(); } : null,
+                                    
+                                    const SizedBox(width: 8),
+                                    
+                                    // 前进10秒
+                                    _PlaybackButton(
+                                      icon: Icons.forward_10_rounded,
+                                      size: 40,
+                                      onPressed: () {
+                                        final newPos = _position + const Duration(seconds: 10);
+                                        _player.seek(newPos > _duration ? _duration : newPos);
+                                        _startHideTimer();
+                                      },
                                     ),
+                                    
+                                    const SizedBox(width: 16),
+                                    
+                                    // 下一首
+                                    if (_videos.length > 1)
+                                      _PlaybackButton(
+                                        icon: Icons.skip_next_rounded,
+                                        size: 48,
+                                        enabled: _index < _videos.length - 1,
+                                        onPressed: () {
+                                          _playAt(_index + 1);
+                                          _startHideTimer();
+                                        },
+                                      ),
                                   ],
                                 ),
                               ),
                             ),
 
-                            // 底部栏
+                            // 底部栏 - mpvEx风格
                             Container(
-                              decoration: const BoxDecoration(
+                              decoration: BoxDecoration(
                                 gradient: LinearGradient(
                                   begin: Alignment.bottomCenter,
                                   end: Alignment.topCenter,
-                                  colors: [Colors.black87, Colors.transparent],
+                                  colors: [
+                                    Colors.black.withOpacity(0.8),
+                                    Colors.transparent,
+                                  ],
                                 ),
                               ),
-                              padding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
+                              padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
                               child: Column(
                                 mainAxisSize: MainAxisSize.min,
                                 children: [
-                                  // 进度条
+                                  // 进度条 - 普通Slider风格
                                   if (!isLive)
-                                    SliderTheme(
-                                      data: SliderTheme.of(context).copyWith(
-                                        trackHeight: 2,
-                                        thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6),
-                                        overlayShape: const RoundSliderOverlayShape(overlayRadius: 14),
-                                        activeTrackColor: Colors.white,
-                                        inactiveTrackColor: Colors.white.withOpacity(0.3),
-                                        thumbColor: Colors.white,
-                                        overlayColor: Colors.white.withOpacity(0.2),
-                                      ),
-                                      child: Slider(
-                                        value: _position.inMilliseconds.toDouble().clamp(0, _duration.inMilliseconds.toDouble().clamp(1, double.infinity)),
-                                        min: 0,
-                                        max: _duration.inMilliseconds.toDouble().clamp(1, double.infinity),
-                                        onChangeStart: (_) {
-                                          _isDraggingSlider = true;
-                                          _hideTimer?.cancel();
-                                        },
-                                        onChanged: (v) {
-                                          setState(() => _position = Duration(milliseconds: v.toInt()));
-                                        },
-                                        onChangeEnd: (v) {
-                                          _isDraggingSlider = false;
-                                          _player.seek(Duration(milliseconds: v.toInt()));
-                                          _startHideTimer();
-                                        },
-                                      ),
+                                    _NormalSeekBar(
+                                      position: _position,
+                                      duration: _duration,
+                                      onSeek: (pos) {
+                                        _isDraggingSlider = true;
+                                        _hideTimer?.cancel();
+                                        setState(() => _position = pos);
+                                      },
+                                      onSeekEnd: (pos) {
+                                        _isDraggingSlider = false;
+                                        _player.seek(pos);
+                                        _startHideTimer();
+                                      },
                                     ),
+                                  
                                   Row(
                                     children: [
-                                      const Spacer(),
+                                      // 时间显示
                                       if (!isLive)
-                                        Text('${_fmt(_position)} / ${_fmt(_duration)}', style: const TextStyle(color: Colors.white, fontSize: 12)),
-                                      const SizedBox(width: 8),
-                                      IconButton(
-                                        icon: Icon(_isFullscreen ? Icons.fullscreen_exit : Icons.fullscreen, color: Colors.white),
+                                        Expanded(
+                                          child: Padding(
+                                            padding: const EdgeInsets.only(left: 4),
+                                            child: Text(
+                                              '${_fmt(_position)} / ${_fmt(_duration)}',
+                                              style: const TextStyle(
+                                                color: Colors.white,
+                                                fontSize: 12,
+                                                fontFamily: 'monospace',
+                                              ),
+                                            ),
+                                          ),
+                                        ),
+                                      
+                                      // 全屏按钮
+                                      _CircularButton(
+                                        icon: _isFullscreen ? Icons.fullscreen_exit : Icons.fullscreen,
+                                        size: 36,
                                         onPressed: _toggleFullscreen,
                                       ),
                                     ],
@@ -822,43 +1028,31 @@ class _MediaKitPlayerScreenState extends State<MediaKitPlayerScreen>
                             ),
                           ],
                         ),
-
-                        // 左下角悬浮便捷切换按钮
-                        if (_videos.length > 1)
-                          Positioned(
-                            left: 8,
-                            bottom: _isFullscreen ? 60 : 80,
-                            child: Container(
-                              decoration: BoxDecoration(
-                                color: Colors.black54,
-                                borderRadius: BorderRadius.circular(24),
-                              ),
-                              child: Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  IconButton(
-                                    icon: Icon(Icons.skip_previous_rounded, color: _index > 0 ? Colors.white : Colors.white38),
-                                    onPressed: _index > 0 ? () { _playAt(_index - 1); } : null,
-                                    iconSize: 32,
-                                    tooltip: '上一个',
-                                  ),
-                                  Container(
-                                    padding: const EdgeInsets.symmetric(horizontal: 4),
-                                    child: Text(
-                                      '${_index + 1}/${_videos.length}',
-                                      style: const TextStyle(color: Colors.white, fontSize: 12),
+                        
+                                // 悬浮切换按钮 - 左下角（竖屏时显示）
+                                if (_videos.length > 1 && !_isFullscreen)
+                                  Positioned(
+                                    left: 16,
+                                    bottom: 80,
+                                    child: _FloatingSwitchButton(
+                                      currentIndex: _index + 1,
+                                      totalCount: _videos.length,
+                                      onPrevious: () {
+                                        if (_index > 0) {
+                                          _playAt(_index - 1);
+                                        } else {
+                                          _showToast('已经是第一个视频了');
+                                        }
+                                      },
+                                      onNext: () {
+                                        if (_index < _videos.length - 1) {
+                                          _playAt(_index + 1);
+                                        } else {
+                                          _showToast('已经是最后一个视频了');
+                                        }
+                                      },
                                     ),
                                   ),
-                                  IconButton(
-                                    icon: Icon(Icons.skip_next_rounded, color: _index < _videos.length - 1 ? Colors.white : Colors.white38),
-                                    onPressed: _index < _videos.length - 1 ? () { _playAt(_index + 1); } : null,
-                                    iconSize: 32,
-                                    tooltip: '下一个',
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ),
                       ],
                     ),
                   ),
@@ -1035,6 +1229,512 @@ class _MediaKitPlayerScreenState extends State<MediaKitPlayerScreen>
   }
 }
 
+// mpvEx风格的圆形按钮
+class _CircularButton extends StatelessWidget {
+  final IconData icon;
+  final Color? iconColor;
+  final VoidCallback? onPressed;
+  final double size;
+
+  const _CircularButton({
+    required this.icon,
+    this.iconColor,
+    this.onPressed,
+    this.size = 40,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onPressed,
+      child: Container(
+        width: size,
+        height: size,
+        margin: const EdgeInsets.all(4),
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          color: Colors.white.withOpacity(0.15),
+        ),
+        child: Center(
+          child: Icon(
+            icon,
+            color: iconColor ?? Colors.white,
+            size: size * 0.5,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// mpvEx风格的播放按钮
+class _PlayPauseButton extends StatelessWidget {
+  final bool isPlaying;
+  final VoidCallback onPressed;
+
+  const _PlayPauseButton({
+    required this.isPlaying,
+    required this.onPressed,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onPressed,
+      child: Container(
+        width: 72,
+        height: 72,
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          gradient: RadialGradient(
+            colors: [
+              Colors.black.withOpacity(0.4),
+              Colors.transparent,
+            ],
+            stops: const [0.0, 1.0],
+          ),
+        ),
+        child: Container(
+          margin: const EdgeInsets.all(4),
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            color: Colors.white.withOpacity(0.2),
+            border: Border.all(
+              color: Colors.white.withOpacity(0.3),
+              width: 1,
+            ),
+          ),
+          child: Center(
+            child: Icon(
+              isPlaying ? Icons.pause_rounded : Icons.play_arrow_rounded,
+              color: Colors.white,
+              size: 40,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// mpvEx风格的播放控制按钮
+class _PlaybackButton extends StatelessWidget {
+  final IconData icon;
+  final double size;
+  final bool enabled;
+  final VoidCallback onPressed;
+
+  const _PlaybackButton({
+    required this.icon,
+    required this.size,
+    this.enabled = true,
+    required this.onPressed,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: enabled ? onPressed : null,
+      child: Container(
+        width: size,
+        height: size,
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          color: Colors.white.withOpacity(0.15),
+        ),
+        child: Center(
+          child: Icon(
+            icon,
+            color: enabled ? Colors.white : Colors.white38,
+            size: size * 0.6,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// mpvEx风格的波浪进度条
+class _WaveSeekBar extends StatefulWidget {
+  final Duration position;
+  final Duration duration;
+  final Function(Duration) onSeek;
+  final Function(Duration) onSeekEnd;
+
+  const _WaveSeekBar({
+    required this.position,
+    required this.duration,
+    required this.onSeek,
+    required this.onSeekEnd,
+  });
+
+  @override
+  State<_WaveSeekBar> createState() => _WaveSeekBarState();
+}
+
+class _WaveSeekBarState extends State<_WaveSeekBar> with SingleTickerProviderStateMixin {
+  bool _isDragging = false;
+  double _dragValue = 0;
+  late AnimationController _waveController;
+  
+  @override
+  void initState() {
+    super.initState();
+    _waveController = AnimationController(
+      vsync: this,
+      duration: const Duration(seconds: 2),
+    )..repeat();
+  }
+
+  @override
+  void dispose() {
+    _waveController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final progress = widget.duration.inMilliseconds > 0
+        ? widget.position.inMilliseconds / widget.duration.inMilliseconds
+        : 0.0;
+    
+    final displayProgress = _isDragging ? _dragValue : progress;
+
+    return GestureDetector(
+      onHorizontalDragStart: (details) {
+        setState(() {
+          _isDragging = true;
+          _dragValue = (details.localPosition.dx / context.size!.width).clamp(0.0, 1.0);
+        });
+        widget.onSeek(Duration(milliseconds: (_dragValue * widget.duration.inMilliseconds).round()));
+      },
+      onHorizontalDragUpdate: (details) {
+        setState(() {
+          _dragValue = (details.localPosition.dx / context.size!.width).clamp(0.0, 1.0);
+        });
+        widget.onSeek(Duration(milliseconds: (_dragValue * widget.duration.inMilliseconds).round()));
+      },
+      onHorizontalDragEnd: (details) {
+        final duration = Duration(milliseconds: (_dragValue * widget.duration.inMilliseconds).round());
+        widget.onSeekEnd(duration);
+        setState(() {
+          _isDragging = false;
+        });
+      },
+      onTapDown: (details) {
+        final tapProgress = (details.localPosition.dx / context.size!.width).clamp(0.0, 1.0);
+        final duration = Duration(milliseconds: (tapProgress * widget.duration.inMilliseconds).round());
+        widget.onSeekEnd(duration);
+      },
+      child: Container(
+        height: 48,
+        padding: const EdgeInsets.symmetric(horizontal: 16),
+        child: AnimatedBuilder(
+          animation: _waveController,
+          builder: (context, child) {
+            return CustomPaint(
+              size: const Size(double.infinity, 48),
+              painter: _WaveSeekBarPainter(
+                progress: displayProgress,
+                wavePhase: _waveController.value * 2 * 3.14159,
+                isPaused: false,
+              ),
+            );
+          },
+        ),
+      ),
+    );
+  }
+}
+
+class _WaveSeekBarPainter extends CustomPainter {
+  final double progress;
+  final double wavePhase;
+  final bool isPaused;
+
+  _WaveSeekBarPainter({
+    required this.progress,
+    required this.wavePhase,
+    required this.isPaused,
+  });
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final centerY = size.height / 2;
+    final strokeWidth = 4.0;
+    final waveAmplitude = isPaused ? 2.0 : 6.0;
+    final waveLength = 80.0;
+
+    final playedPaint = Paint()
+      ..color = Colors.white
+      ..strokeWidth = strokeWidth
+      ..strokeCap = StrokeCap.round
+      ..style = PaintingStyle.stroke;
+
+    final unplayedPaint = Paint()
+      ..color = Colors.white.withOpacity(0.3)
+      ..strokeWidth = strokeWidth
+      ..strokeCap = StrokeCap.round
+      ..style = PaintingStyle.stroke;
+
+    final playedPath = Path();
+    final unplayedPath = Path();
+    
+    final progressX = size.width * progress;
+    final animatedPhase = wavePhase;
+
+    // 绘制已播放部分（波浪效果）
+    if (progress > 0) {
+      playedPath.moveTo(0, centerY);
+      for (double x = 0; x <= progressX; x += 2) {
+        final waveOffset = isPaused ? 0.0 : 
+            waveAmplitude * (x / waveLength * 2 * 3.14159 + animatedPhase).remainder(2 * 3.14159) / (2 * 3.14159) * 2 - 1;
+        final y = centerY + waveOffset;
+        if (x == 0) {
+          playedPath.moveTo(x, y);
+        } else {
+          playedPath.lineTo(x, y);
+        }
+      }
+      canvas.drawPath(playedPath, playedPaint);
+    }
+
+    // 绘制未播放部分
+    if (progress < 1) {
+      unplayedPath.moveTo(progressX, centerY);
+      for (double x = progressX; x <= size.width; x += 2) {
+        final waveOffset = isPaused ? 0.0 : 
+            waveAmplitude * (x / waveLength * 2 * 3.14159 + animatedPhase).remainder(2 * 3.14159) / (2 * 3.14159) * 2 - 1;
+        final y = centerY + waveOffset;
+        unplayedPath.lineTo(x, y);
+      }
+      canvas.drawPath(unplayedPath, unplayedPaint);
+    }
+
+    // 绘制进度点
+    final dotPaint = Paint()
+      ..color = Colors.white
+      ..style = PaintingStyle.fill;
+    canvas.drawCircle(Offset(progressX, centerY), strokeWidth + 2, dotPaint);
+  }
+
+  @override
+  bool shouldRepaint(covariant _WaveSeekBarPainter oldDelegate) {
+    return oldDelegate.progress != progress || 
+           oldDelegate.wavePhase != wavePhase || 
+           oldDelegate.isPaused != isPaused;
+  }
+}
+
+// mpvEx风格的垂直滑块指示器
+class _VerticalSliderIndicator extends StatelessWidget {
+  final VerticalDragType type;
+  final double value;
+
+  const _VerticalSliderIndicator({
+    required this.type,
+    required this.value,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final percentage = (value * 100).toInt();
+    
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.black.withOpacity(0.7),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: Colors.white.withOpacity(0.2),
+          width: 1,
+        ),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            '$percentage%',
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 14,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          const SizedBox(height: 12),
+          // 垂直滑块
+          Container(
+            width: 24,
+            height: 120,
+            decoration: BoxDecoration(
+              color: Colors.white.withOpacity(0.1),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Stack(
+              alignment: Alignment.bottomCenter,
+              children: [
+                // 背景轨道
+                Container(
+                  width: 8,
+                  height: 100,
+                  decoration: BoxDecoration(
+                    color: Colors.white.withOpacity(0.2),
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                ),
+                // 进度填充
+                Positioned(
+                  bottom: 0,
+                  child: Container(
+                    width: 8,
+                    height: 100 * value,
+                    decoration: BoxDecoration(
+                      color: type == VerticalDragType.brightness 
+                          ? Colors.amber 
+                          : Colors.blue,
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 12),
+          Icon(
+            type == VerticalDragType.brightness
+                ? (value < 0.3 ? Icons.brightness_low : value > 0.7 ? Icons.brightness_high : Icons.brightness_medium)
+                : (value < 0.3 ? Icons.volume_mute : Icons.volume_up),
+            color: Colors.white,
+            size: 28,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// 双击快进/快退指示器
+class _DoubleTapSeekIndicator extends StatefulWidget {
+  final bool isForward;
+  final int seekAmount;
+
+  const _DoubleTapSeekIndicator({
+    required this.isForward,
+    required this.seekAmount,
+  });
+
+  @override
+  State<_DoubleTapSeekIndicator> createState() => _DoubleTapSeekIndicatorState();
+}
+
+class _DoubleTapSeekIndicatorState extends State<_DoubleTapSeekIndicator>
+    with TickerProviderStateMixin {
+  late List<AnimationController> _controllers;
+  late List<Animation<double>> _alphas;
+
+  @override
+  void initState() {
+    super.initState();
+    _controllers = List.generate(3, (index) {
+      return AnimationController(
+        vsync: this,
+        duration: const Duration(milliseconds: 750),
+      );
+    });
+
+    _alphas = _controllers.map((controller) {
+      return Tween<double>(begin: 0.0, end: 1.0).animate(
+        CurvedAnimation(parent: controller, curve: Curves.easeInOut),
+      );
+    }).toList();
+
+    // 错开启动动画
+    for (int i = 0; i < 3; i++) {
+      Future.delayed(Duration(milliseconds: i * 150), () {
+        if (mounted) _controllers[i].repeat(reverse: true);
+      });
+    }
+  }
+
+  @override
+  void dispose() {
+    for (var controller in _controllers) {
+      controller.dispose();
+    }
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Row(
+        mainAxisAlignment: widget.isForward ? MainAxisAlignment.end : MainAxisAlignment.start,
+        children: [
+          if (!widget.isForward) const SizedBox(width: 20),
+          if (!widget.isForward)
+            ...List.generate(3, (index) {
+              return AnimatedBuilder(
+                animation: _alphas[index],
+                builder: (context, child) {
+                  return Transform.translate(
+                    offset: Offset(widget.isForward ? 10 : -10, 0),
+                    child: Opacity(
+                      opacity: _alphas[index].value,
+                      child: Icon(
+                        widget.isForward 
+                            ? Icons.keyboard_arrow_right 
+                            : Icons.keyboard_arrow_left,
+                        color: Colors.white,
+                        size: 32,
+                      ),
+                    ),
+                  );
+                },
+              );
+            }),
+          const SizedBox(width: 8),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            decoration: BoxDecoration(
+              color: Colors.black.withOpacity(0.6),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Text(
+              widget.isForward ? '+${widget.seekAmount}' : '-${widget.seekAmount}',
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 24,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ),
+          if (widget.isForward)
+            ...List.generate(3, (index) {
+              return AnimatedBuilder(
+                animation: _alphas[index],
+                builder: (context, child) {
+                  return Transform.translate(
+                    offset: Offset(-10, 0),
+                    child: Opacity(
+                      opacity: _alphas[index].value,
+                      child: Icon(
+                        Icons.keyboard_arrow_right,
+                        color: Colors.white,
+                        size: 32,
+                      ),
+                    ),
+                  );
+                },
+              );
+            }),
+          if (widget.isForward) const SizedBox(width: 20),
+        ],
+      ),
+    );
+  }
+}
+
+// 垂直拖动指示器
 class _VerticalDragIndicator extends StatelessWidget {
   final VerticalDragType type;
   final double value;
@@ -1112,6 +1812,220 @@ class _SortButton extends StatelessWidget {
             Text(
               label,
               style: const TextStyle(color: Colors.white, fontSize: 12),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// 普通SeekBar进度条 - 替换波浪进度条
+class _NormalSeekBar extends StatefulWidget {
+  final Duration position;
+  final Duration duration;
+  final Function(Duration) onSeek;
+  final Function(Duration) onSeekEnd;
+
+  const _NormalSeekBar({
+    required this.position,
+    required this.duration,
+    required this.onSeek,
+    required this.onSeekEnd,
+  });
+
+  @override
+  State<_NormalSeekBar> createState() => _NormalSeekBarState();
+}
+
+class _NormalSeekBarState extends State<_NormalSeekBar> {
+  bool _isDragging = false;
+  double _dragValue = 0;
+
+  @override
+  Widget build(BuildContext context) {
+    final progress = widget.duration.inMilliseconds > 0
+        ? widget.position.inMilliseconds / widget.duration.inMilliseconds
+        : 0.0;
+    
+    final displayProgress = _isDragging ? _dragValue : progress;
+    final clampedProgress = displayProgress.clamp(0.0, 1.0);
+
+    return GestureDetector(
+      onHorizontalDragStart: (details) {
+        setState(() {
+          _isDragging = true;
+          _dragValue = (details.localPosition.dx / context.size!.width).clamp(0.0, 1.0);
+        });
+        widget.onSeek(Duration(milliseconds: (_dragValue * widget.duration.inMilliseconds).round()));
+      },
+      onHorizontalDragUpdate: (details) {
+        setState(() {
+          _dragValue = (details.localPosition.dx / context.size!.width).clamp(0.0, 1.0);
+        });
+        widget.onSeek(Duration(milliseconds: (_dragValue * widget.duration.inMilliseconds).round()));
+      },
+      onHorizontalDragEnd: (details) {
+        final duration = Duration(milliseconds: (_dragValue * widget.duration.inMilliseconds).round());
+        widget.onSeekEnd(duration);
+        setState(() {
+          _isDragging = false;
+        });
+      },
+      onTapDown: (details) {
+        final tapProgress = (details.localPosition.dx / context.size!.width).clamp(0.0, 1.0);
+        final duration = Duration(milliseconds: (tapProgress * widget.duration.inMilliseconds).round());
+        widget.onSeekEnd(duration);
+      },
+      child: Container(
+        height: 40,
+        padding: const EdgeInsets.symmetric(horizontal: 16),
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            final trackWidth = constraints.maxWidth;
+            final dotPosition = trackWidth * clampedProgress;
+            
+            return Stack(
+              alignment: Alignment.center,
+              children: [
+                // 底部轨道 - 未播放部分
+                Container(
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: Colors.white.withOpacity(0.3),
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+                // 顶部轨道 - 已播放部分
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: Container(
+                    width: dotPosition,
+                    height: 4,
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(2),
+                    ),
+                  ),
+                ),
+                // 进度点 - 居中显示，不超出边界
+                Positioned(
+                  left: (dotPosition - 8).clamp(0.0, trackWidth - 16),
+                  child: Container(
+                    width: 16,
+                    height: 16,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: Colors.white,
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withOpacity(0.3),
+                          blurRadius: 4,
+                          offset: const Offset(0, 2),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            );
+          },
+        ),
+      ),
+    );
+  }
+}
+
+// 悬浮切换按钮 - 用于单手操作快速切换视频（磨砂设计）
+class _FloatingSwitchButton extends StatelessWidget {
+  final int currentIndex;
+  final int totalCount;
+  final VoidCallback onPrevious;
+  final VoidCallback onNext;
+
+  const _FloatingSwitchButton({
+    required this.currentIndex,
+    required this.totalCount,
+    required this.onPrevious,
+    required this.onNext,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 130,
+      height: 48,
+      decoration: BoxDecoration(
+        color: Colors.white.withOpacity(0.15),
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(
+          color: Colors.white.withOpacity(0.2),
+          width: 1,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.2),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(23),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+          children: [
+            // 上一个按钮 - 不紧贴边缘
+            Padding(
+              padding: const EdgeInsets.only(left: 4),
+              child: GestureDetector(
+                onTap: onPrevious,
+                child: Container(
+                  width: 36,
+                  height: 36,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: Colors.white.withOpacity(0.1),
+                  ),
+                  child: const Icon(
+                    Icons.skip_previous_rounded,
+                    color: Colors.white,
+                    size: 20,
+                  ),
+                ),
+              ),
+            ),
+            // 索引显示
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8),
+              child: Text(
+                '$currentIndex / $totalCount',
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ),
+            // 下一个按钮 - 不紧贴边缘
+            Padding(
+              padding: const EdgeInsets.only(right: 4),
+              child: GestureDetector(
+                onTap: onNext,
+                child: Container(
+                  width: 36,
+                  height: 36,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: Colors.white.withOpacity(0.1),
+                  ),
+                  child: const Icon(
+                    Icons.skip_next_rounded,
+                    color: Colors.white,
+                    size: 20,
+                  ),
+                ),
+              ),
             ),
           ],
         ),

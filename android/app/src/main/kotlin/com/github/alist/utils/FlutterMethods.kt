@@ -132,4 +132,11 @@ object FlutterMethods {
             }
         )
     }
+
+    // Picture-in-Picture mode
+    var pipCallback: (() -> Unit)? = null
+
+    fun enterPictureInPicture() {
+        pipCallback?.invoke()
+    }
 }
