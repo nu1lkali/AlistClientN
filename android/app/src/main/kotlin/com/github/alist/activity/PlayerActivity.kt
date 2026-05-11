@@ -106,6 +106,10 @@ class PlayerActivity : AppCompatActivity(), GSYVideoProgressListener {
     // 动态注册的PiP BroadcastReceiver
     private val pipReceiver = PipActionReceiver()
     private var pipReceiverRegistered = false
+    
+    // PiP模式下定时更新按钮图标的Handler
+    private val pipUpdateHandler = Handler(Looper.getMainLooper())
+    private var pipUpdateRunnable: Runnable? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -163,20 +167,25 @@ class PlayerActivity : AppCompatActivity(), GSYVideoProgressListener {
             PIP_ACTION_PREVIOUS -> {
                 saveCurrentTime()
                 playPrevious()
-                // 更新PiP按钮（上一个/下一个的可用状态可能变化）
-                updatePipActions()
+                // 切换视频后，新视频会自动开始播放，强制更新PiP按钮为暂停图标
+                // 使用延迟确保视频已开始播放
+                Handler(Looper.getMainLooper()).postDelayed({
+                    updatePipActions()
+                }, 300)
             }
             PIP_ACTION_NEXT -> {
                 saveCurrentTime()
                 playNext()
-                // 更新PiP按钮（上一个/下一个的可用状态可能变化）
-                updatePipActions()
+                // 切换视频后，新视频会自动开始播放，强制更新PiP按钮为暂停图标
+                Handler(Looper.getMainLooper()).postDelayed({
+                    updatePipActions()
+                }, 300)
             }
         }
     }
     
     private fun updatePipActions() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && isInPictureInPictureMode) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val isPlaying = gsyVideoPlayer.currentPlayer.currentState == GSYVideoView.CURRENT_STATE_PLAYING
             val currentSortedIndex = getCurrentSortedIndex()
             val hasPrevious = currentSortedIndex > 0
@@ -355,6 +364,10 @@ class PlayerActivity : AppCompatActivity(), GSYVideoProgressListener {
                     isPlay = true
                     handler.removeMessages(messageRecordWatchTime)
                     handler.sendEmptyMessageDelayed(messageRecordWatchTime, 30 * 1000)
+                    // 画中画模式下，视频准备好后更新PiP按钮图标
+                    if (isInPictureInPictureMode) {
+                        updatePipActions()
+                    }
                 }
 
                 override fun onComplete(url: String?, vararg objects: Any?) {
@@ -865,7 +878,13 @@ class PlayerActivity : AppCompatActivity(), GSYVideoProgressListener {
             playlistDrawer.visibility = View.GONE
             playlistScrim.visibility = View.GONE
             isPlaylistVisible = false
+            
+            // 启动定时轮询，持续更新PiP按钮图标（确保切换视频后图标正确）
+            startPipUpdateTimer()
         } else {
+            // 退出PiP模式：停止定时轮询
+            stopPipUpdateTimer()
+            
             // 退出PiP模式：恢复UI
             gsyVideoPlayer.exitPipMode()
             
@@ -911,6 +930,29 @@ class PlayerActivity : AppCompatActivity(), GSYVideoProgressListener {
                 }, 100)
             }
         }
+    }
+
+    /**
+     * 启动PiP按钮图标定时更新（每200ms检查一次播放状态，持续3秒后自动停止）
+     * 主要用于切换视频后快速同步按钮图标
+     */
+    private fun startPipUpdateTimer() {
+        stopPipUpdateTimer()
+        pipUpdateRunnable = Runnable {
+            if (isInPictureInPictureMode && Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                updatePipActions()
+                pipUpdateHandler.postDelayed(pipUpdateRunnable!!, 200)
+            }
+        }
+        pipUpdateHandler.postDelayed(pipUpdateRunnable!!, 200)
+    }
+    
+    /**
+     * 停止PiP按钮图标定时更新
+     */
+    private fun stopPipUpdateTimer() {
+        pipUpdateRunnable?.let { pipUpdateHandler.removeCallbacks(it) }
+        pipUpdateRunnable = null
     }
 
     override fun onProgress(p0: Long, p1: Long, currentTime: Long, totalTime: Long) {
