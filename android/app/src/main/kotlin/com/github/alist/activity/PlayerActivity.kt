@@ -55,6 +55,8 @@ class PlayerActivity : AppCompatActivity(), GSYVideoProgressListener {
     companion object {
         const val ACTION_PIP = "com.github.alist.PIP_ACTION"
         const val PIP_ACTION_PLAY_PAUSE = 1001
+        const val PIP_ACTION_PREVIOUS = 1002
+        const val PIP_ACTION_NEXT = 1003
     }
     
     private lateinit var playerWrapper: PlayerWrapper
@@ -158,38 +160,86 @@ class PlayerActivity : AppCompatActivity(), GSYVideoProgressListener {
                 // 更新PiP按钮图标
                 updatePipActions()
             }
+            PIP_ACTION_PREVIOUS -> {
+                saveCurrentTime()
+                playPrevious()
+                // 更新PiP按钮（上一个/下一个的可用状态可能变化）
+                updatePipActions()
+            }
+            PIP_ACTION_NEXT -> {
+                saveCurrentTime()
+                playNext()
+                // 更新PiP按钮（上一个/下一个的可用状态可能变化）
+                updatePipActions()
+            }
         }
     }
     
     private fun updatePipActions() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && isInPictureInPictureMode) {
             val isPlaying = gsyVideoPlayer.currentPlayer.currentState == GSYVideoView.CURRENT_STATE_PLAYING
+            val currentSortedIndex = getCurrentSortedIndex()
+            val hasPrevious = currentSortedIndex > 0
+            val hasNext = currentSortedIndex < sortedVideos.lastIndex
             
-            val intent = Intent(ACTION_PIP).apply {
-                putExtra("request_code", PIP_ACTION_PLAY_PAUSE)
+            // 上一个按钮
+            val prevIntent = Intent(ACTION_PIP).apply {
+                putExtra("request_code", PIP_ACTION_PREVIOUS)
             }
-            val pendingIntent = PendingIntent.getBroadcast(
+            val prevPendingIntent = PendingIntent.getBroadcast(
                 this,
-                PIP_ACTION_PLAY_PAUSE,
-                intent,
+                PIP_ACTION_PREVIOUS,
+                prevIntent,
                 PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
             )
+            val prevAction = RemoteAction(
+                Icon.createWithResource(this, android.R.drawable.ic_media_previous),
+                "上一个",
+                "切换到上一个视频",
+                prevPendingIntent
+            )
             
+            // 播放/暂停按钮
+            val playPauseIntent = Intent(ACTION_PIP).apply {
+                putExtra("request_code", PIP_ACTION_PLAY_PAUSE)
+            }
+            val playPausePendingIntent = PendingIntent.getBroadcast(
+                this,
+                PIP_ACTION_PLAY_PAUSE,
+                playPauseIntent,
+                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+            )
             val playPauseIcon = if (isPlaying) {
                 Icon.createWithResource(this, android.R.drawable.ic_media_pause)
             } else {
                 Icon.createWithResource(this, android.R.drawable.ic_media_play)
             }
-            
             val playPauseAction = RemoteAction(
                 playPauseIcon,
                 if (isPlaying) "暂停" else "播放",
                 if (isPlaying) "点击暂停" else "点击播放",
-                pendingIntent
+                playPausePendingIntent
+            )
+            
+            // 下一个按钮
+            val nextIntent = Intent(ACTION_PIP).apply {
+                putExtra("request_code", PIP_ACTION_NEXT)
+            }
+            val nextPendingIntent = PendingIntent.getBroadcast(
+                this,
+                PIP_ACTION_NEXT,
+                nextIntent,
+                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+            )
+            val nextAction = RemoteAction(
+                Icon.createWithResource(this, android.R.drawable.ic_media_next),
+                "下一个",
+                "切换到下一个视频",
+                nextPendingIntent
             )
             
             val pipParams = PictureInPictureParams.Builder()
-                .setActions(listOf(playPauseAction))
+                .setActions(listOf(prevAction, playPauseAction, nextAction))
                 .build()
             
             try {
@@ -737,35 +787,69 @@ class PlayerActivity : AppCompatActivity(), GSYVideoProgressListener {
             // 标记正在进入PiP，防止onPause中暂停视频
             isEnteringPip = true
             
-            // 创建PiP Intent
-            val intent = Intent(ACTION_PIP).apply {
-                putExtra("request_code", PIP_ACTION_PLAY_PAUSE)
-            }
-            val pendingIntent = PendingIntent.getBroadcast(
-                this,
-                PIP_ACTION_PLAY_PAUSE,
-                intent,
-                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
-            )
-            
             val pipParamsBuilder = PictureInPictureParams.Builder()
                 .setAspectRatio(aspectRatio)
             
-            // 使用Android系统内置图标
             val isPlaying = gsyVideoPlayer.currentPlayer.currentState == GSYVideoView.CURRENT_STATE_PLAYING
+            val currentSortedIndex = getCurrentSortedIndex()
+            
+            // 上一个按钮
+            val prevIntent = Intent(ACTION_PIP).apply {
+                putExtra("request_code", PIP_ACTION_PREVIOUS)
+            }
+            val prevPendingIntent = PendingIntent.getBroadcast(
+                this,
+                PIP_ACTION_PREVIOUS,
+                prevIntent,
+                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+            )
+            val prevAction = RemoteAction(
+                Icon.createWithResource(this, android.R.drawable.ic_media_previous),
+                "上一个",
+                "切换到上一个视频",
+                prevPendingIntent
+            )
+            
+            // 播放/暂停按钮
+            val playPauseIntent = Intent(ACTION_PIP).apply {
+                putExtra("request_code", PIP_ACTION_PLAY_PAUSE)
+            }
+            val playPausePendingIntent = PendingIntent.getBroadcast(
+                this,
+                PIP_ACTION_PLAY_PAUSE,
+                playPauseIntent,
+                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+            )
             val playPauseIcon = if (isPlaying) {
                 Icon.createWithResource(this, android.R.drawable.ic_media_pause)
             } else {
                 Icon.createWithResource(this, android.R.drawable.ic_media_play)
             }
-            
             val playPauseAction = RemoteAction(
                 playPauseIcon,
                 if (isPlaying) "暂停" else "播放",
                 if (isPlaying) "点击暂停" else "点击播放",
-                pendingIntent
+                playPausePendingIntent
             )
-            pipParamsBuilder.setActions(listOf(playPauseAction))
+            
+            // 下一个按钮
+            val nextIntent = Intent(ACTION_PIP).apply {
+                putExtra("request_code", PIP_ACTION_NEXT)
+            }
+            val nextPendingIntent = PendingIntent.getBroadcast(
+                this,
+                PIP_ACTION_NEXT,
+                nextIntent,
+                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+            )
+            val nextAction = RemoteAction(
+                Icon.createWithResource(this, android.R.drawable.ic_media_next),
+                "下一个",
+                "切换到下一个视频",
+                nextPendingIntent
+            )
+            
+            pipParamsBuilder.setActions(listOf(prevAction, playPauseAction, nextAction))
             
             enterPictureInPictureMode(pipParamsBuilder.build())
         }

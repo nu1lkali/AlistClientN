@@ -255,7 +255,11 @@ public class AlistClientVideoPlayer extends NormalGSYVideoPlayer {
     public void onPrepared() {
         super.onPrepared();
         isEnableSeek = getDuration() > 0L;
-        if (isEnableSeek) {
+        // 画中画模式下，不显示前进/后退按钮
+        if (isInPipMode) {
+            btnRewind.setVisibility(View.GONE);
+            btnFfwd.setVisibility(View.GONE);
+        } else if (isEnableSeek) {
             btnRewind.setVisibility(View.VISIBLE);
             btnFfwd.setVisibility(View.VISIBLE);
         } else {
