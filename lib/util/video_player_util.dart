@@ -109,8 +109,10 @@ class VideoPlayerUtil {
           },
         );
       } else {
+        final autoPipEnabled = SpUtil.getBool(AlistConstant.autoPipEnabled, defValue: true) ?? true;
         AlistPlugin.playVideoWithInternalPlayer(
-            videosParams, index, headers, playerType);
+            videosParams, index, headers, playerType,
+            autoPipEnabled: autoPipEnabled);
       }
     } else {
       Get.toNamed(

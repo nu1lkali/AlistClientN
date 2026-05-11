@@ -103,6 +103,7 @@ class AlistPlugin(private val activity: Activity, private val scope: CoroutineSc
                 val index = call.argument<Int>("index")
                 val headers = call.argument<String?>("headers")
                 val playerType = call.argument<String>("playerType")
+                val autoPipEnabled = call.argument<Boolean>("autoPipEnabled") ?: true
 
                 // Set up PiP callback for Flutter to trigger PiP mode
                 FlutterMethods.pipCallback = {
@@ -116,6 +117,7 @@ class AlistPlugin(private val activity: Activity, private val scope: CoroutineSc
                 intent.putExtra("index", index)
                 intent.putExtra("headers", headers)
                 intent.putExtra("playerType", playerType)
+                intent.putExtra("autoPipEnabled", autoPipEnabled)
                 activity.startActivity(intent)
             }
 

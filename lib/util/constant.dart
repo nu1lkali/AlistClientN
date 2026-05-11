@@ -42,6 +42,7 @@ class AlistConstant {
   static const String groupedRandomSort = 'groupedRandomSort'; // 随机排序时按类型分组
   static const String enableMediaKitPlayer = 'enableMediaKitPlayer'; // 使用 libmpv 播放器
   static const String videoBrightness = 'videoBrightness'; // 视频播放亮度记忆
+  static const String autoPipEnabled = 'autoPipEnabled'; // 自动进入画中画
 
   static const String locale = 'locale';
 }

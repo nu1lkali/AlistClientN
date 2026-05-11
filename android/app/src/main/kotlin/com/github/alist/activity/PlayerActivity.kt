@@ -3,8 +3,15 @@ package com.github.alist.activity
 import android.animation.Animator
 import android.animation.AnimatorListenerAdapter
 import android.animation.ObjectAnimator
+import android.app.PendingIntent
 import android.app.PictureInPictureParams
+import android.app.RemoteAction
+import android.content.BroadcastReceiver
+import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
 import android.content.res.Configuration
+import android.graphics.drawable.Icon
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
@@ -20,8 +27,6 @@ import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
-import androidx.core.view.isInvisible
-import androidx.core.view.isVisible
 import androidx.core.view.updateLayoutParams
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
@@ -47,6 +52,11 @@ import tv.danmaku.ijk.media.exo2.Exo2PlayerManager
 import kotlin.math.abs
 
 class PlayerActivity : AppCompatActivity(), GSYVideoProgressListener {
+    companion object {
+        const val ACTION_PIP = "com.github.alist.PIP_ACTION"
+        const val PIP_ACTION_PLAY_PAUSE = 1001
+    }
+    
     private lateinit var playerWrapper: PlayerWrapper
     private var videosStr = "[]"
     private var headersStr = "{}"
@@ -68,7 +78,7 @@ class PlayerActivity : AppCompatActivity(), GSYVideoProgressListener {
     private lateinit var playlistScrim: View
     private lateinit var playlistAdapter: PlaylistAdapter
     private var sortedVideos: MutableList<VideoItem> = mutableListOf()
-    private var videoIndexMap: MutableMap<Int, Int> = mutableMapOf() // sortedIndex -> originalIndex
+    private var videoIndexMap: MutableMap<Int, Int> = mutableMapOf()
     private var isNameSortAscending = true
     private var isDurationSortAscending = false
 
@@ -77,11 +87,20 @@ class PlayerActivity : AppCompatActivity(), GSYVideoProgressListener {
         override fun handleMessage(msg: Message) {
             if (msg.what == messageRecordWatchTime) {
                 saveCurrentTime()
-                // 每30s记录一次播放进度
                 sendEmptyMessageDelayed(messageRecordWatchTime, 30 * 1000)
             }
         }
     }
+    
+    // 记录进入PiP前的播放状态
+    private var wasPlayingBeforePip = false
+    
+    // 标记是否正在进入PiP模式（避免在onPause中暂停视频）
+    private var isEnteringPip = false
+    
+    // 动态注册的PiP BroadcastReceiver
+    private val pipReceiver = PipActionReceiver()
+    private var pipReceiverRegistered = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -94,40 +113,104 @@ class PlayerActivity : AppCompatActivity(), GSYVideoProgressListener {
         WindowCompat.setDecorFitsSystemWindows(window, false)
         setContentView(R.layout.activity_player)
         initViews()
+        
+        // 动态注册PiP BroadcastReceiver
+        registerPipReceiver()
 
         if (index >= 0 && videos.size > index) {
             startPlay(index, videos[index])
         }
     }
+    
+    private fun registerPipReceiver() {
+        if (!pipReceiverRegistered) {
+            pipReceiver.onAction = { requestCode ->
+                handlePipAction(requestCode)
+            }
+            registerReceiver(pipReceiver, IntentFilter(ACTION_PIP))
+            pipReceiverRegistered = true
+        }
+    }
+    
+    private fun unregisterPipReceiver() {
+        if (pipReceiverRegistered) {
+            try {
+                unregisterReceiver(pipReceiver)
+            } catch (e: Exception) {
+                // ignore
+            }
+            pipReceiverRegistered = false
+        }
+    }
+    
+    private fun handlePipAction(requestCode: Int) {
+        when (requestCode) {
+            PIP_ACTION_PLAY_PAUSE -> {
+                val player = gsyVideoPlayer.currentPlayer
+                if (player.currentState == GSYVideoView.CURRENT_STATE_PLAYING) {
+                    player.onVideoPause()
+                } else {
+                    player.onVideoResume(false)
+                }
+                // 更新PiP按钮图标
+                updatePipActions()
+            }
+        }
+    }
+    
+    private fun updatePipActions() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && isInPictureInPictureMode) {
+            val isPlaying = gsyVideoPlayer.currentPlayer.currentState == GSYVideoView.CURRENT_STATE_PLAYING
+            
+            val intent = Intent(ACTION_PIP).apply {
+                putExtra("request_code", PIP_ACTION_PLAY_PAUSE)
+            }
+            val pendingIntent = PendingIntent.getBroadcast(
+                this,
+                PIP_ACTION_PLAY_PAUSE,
+                intent,
+                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+            )
+            
+            val playPauseIcon = if (isPlaying) {
+                Icon.createWithResource(this, android.R.drawable.ic_media_pause)
+            } else {
+                Icon.createWithResource(this, android.R.drawable.ic_media_play)
+            }
+            
+            val playPauseAction = RemoteAction(
+                playPauseIcon,
+                if (isPlaying) "暂停" else "播放",
+                if (isPlaying) "点击暂停" else "点击播放",
+                pendingIntent
+            )
+            
+            val pipParams = PictureInPictureParams.Builder()
+                .setActions(listOf(playPauseAction))
+                .build()
+            
+            try {
+                setPictureInPictureParams(pipParams)
+            } catch (e: Exception) {
+                // ignore
+            }
+        }
+    }
 
     private fun configureIjkPlayer() {
-        // ijkplayer 硬解参数通过 VideoOptionModel 设置
         val optionModelList = ArrayList<VideoOptionModel>()
-        
-        // 强制使用软解模式 - WMV/ASF 需要软件解码
-        optionModelList.add(VideoOptionModel(IjkMediaPlayer.OPT_CATEGORY_PLAYER, "mediacodec", 0))  // 关闭硬解，软解兼容性更好
+        optionModelList.add(VideoOptionModel(IjkMediaPlayer.OPT_CATEGORY_PLAYER, "mediacodec", 0))
         optionModelList.add(VideoOptionModel(IjkMediaPlayer.OPT_CATEGORY_PLAYER, "mediacodec-auto-rotate", 0))
         optionModelList.add(VideoOptionModel(IjkMediaPlayer.OPT_CATEGORY_PLAYER, "mediacodec-handle-resolution-change", 0))
-        
-        // WMV/ASF 格式需要更长的分析时间
-        optionModelList.add(VideoOptionModel(IjkMediaPlayer.OPT_CATEGORY_FORMAT, "analyzeduration", "500000"))  // 500ms
-        optionModelList.add(VideoOptionModel(IjkMediaPlayer.OPT_CATEGORY_FORMAT, "probesize", "204800"))        // 200KB
-        
-        // 缓冲优化 - 减少前几秒卡顿
-        optionModelList.add(VideoOptionModel(IjkMediaPlayer.OPT_CATEGORY_FORMAT, "max-buffer-size", "4194304"))    // 4MB
-        optionModelList.add(VideoOptionModel(IjkMediaPlayer.OPT_CATEGORY_FORMAT, "min-buffer-duration", "1000")) // 1s
-        optionModelList.add(VideoOptionModel(IjkMediaPlayer.OPT_CATEGORY_FORMAT, "max-buffer-duration", "3000")) // 3s
-        
-        // 丢帧策略
+        optionModelList.add(VideoOptionModel(IjkMediaPlayer.OPT_CATEGORY_FORMAT, "analyzeduration", "500000"))
+        optionModelList.add(VideoOptionModel(IjkMediaPlayer.OPT_CATEGORY_FORMAT, "probesize", "204800"))
+        optionModelList.add(VideoOptionModel(IjkMediaPlayer.OPT_CATEGORY_FORMAT, "max-buffer-size", "4194304"))
+        optionModelList.add(VideoOptionModel(IjkMediaPlayer.OPT_CATEGORY_FORMAT, "min-buffer-duration", "1000"))
+        optionModelList.add(VideoOptionModel(IjkMediaPlayer.OPT_CATEGORY_FORMAT, "max-buffer-duration", "3000"))
         optionModelList.add(VideoOptionModel(IjkMediaPlayer.OPT_CATEGORY_PLAYER, "framedrop", 5))
-        optionModelList.add(VideoOptionModel(IjkMediaPlayer.OPT_CATEGORY_PLAYER, "infbuf", 1))  // 无限缓冲
-        
-        // 音频配置
-        optionModelList.add(VideoOptionModel(IjkMediaPlayer.OPT_CATEGORY_PLAYER, "opensles", 0))  // 关闭 OpenSL，使用 AAudio
-        
-        // ASF/WMV 特定配置
+        optionModelList.add(VideoOptionModel(IjkMediaPlayer.OPT_CATEGORY_PLAYER, "infbuf", 1))
+        optionModelList.add(VideoOptionModel(IjkMediaPlayer.OPT_CATEGORY_PLAYER, "opensles", 0))
         optionModelList.add(VideoOptionModel(IjkMediaPlayer.OPT_CATEGORY_FORMAT, "rtsp_transport", "tcp"))
-        
         GSYVideoManager.instance().optionModelList = optionModelList
     }
 
@@ -168,11 +251,9 @@ class PlayerActivity : AppCompatActivity(), GSYVideoProgressListener {
         orientationUtils = OrientationUtils(this, gsyVideoPlayer)
         orientationUtils.isEnable = false
 
-        // Initialize sorted videos list
         sortedVideos = videos.toMutableList()
         updateVideoIndexMap()
 
-        // playlist drawer
         playlistDrawer = findViewById(R.id.playlist_drawer)
         playlistScrim = findViewById(R.id.playlist_scrim)
         playlistDrawer.visibility = View.GONE
@@ -195,7 +276,6 @@ class PlayerActivity : AppCompatActivity(), GSYVideoProgressListener {
         rvPlaylist.layoutManager = LinearLayoutManager(this)
         rvPlaylist.adapter = playlistAdapter
 
-        // Sort buttons
         findViewById<View>(R.id.btn_sort_by_name).setOnClickListener { sortByName() }
         findViewById<View>(R.id.btn_sort_by_duration).setOnClickListener { sortByDuration() }
         findViewById<View>(R.id.btn_shuffle).setOnClickListener { shufflePlaylist() }
@@ -217,11 +297,9 @@ class PlayerActivity : AppCompatActivity(), GSYVideoProgressListener {
             .setVideoAllCallBack(object : GSYSampleCallBack() {
                 override fun onPrepared(url: String, vararg objects: Any) {
                     super.onPrepared(url, *objects)
-                    //开始播放了才能旋转和全屏
                     orientationUtils.isEnable = true
                     isPlay = true
                     handler.removeMessages(messageRecordWatchTime)
-                    // 延时 30 秒记录一次播放进度
                     handler.sendEmptyMessageDelayed(messageRecordWatchTime, 30 * 1000)
                 }
 
@@ -262,7 +340,6 @@ class PlayerActivity : AppCompatActivity(), GSYVideoProgressListener {
                         gsyVideoPlayer.currentPlayer.seekOnStart = currentTime
                     }
                     Debuger.printfError("***** onPlayError ****")
-                    // 如果当前是 ExoPlayer 且播放失败，自动切换到 ijkplayer 重试
                     if (playerType != "ijkplayer") {
                         Debuger.printfError("ExoPlayer failed, switching to ijkplayer")
                         playerType = "ijkplayer"
@@ -277,7 +354,6 @@ class PlayerActivity : AppCompatActivity(), GSYVideoProgressListener {
             }).setLockClickListener { _, lock ->
                 orientationUtils.isEnable = !lock
             }.apply {
-                // ijkplayer 硬件解码配置（仅在使用 ijkplayer 时生效）
                 if (playerType == "ijkplayer") {
                     configureIjkPlayer()
                 }
@@ -365,17 +441,18 @@ class PlayerActivity : AppCompatActivity(), GSYVideoProgressListener {
             currentPlayer.findViewById<View>(R.id.btn_next).alpha = 1f
         }
         
-        // 检查收藏状态并更新图标
         checkFavoriteStatus()
     }
 
     override fun onPause() {
-        gsyVideoPlayer.currentPlayer.onVideoPause()
+        // 只有在不是进入PiP模式时才暂停视频
+        if (!isEnteringPip) {
+            gsyVideoPlayer.currentPlayer.onVideoPause()
+        }
         super.onPause()
         isPause = true
         handler.removeMessages(messageRecordWatchTime)
         saveCurrentTime()
-        // 保存当前亮度
         val brightness = window.attributes.screenBrightness
         if (brightness >= 0f) {
             getSharedPreferences("player_prefs", MODE_PRIVATE)
@@ -397,10 +474,9 @@ class PlayerActivity : AppCompatActivity(), GSYVideoProgressListener {
     }
 
     override fun onResume() {
-        gsyVideoPlayer.currentPlayer.onVideoResume(false)
         super.onResume()
+        gsyVideoPlayer.currentPlayer.onVideoResume(false)
         isPause = false
-        // 恢复上次保存的亮度
         val savedBrightness = getSharedPreferences("player_prefs", MODE_PRIVATE)
             .getFloat("last_brightness", -1f)
         if (savedBrightness >= 0f) {
@@ -420,6 +496,7 @@ class PlayerActivity : AppCompatActivity(), GSYVideoProgressListener {
 
     override fun onDestroy() {
         super.onDestroy()
+        unregisterPipReceiver()
         if (isPlay) {
             gsyVideoPlayer.currentPlayer.release()
         }
@@ -433,7 +510,6 @@ class PlayerActivity : AppCompatActivity(), GSYVideoProgressListener {
             gsyVideoPlayer.onConfigurationChanged(this, newConfig, orientationUtils, true, true)
         }
     }
-
 
     override fun onBackPressed() {
         if (isPlaylistVisible) {
@@ -456,7 +532,6 @@ class PlayerActivity : AppCompatActivity(), GSYVideoProgressListener {
             .setMessage("确定删除「$name」？此操作不可撤销。")
             .setPositiveButton("删除") { _, _ ->
                 pendingDeletePath = video.remotePath
-                // simulate back button: lets the player disconnect normally before onDestroy fires
                 playerWrapper.btnBack.performClick()
             }
             .setNegativeButton("取消", null)
@@ -467,7 +542,6 @@ class PlayerActivity : AppCompatActivity(), GSYVideoProgressListener {
         if (videos.isEmpty()) return
         val video = videos[index]
         
-        // Format file size
         val sizeStr = try {
             val sizeBytes = video.size?.toLongOrNull() ?: 0L
             when {
@@ -481,7 +555,6 @@ class PlayerActivity : AppCompatActivity(), GSYVideoProgressListener {
             "未知"
         }
         
-        // Get video duration
         val duration = gsyVideoPlayer.duration
         val durationStr = if (duration > 0) {
             val hours = duration / 3600000
@@ -496,7 +569,6 @@ class PlayerActivity : AppCompatActivity(), GSYVideoProgressListener {
             "未知"
         }
         
-        // Get video resolution
         val width = gsyVideoPlayer.currentPlayer.currentVideoWidth
         val height = gsyVideoPlayer.currentPlayer.currentVideoHeight
         val resolutionStr = if (width > 0 && height > 0) {
@@ -505,10 +577,8 @@ class PlayerActivity : AppCompatActivity(), GSYVideoProgressListener {
             "未知"
         }
         
-        // Get directory path
         val dirPath = video.remotePath.substringBeforeLast("/")
         
-        // Build info message
         val infoMessage = StringBuilder()
         infoMessage.append("文件名：${video.name}\n\n")
         infoMessage.append("文件大小：$sizeStr\n\n")
@@ -527,7 +597,6 @@ class PlayerActivity : AppCompatActivity(), GSYVideoProgressListener {
         if (videos.isEmpty()) return
         val video = videos[index]
         
-        // 调用Flutter方法切换收藏状态
         FlutterMethods.toggleFavorite(video, fun(isFavorite: Boolean) {
             runOnUiThread {
                 updateFavoriteIcon(isFavorite)
@@ -559,15 +628,11 @@ class PlayerActivity : AppCompatActivity(), GSYVideoProgressListener {
         private var currentToast: android.widget.Toast? = null
         
         fun show(context: android.content.Context, msg: String) {
-            // Cancel previous toast to avoid queuing
             currentToast?.cancel()
-            
-            // Create and show new toast with shorter duration
             currentToast = android.widget.Toast.makeText(context, msg, android.widget.Toast.LENGTH_SHORT).apply {
-                // Use a handler to dismiss after 1 second instead of default 2 seconds
                 android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
                     cancel()
-                }, 1000) // 1 second
+                }, 1000)
                 show()
             }
         }
@@ -599,7 +664,6 @@ class PlayerActivity : AppCompatActivity(), GSYVideoProgressListener {
     }
 
     private fun getCurrentSortedIndex(): Int {
-        // Find current video in sorted list
         return sortedVideos.indexOfFirst { it.remotePath == videos[index].remotePath }
     }
 
@@ -612,10 +676,7 @@ class PlayerActivity : AppCompatActivity(), GSYVideoProgressListener {
     }
 
     private fun sortByName() {
-        // Toggle sort order
         isNameSortAscending = !isNameSortAscending
-        
-        // Use natural sort to handle numbers correctly (1, 2, 3, ..., 10 instead of 1, 10, 2, 3)
         if (isNameSortAscending) {
             sortedVideos.sortWith(compareBy { naturalSortKey(it.name) })
             SmartToast.show(this, "按文件名升序排序")
@@ -623,24 +684,19 @@ class PlayerActivity : AppCompatActivity(), GSYVideoProgressListener {
             sortedVideos.sortWith(compareByDescending { naturalSortKey(it.name) })
             SmartToast.show(this, "按文件名降序排序")
         }
-        
         updateVideoIndexMap()
         playlistAdapter.updateVideos(sortedVideos)
         playlistAdapter.updateCurrentIndex(getCurrentSortedIndex())
     }
     
     private fun naturalSortKey(name: String): String {
-        // Convert numbers in the string to zero-padded format for natural sorting
         return name.replace(Regex("\\d+")) { matchResult ->
             matchResult.value.padStart(10, '0')
         }
     }
 
     private fun sortByDuration() {
-        // Toggle sort order
         isDurationSortAscending = !isDurationSortAscending
-        
-        // Sort by file size as a proxy for duration
         if (isDurationSortAscending) {
             sortedVideos.sortBy { it.size?.toLongOrNull() ?: 0L }
             SmartToast.show(this, "按文件大小升序排序")
@@ -648,7 +704,6 @@ class PlayerActivity : AppCompatActivity(), GSYVideoProgressListener {
             sortedVideos.sortByDescending { it.size?.toLongOrNull() ?: 0L }
             SmartToast.show(this, "按文件大小降序排序")
         }
-        
         updateVideoIndexMap()
         playlistAdapter.updateVideos(sortedVideos)
         playlistAdapter.updateCurrentIndex(getCurrentSortedIndex())
@@ -665,21 +720,48 @@ class PlayerActivity : AppCompatActivity(), GSYVideoProgressListener {
     // Picture-in-Picture mode support
     fun startPictureInPictureMode() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            // Get video aspect ratio for PiP window
             val width = gsyVideoPlayer.currentPlayer.currentVideoWidth
             val height = gsyVideoPlayer.currentPlayer.currentVideoHeight
             
             val aspectRatio = if (width > 0 && height > 0) {
                 Rational(width, height)
             } else {
-                Rational(16, 9) // Default fallback
+                Rational(16, 9)
             }
             
-            val pipParams = PictureInPictureParams.Builder()
-                .setAspectRatio(aspectRatio)
-                .build()
+            wasPlayingBeforePip = gsyVideoPlayer.currentPlayer.currentState == GSYVideoView.CURRENT_STATE_PLAYING
             
-            enterPictureInPictureMode(pipParams)
+            // 创建PiP Intent
+            val intent = Intent(ACTION_PIP).apply {
+                putExtra("request_code", PIP_ACTION_PLAY_PAUSE)
+            }
+            val pendingIntent = PendingIntent.getBroadcast(
+                this,
+                PIP_ACTION_PLAY_PAUSE,
+                intent,
+                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+            )
+            
+            val pipParamsBuilder = PictureInPictureParams.Builder()
+                .setAspectRatio(aspectRatio)
+            
+            // 使用Android系统内置图标
+            val isPlaying = gsyVideoPlayer.currentPlayer.currentState == GSYVideoView.CURRENT_STATE_PLAYING
+            val playPauseIcon = if (isPlaying) {
+                Icon.createWithResource(this, android.R.drawable.ic_media_pause)
+            } else {
+                Icon.createWithResource(this, android.R.drawable.ic_media_play)
+            }
+            
+            val playPauseAction = RemoteAction(
+                playPauseIcon,
+                if (isPlaying) "暂停" else "播放",
+                if (isPlaying) "点击暂停" else "点击播放",
+                pendingIntent
+            )
+            pipParamsBuilder.setActions(listOf(playPauseAction))
+            
+            enterPictureInPictureMode(pipParamsBuilder.build())
         }
     }
 
@@ -687,31 +769,43 @@ class PlayerActivity : AppCompatActivity(), GSYVideoProgressListener {
         super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig)
         
         if (isInPictureInPictureMode) {
-            // Hide controls when in PiP mode
-            playerWrapper.layoutTop.visibility = View.GONE
-            playerWrapper.layoutBottom.visibility = View.GONE
-            playerWrapper.bottomProgressbar.visibility = View.GONE
+            // 进入画中画模式：彻底隐藏所有自定义UI、禁用手势、清除背景
+            gsyVideoPlayer.enterPipMode()
+            // 隐藏播放列表相关控件
             playlistDrawer.visibility = View.GONE
             playlistScrim.visibility = View.GONE
             isPlaylistVisible = false
         } else {
-            // Show controls when exiting PiP mode
-            playerWrapper.layoutTop.visibility = View.VISIBLE
-            playerWrapper.layoutBottom.visibility = View.VISIBLE
-            playerWrapper.bottomProgressbar.visibility = View.VISIBLE
+            // 退出画中画模式：恢复所有自定义UI和手势
+            gsyVideoPlayer.exitPipMode()
+            
+            if (wasPlayingBeforePip) {
+                Handler(Looper.getMainLooper()).postDelayed({
+                    if (gsyVideoPlayer.currentPlayer.currentState != GSYVideoView.CURRENT_STATE_PLAYING) {
+                        gsyVideoPlayer.currentPlayer.onVideoResume(false)
+                    }
+                }, 500)
+            }
         }
     }
 
     override fun onUserLeaveHint() {
         super.onUserLeaveHint()
-        // Auto-enter PiP when user presses home button during playback
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            // 检查"自动小窗"开关（从Intent传入，默认开启）
+            val autoPipEnabled = intent?.getBooleanExtra("autoPipEnabled", true) ?: true
+            if (!autoPipEnabled) return
+            
             if (gsyVideoPlayer.currentPlayer.currentState == GSYVideoView.CURRENT_STATE_PLAYING) {
+                isEnteringPip = true
                 startPictureInPictureMode()
+                // 进入PiP后重置标记
+                Handler(Looper.getMainLooper()).postDelayed({
+                    isEnteringPip = false
+                }, 100)
             }
         }
     }
-
 
     override fun onProgress(p0: Long, p1: Long, currentTime: Long, totalTime: Long) {
         if (totalTime <= 0) {
@@ -794,20 +888,17 @@ class PlaylistAdapter(
         val video = videos[position]
         val isPlaying = position == currentIndex
         
-        // 序号样式
         holder.tvIndex.text = "${position + 1}"
         holder.tvIndex.alpha = if (isPlaying) 1f else 0.6f
         
-        // 文件名样式
         holder.tvName.text = video.name
         holder.tvName.alpha = if (isPlaying) 1f else 0.75f
         holder.tvName.setTypeface(null, if (isPlaying) android.graphics.Typeface.BOLD else android.graphics.Typeface.NORMAL)
         
-        // 当前播放项添加微妙的背景色
         if (isPlaying) {
-            holder.itemView.setBackgroundColor(0x1AFFFFFF) // 10% 白色
+            holder.itemView.setBackgroundColor(0x1AFFFFFF)
         } else {
-            holder.itemView.setBackgroundColor(0x00000000) // 透明
+            holder.itemView.setBackgroundColor(0x00000000)
         }
         
         holder.itemView.setOnClickListener { onItemClick(position) }

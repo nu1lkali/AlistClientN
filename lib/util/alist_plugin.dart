@@ -80,7 +80,8 @@ class AlistPlugin {
       List<Map<String, String?>> videos,
       int index,
       Map<String, String>? headers,
-      String? playerType) async {
+      String? playerType,
+      {bool autoPipEnabled = true}) async {
     String? headersStr = headers != null ? jsonEncode(headers) : null;
 
     var result =
@@ -88,7 +89,8 @@ class AlistPlugin {
       "videos": jsonEncode(videos),
       "index": index,
       "headers": headersStr,
-      "playerType": playerType
+      "playerType": playerType,
+      "autoPipEnabled": autoPipEnabled,
     });
     return result == true;
   }

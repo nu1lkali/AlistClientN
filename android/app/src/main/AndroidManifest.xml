@@ -57,11 +57,11 @@
         <activity
             android:name="com.github.alist.activity.PlayerActivity"
             android:theme="@style/PlayerTheme"
-            android:configChanges="keyboard|keyboardHidden|orientation|screenSize|screenLayout|smallestScreenSize|uiMode"
+            android:configChanges="keyboard|keyboardHidden|orientation|screenSize|screenLayout|smallestScreenSize|uiMode|density|locale|layoutDirection|fontScale"
             android:supportsPictureInPicture="true"
             android:launchMode="singleTask"
             android:screenOrientation="portrait" />
-
+        
         <activity
             android:name="com.github.alist.activity.HeicViewerActivity"
             android:theme="@style/PlayerTheme"

@@ -47,6 +47,7 @@ class _SettingsContainerState extends State<_SettingsContainer>
   late final RxInt _audioPlayerUiStyle;
   late final RxBool _groupedRandomSort;
   late final RxBool _enableMediaKitPlayer;
+  late final RxBool _autoPipEnabled;
 
   @override
   void initState() {
@@ -61,6 +62,8 @@ class _SettingsContainerState extends State<_SettingsContainer>
     _groupedRandomSort = (SpUtil.getBool(AlistConstant.groupedRandomSort, defValue: false) ?? false).obs;
     // Initialize media kit player
     _enableMediaKitPlayer = (SpUtil.getBool(AlistConstant.enableMediaKitPlayer, defValue: false) ?? false).obs;
+    // Initialize auto PiP setting
+    _autoPipEnabled = (SpUtil.getBool(AlistConstant.autoPipEnabled, defValue: true) ?? true).obs;
 
     _serverStreamSubscription =
         _databaseController.serverDao.serverList().listen((event) {
@@ -93,7 +96,8 @@ class _SettingsContainerState extends State<_SettingsContainer>
         m.menuId == MenuId.playerSettings ||
         m.menuId == MenuId.iptvUrl ||
         m.menuId == MenuId.slideshowInterval ||
-        m.menuId == MenuId.themeColor).toList();
+        m.menuId == MenuId.themeColor ||
+        m.menuId == MenuId.autoPip).toList();
     final aboutMenus = menus.where((m) =>
         m.menuId == MenuId.donate ||
         m.menuId == MenuId.privacyPolicy ||
@@ -315,6 +319,45 @@ class _SettingsContainerState extends State<_SettingsContainer>
         )),
       );
     }
+
+    // 自动画中画开关
+    if (settingsMenu.menuId == MenuId.autoPip) {
+      return ListTile(
+        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+        leading: Container(
+          width: 44,
+          height: 44,
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              colors: [
+                scheme.primaryContainer.withOpacity(0.8),
+                scheme.primaryContainer.withOpacity(0.5),
+              ],
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+            ),
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Icon(Icons.picture_in_picture_alt_rounded, size: 22,
+              color: isDark ? Colors.white.withOpacity(0.9) : scheme.primary),
+        ),
+        title: const Text(
+          '自动画中画',
+          style: TextStyle(fontSize: 15, fontWeight: FontWeight.w500, letterSpacing: -0.2),
+        ),
+        subtitle: Text(
+          '按 Home 键时自动进入画中画模式',
+          style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
+        ),
+        trailing: Obx(() => Switch(
+          value: _autoPipEnabled.value,
+          onChanged: (value) {
+            SpUtil.putBool(AlistConstant.autoPipEnabled, value);
+            _autoPipEnabled.value = value;
+          },
+        )),
+      );
+    }
     
     return ListTile(
       onTap: () => _handleMenuTap(settingsMenu, context),
@@ -379,6 +422,7 @@ class _SettingsContainerState extends State<_SettingsContainer>
       case MenuId.audioPlayerUi:
       case MenuId.groupedRandomSort:
       case MenuId.enableMediaKitPlayer:
+      case MenuId.autoPip:
         // toggle 类型，由 ListTile trailing Switch 处理，无需跳转
         break;
       case MenuId.themeColor:
@@ -660,6 +704,11 @@ class _SettingsContainerState extends State<_SettingsContainer>
           icon: Images.settingsScreenPlayer,
           iconData: Icons.slideshow_rounded),
       SettingsMenu(
+          menuId: MenuId.autoPip,
+          name: '自动画中画',
+          icon: Images.settingsScreenPlayer,
+          iconData: Icons.picture_in_picture_alt_rounded),
+      SettingsMenu(
           menuId: MenuId.privacyPolicy,
           name: Intl.settingsScreen_item_privacyPolicy.tr,
           icon: Images.settingsScreenPrivacyPolicy,
@@ -740,4 +789,5 @@ enum MenuId {
   themeColor,
   iptvUrl,
   slideshowInterval,
+  autoPip,
 }

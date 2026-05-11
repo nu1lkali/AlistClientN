@@ -28,6 +28,7 @@ import androidx.core.view.GestureDetectorCompat;
 import com.github.alist.client.R;
 import com.shuyu.gsyvideoplayer.video.NormalGSYVideoPlayer;
 import com.shuyu.gsyvideoplayer.video.base.GSYBaseVideoPlayer;
+import com.shuyu.gsyvideoplayer.video.base.GSYVideoView;
 
 import java.io.File;
 import java.io.FileOutputStream;
@@ -54,6 +55,8 @@ public class AlistClientVideoPlayer extends NormalGSYVideoPlayer {
     protected boolean isEnableSeek;
     private boolean isLongPressing;
     private ValueAnimator ffwdIconAnimator;
+    // 画中画模式标记，为true时阻止自定义UI显示
+    private boolean isInPipMode = false;
 
     public interface OnDeleteClickListener {
         void onDeleteClick();
@@ -216,6 +219,10 @@ public class AlistClientVideoPlayer extends NormalGSYVideoPlayer {
 
     @Override
     public boolean onTouch(View v, MotionEvent event) {
+        // 画中画模式下，拦截所有触摸事件，防止点击触发UI显示
+        if (isInPipMode) {
+            return true;
+        }
         if (v.getId() == R.id.surface_container && this.mIfCurrentIsFullscreen && !this.mLockCurScreen) {
             if ((event.getActionMasked() == MotionEvent.ACTION_UP || event.getActionMasked() == MotionEvent.ACTION_CANCEL) && isLongPressing) {
                 isLongPressing = false;
@@ -242,6 +249,10 @@ public class AlistClientVideoPlayer extends NormalGSYVideoPlayer {
     }
 
     protected void setCenterButtonsVisibility(int visibility) {
+        // 画中画模式下，始终隐藏自定义UI控件
+        if (isInPipMode) {
+            visibility = View.GONE;
+        }
         btnPrevious.setVisibility(visibility);
         btnNext.setVisibility(visibility);
         if (isEnableSeek) {
@@ -254,24 +265,31 @@ public class AlistClientVideoPlayer extends NormalGSYVideoPlayer {
 
     @Override
     protected void hideAllWidget() {
-        super.hideAllWidget();
+        // 画中画模式下，跳过父类hideAllWidget，避免触发父类UI逻辑
+        if (!isInPipMode) {
+            super.hideAllWidget();
+        }
         setCenterButtonsVisibility(View.INVISIBLE);
     }
 
     @Override
     protected void changeUiToNormal() {
+        // 画中画模式下，跳过所有父类UI变更逻辑
+        if (isInPipMode) return;
         super.changeUiToNormal();
         setCenterButtonsVisibility(View.VISIBLE);
     }
 
     @Override
     protected void changeUiToPreparingShow() {
+        if (isInPipMode) return;
         super.changeUiToPreparingShow();
         setCenterButtonsVisibility(View.INVISIBLE);
     }
 
     @Override
     protected void changeUiToPlayingShow() {
+        if (isInPipMode) return;
         super.changeUiToPlayingShow();
         if (!this.mLockCurScreen || !this.mNeedLockFull) {
             setCenterButtonsVisibility(View.VISIBLE);
@@ -280,6 +298,8 @@ public class AlistClientVideoPlayer extends NormalGSYVideoPlayer {
 
     @Override
     protected void changeUiToPauseShow() {
+        // 画中画模式下，跳过所有父类UI变更逻辑
+        if (isInPipMode) return;
         super.changeUiToPauseShow();
         if (!this.mLockCurScreen || !this.mNeedLockFull) {
             setCenterButtonsVisibility(View.VISIBLE);
@@ -288,42 +308,49 @@ public class AlistClientVideoPlayer extends NormalGSYVideoPlayer {
 
     @Override
     protected void changeUiToPlayingBufferingShow() {
+        if (isInPipMode) return;
         super.changeUiToPlayingBufferingShow();
         setCenterButtonsVisibility(View.INVISIBLE);
     }
 
     @Override
     protected void changeUiToCompleteShow() {
+        if (isInPipMode) return;
         super.changeUiToCompleteShow();
         setCenterButtonsVisibility(View.VISIBLE);
     }
 
     @Override
     protected void changeUiToError() {
+        if (isInPipMode) return;
         super.changeUiToError();
         setCenterButtonsVisibility(View.VISIBLE);
     }
 
     @Override
     protected void changeUiToPrepareingClear() {
+        if (isInPipMode) return;
         super.changeUiToPrepareingClear();
         setCenterButtonsVisibility(View.INVISIBLE);
     }
 
     @Override
     protected void changeUiToPlayingBufferingClear() {
+        if (isInPipMode) return;
         super.changeUiToPlayingBufferingClear();
         setCenterButtonsVisibility(View.INVISIBLE);
     }
 
     @Override
     protected void changeUiToClear() {
+        if (isInPipMode) return;
         super.changeUiToClear();
         setCenterButtonsVisibility(View.INVISIBLE);
     }
 
     @Override
     protected void changeUiToCompleteClear() {
+        if (isInPipMode) return;
         super.changeUiToCompleteClear();
         setCenterButtonsVisibility(View.VISIBLE);
     }
@@ -370,6 +397,101 @@ public class AlistClientVideoPlayer extends NormalGSYVideoPlayer {
 
     public View getBtnScreenshot() {
         return btnScreenshot;
+    }
+
+    /**
+     * 进入画中画模式 - 彻底隐藏所有自定义UI并禁用手势
+     */
+    public void enterPipMode() {
+        this.isInPipMode = true;
+        
+        // 1. 调用GSY内置方法隐藏所有标准控件
+        hideAllWidget();
+        
+        // 2. 强制隐藏所有自定义UI控件（使用GONE彻底移除占位）
+        View layoutTop = findViewById(R.id.layout_top);
+        if (layoutTop != null) layoutTop.setVisibility(View.GONE);
+        
+        View layoutBottom = findViewById(R.id.layout_bottom);
+        if (layoutBottom != null) layoutBottom.setVisibility(View.GONE);
+        
+        View bottomProgressbar = findViewById(R.id.bottom_progressbar);
+        if (bottomProgressbar != null) bottomProgressbar.setVisibility(View.GONE);
+        
+        // 中间控制按钮组
+        setCenterButtonsVisibility(View.GONE);
+        
+        // 悬浮快捷导航
+        if (llQuickNav != null) llQuickNav.setVisibility(View.GONE);
+        
+        // 倍速播放提示
+        if (llPlayingAtDoubleSpeed != null) llPlayingAtDoubleSpeed.setVisibility(View.GONE);
+        
+        // 加载进度条
+        View loading = findViewById(R.id.loading);
+        if (loading != null) loading.setVisibility(View.GONE);
+        
+        // 锁屏按钮
+        View lockScreen = findViewById(R.id.lock_screen);
+        if (lockScreen != null) lockScreen.setVisibility(View.GONE);
+        
+        // 小关闭按钮
+        View smallClose = findViewById(R.id.small_close);
+        if (smallClose != null) smallClose.setVisibility(View.GONE);
+        
+        // 缩略图
+        View thumb = findViewById(R.id.thumb);
+        if (thumb != null) thumb.setVisibility(View.GONE);
+        
+        // 中间的大播放/暂停按钮
+        View startButton = findViewById(R.id.start);
+        if (startButton != null) startButton.setVisibility(View.GONE);
+        
+        // 3. 禁用手势操作，防止点击触发UI显示
+        setIsTouchWiget(false);
+        
+        // 4. 确保surface_container没有额外背景/内边距导致黑边
+        View surfaceContainer = findViewById(R.id.surface_container);
+        if (surfaceContainer != null) {
+            surfaceContainer.setBackgroundColor(android.graphics.Color.TRANSPARENT);
+        }
+    }
+
+    /**
+     * 退出画中画模式 - 恢复所有自定义UI和手势
+     */
+    public void exitPipMode() {
+        this.isInPipMode = false;
+        
+        // 1. 恢复surface_container背景色
+        View surfaceContainer = findViewById(R.id.surface_container);
+        if (surfaceContainer != null) {
+            surfaceContainer.setBackgroundColor(android.graphics.Color.BLACK);
+        }
+        
+        // 2. 恢复手势操作
+        setIsTouchWiget(true);
+        
+        // 3. 恢复所有自定义UI控件
+        View layoutTop = findViewById(R.id.layout_top);
+        if (layoutTop != null) layoutTop.setVisibility(View.VISIBLE);
+        
+        View layoutBottom = findViewById(R.id.layout_bottom);
+        if (layoutBottom != null) layoutBottom.setVisibility(View.VISIBLE);
+        
+        View bottomProgressbar = findViewById(R.id.bottom_progressbar);
+        if (bottomProgressbar != null) bottomProgressbar.setVisibility(View.VISIBLE);
+        
+        // 4. 根据当前播放状态恢复对应的UI
+        int state = getCurrentPlayer().getCurrentState();
+        if (state == GSYVideoView.CURRENT_STATE_PLAYING
+            || state == GSYVideoView.CURRENT_STATE_PLAYING_BUFFERING_START) {
+            changeUiToPlayingShow();
+        } else if (state == GSYVideoView.CURRENT_STATE_PAUSE) {
+            changeUiToPauseShow();
+        } else {
+            changeUiToNormal();
+        }
     }
 
     private void takeScreenshot() {
