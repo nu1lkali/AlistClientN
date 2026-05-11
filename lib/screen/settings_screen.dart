@@ -346,7 +346,7 @@ class _SettingsContainerState extends State<_SettingsContainer>
           style: TextStyle(fontSize: 15, fontWeight: FontWeight.w500, letterSpacing: -0.2),
         ),
         subtitle: Text(
-          '按 Home 键时自动进入画中画模式',
+          '按 Home 键时自动进入画中画',
           style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
         ),
         trailing: Obx(() => Switch(

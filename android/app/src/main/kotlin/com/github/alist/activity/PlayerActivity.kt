@@ -98,6 +98,9 @@ class PlayerActivity : AppCompatActivity(), GSYVideoProgressListener {
     // 标记是否正在进入PiP模式（避免在onPause中暂停视频）
     private var isEnteringPip = false
     
+    // 标记退出PiP后是否应该finish（点击叉叉关闭时=true，点击PiP窗口恢复时=false）
+    private var shouldFinishAfterPipExit = false
+    
     // 动态注册的PiP BroadcastReceiver
     private val pipReceiver = PipActionReceiver()
     private var pipReceiverRegistered = false
@@ -767,7 +770,7 @@ class PlayerActivity : AppCompatActivity(), GSYVideoProgressListener {
             enterPictureInPictureMode(pipParamsBuilder.build())
         }
     }
-
+ 
     override fun onPictureInPictureModeChanged(isInPictureInPictureMode: Boolean, newConfig: Configuration) {
         super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig)
         
@@ -779,16 +782,32 @@ class PlayerActivity : AppCompatActivity(), GSYVideoProgressListener {
             playlistScrim.visibility = View.GONE
             isPlaylistVisible = false
         } else {
-            // 退出画中画模式：恢复所有自定义UI和手势
+            // 退出PiP模式：恢复UI
             gsyVideoPlayer.exitPipMode()
             
-            if (wasPlayingBeforePip) {
-                Handler(Looper.getMainLooper()).postDelayed({
-                    if (gsyVideoPlayer.currentPlayer.currentState != GSYVideoView.CURRENT_STATE_PLAYING) {
-                        gsyVideoPlayer.currentPlayer.onVideoResume(false)
-                    }
-                }, 500)
-            }
+            // 立即暂停视频，避免点击叉叉关闭后仍有声音
+            gsyVideoPlayer.currentPlayer.onVideoPause()
+            
+            // 标记需要finish，但如果Activity重新获得焦点（用户点击PiP窗口恢复），则取消
+            shouldFinishAfterPipExit = true
+            
+            // 延迟500ms后检查：如果Activity没有重新获得焦点，则finish
+            Handler(Looper.getMainLooper()).postDelayed({
+                if (shouldFinishAfterPipExit && !isFinishing) {
+                    finish()
+                }
+            }, 500)
+        }
+    }
+    
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        // 如果退出PiP后Activity重新获得焦点，说明用户点击了PiP窗口恢复播放器
+        // 此时取消finish标记，并恢复播放
+        if (hasFocus && shouldFinishAfterPipExit) {
+            shouldFinishAfterPipExit = false
+            // 恢复视频播放
+            gsyVideoPlayer.currentPlayer.onVideoResume(false)
         }
     }
 
