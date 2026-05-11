@@ -48,6 +48,7 @@ public class AlistClientVideoPlayer extends NormalGSYVideoPlayer {
     protected View btnPlaylist;
     protected View btnInfo;
     protected View btnFavorite;
+    protected View btnPip;
     private View llPlayingAtDoubleSpeed;
     private View llQuickNav;
     private View btnQuickPrevious;
@@ -74,10 +75,15 @@ public class AlistClientVideoPlayer extends NormalGSYVideoPlayer {
         void onFavoriteClick();
     }
 
+    public interface OnPipClickListener {
+        void onPipClick();
+    }
+
     private OnDeleteClickListener deleteClickListener;
     private OnPlaylistClickListener playlistClickListener;
     private OnInfoClickListener infoClickListener;
     private OnFavoriteClickListener favoriteClickListener;
+    private OnPipClickListener pipClickListener;
 
     public void setOnDeleteClickListener(OnDeleteClickListener listener) {
         this.deleteClickListener = listener;
@@ -115,6 +121,15 @@ public class AlistClientVideoPlayer extends NormalGSYVideoPlayer {
         }
     }
 
+    public void setOnPipClickListener(OnPipClickListener listener) {
+        this.pipClickListener = listener;
+        if (btnPip != null) {
+            btnPip.setOnClickListener(v -> {
+                if (pipClickListener != null) pipClickListener.onPipClick();
+            });
+        }
+    }
+
     public AlistClientVideoPlayer(Context context, Boolean fullFlag) {
         super(context, fullFlag);
     }
@@ -146,6 +161,7 @@ public class AlistClientVideoPlayer extends NormalGSYVideoPlayer {
         btnPlaylist = findViewById(R.id.btn_playlist);
         btnInfo = findViewById(R.id.btn_info);
         btnFavorite = findViewById(R.id.btn_favorite);
+        btnPip = findViewById(R.id.btn_pip);
         btnRewind.setVisibility(View.INVISIBLE);
         btnFfwd.setVisibility(View.INVISIBLE);
         btnScreenshot.setOnClickListener(v -> takeScreenshot());
@@ -370,6 +386,7 @@ public class AlistClientVideoPlayer extends NormalGSYVideoPlayer {
             fullPlayer.playlistClickListener = this.playlistClickListener;
             fullPlayer.infoClickListener = this.infoClickListener;
             fullPlayer.favoriteClickListener = this.favoriteClickListener;
+            fullPlayer.pipClickListener = this.pipClickListener;
             fullPlayer.btnScreenshot.setOnClickListener(v -> fullPlayer.takeScreenshot());
             if (fullPlayer.btnDelete != null && fullPlayer.deleteClickListener != null) {
                 fullPlayer.btnDelete.setOnClickListener(v -> {

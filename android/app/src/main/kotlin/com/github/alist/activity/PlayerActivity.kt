@@ -284,6 +284,7 @@ class PlayerActivity : AppCompatActivity(), GSYVideoProgressListener {
         gsyVideoPlayer.setOnDeleteClickListener { confirmDelete() }
         gsyVideoPlayer.setOnInfoClickListener { showVideoInfo() }
         gsyVideoPlayer.setOnFavoriteClickListener { toggleFavorite() }
+        gsyVideoPlayer.setOnPipClickListener { startPictureInPictureMode() }
 
         val gsyVideoOption = GSYVideoOptionBuilder()
         gsyVideoOption
@@ -730,6 +731,8 @@ class PlayerActivity : AppCompatActivity(), GSYVideoProgressListener {
             }
             
             wasPlayingBeforePip = gsyVideoPlayer.currentPlayer.currentState == GSYVideoView.CURRENT_STATE_PLAYING
+            // 标记正在进入PiP，防止onPause中暂停视频
+            isEnteringPip = true
             
             // 创建PiP Intent
             val intent = Intent(ACTION_PIP).apply {
