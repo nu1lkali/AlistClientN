@@ -787,21 +787,28 @@ class PlayerActivity : AppCompatActivity(), GSYVideoProgressListener {
     // Picture-in-Picture mode support
     fun startPictureInPictureMode() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val width = gsyVideoPlayer.currentPlayer.currentVideoWidth
-            val height = gsyVideoPlayer.currentPlayer.currentVideoHeight
+            // 使用GSYVideoManager获取渲染后的实际视频宽高（已考虑旋转）
+            val videoManager = gsyVideoPlayer.gsyVideoManager
+            var width = videoManager.videoWidth
+            var height = videoManager.videoHeight
             
-            val aspectRatio = if (width > 0 && height > 0) {
-                Rational(width, height)
-            } else {
-                Rational(16, 9)
+            // 如果GSYVideoManager返回的宽高无效，回退到currentPlayer
+            if (width <= 0 || height <= 0) {
+                width = gsyVideoPlayer.currentPlayer.currentVideoWidth
+                height = gsyVideoPlayer.currentPlayer.currentVideoHeight
             }
+            
+            // 如果还是拿不到宽高，给一个默认竖屏比例9:16
+            if (width <= 0 || height <= 0) {
+                width = 9
+                height = 16
+            }
+            
+            val aspectRatio = Rational(width, height)
             
             wasPlayingBeforePip = gsyVideoPlayer.currentPlayer.currentState == GSYVideoView.CURRENT_STATE_PLAYING
             // 标记正在进入PiP，防止onPause中暂停视频
             isEnteringPip = true
-            
-            val pipParamsBuilder = PictureInPictureParams.Builder()
-                .setAspectRatio(aspectRatio)
             
             val isPlaying = gsyVideoPlayer.currentPlayer.currentState == GSYVideoView.CURRENT_STATE_PLAYING
             val currentSortedIndex = getCurrentSortedIndex()
@@ -862,9 +869,17 @@ class PlayerActivity : AppCompatActivity(), GSYVideoProgressListener {
                 nextPendingIntent
             )
             
-            pipParamsBuilder.setActions(listOf(prevAction, playPauseAction, nextAction))
+            // 关键点：使用Java辅助类创建PiP参数（含aspectRatio、actions和禁用缩放）
+            val pipParams = com.github.alist.utils.PipHelper.createPipParams(
+                aspectRatio,
+                listOf(prevAction, playPauseAction, nextAction)
+            )
             
-            enterPictureInPictureMode(pipParamsBuilder.build())
+            // 先设置参数，再进入PiP模式
+            setPictureInPictureParams(pipParams)
+            
+            // 使用同一个参数进入PiP模式（PipHelper已经包含了aspectRatio、actions和禁用缩放设置）
+            enterPictureInPictureMode(pipParams)
         }
     }
  

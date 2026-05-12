@@ -58,6 +58,8 @@ public class AlistClientVideoPlayer extends NormalGSYVideoPlayer {
     private ValueAnimator ffwdIconAnimator;
     // 画中画模式标记，为true时阻止自定义UI显示
     private boolean isInPipMode = false;
+    // PiP模式下用于拦截触摸事件的透明覆盖层
+    private View pipTouchBlocker = null;
 
     public interface OnDeleteClickListener {
         void onDeleteClick();
@@ -426,10 +428,13 @@ public class AlistClientVideoPlayer extends NormalGSYVideoPlayer {
     public void enterPipMode() {
         this.isInPipMode = true;
         
-        // 1. 调用GSY内置方法隐藏所有标准控件
+        // 1. 锁定屏幕，阻止GSY内部所有手势和点击响应
+        this.mLockCurScreen = true;
+        
+        // 2. 调用GSY内置方法隐藏所有标准控件
         hideAllWidget();
         
-        // 2. 强制隐藏所有自定义UI控件（使用GONE彻底移除占位）
+        // 3. 强制隐藏所有自定义UI控件（使用GONE彻底移除占位）
         View layoutTop = findViewById(R.id.layout_top);
         if (layoutTop != null) layoutTop.setVisibility(View.GONE);
         
@@ -468,14 +473,36 @@ public class AlistClientVideoPlayer extends NormalGSYVideoPlayer {
         View startButton = findViewById(R.id.start);
         if (startButton != null) startButton.setVisibility(View.GONE);
         
-        // 3. 禁用手势操作，防止点击触发UI显示
+        // 4. 禁用手势操作，防止点击触发UI显示
         setIsTouchWiget(false);
         
-        // 4. 确保surface_container没有额外背景/内边距导致黑边
+        // 5. 确保surface_container没有额外背景/内边距导致黑边
         View surfaceContainer = findViewById(R.id.surface_container);
         if (surfaceContainer != null) {
             surfaceContainer.setBackgroundColor(android.graphics.Color.TRANSPARENT);
         }
+        
+        // 6. 添加透明覆盖层拦截所有触摸事件，阻止系统PiP缩放动画
+        if (pipTouchBlocker == null) {
+            pipTouchBlocker = new View(getContext());
+            pipTouchBlocker.setLayoutParams(new ViewGroup.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT
+            ));
+            pipTouchBlocker.setBackgroundColor(android.graphics.Color.TRANSPARENT);
+            pipTouchBlocker.setClickable(true);
+            pipTouchBlocker.setFocusable(true);
+            pipTouchBlocker.setOnTouchListener((v, event) -> {
+                // 消耗所有触摸事件，不执行任何操作
+                return true;
+            });
+            // 将覆盖层添加到根布局的最上层
+            if (getRootView() instanceof ViewGroup) {
+                ((ViewGroup) getRootView()).addView(pipTouchBlocker);
+            }
+        }
+        pipTouchBlocker.setVisibility(View.VISIBLE);
+        pipTouchBlocker.bringToFront();
     }
 
     /**
@@ -484,16 +511,32 @@ public class AlistClientVideoPlayer extends NormalGSYVideoPlayer {
     public void exitPipMode() {
         this.isInPipMode = false;
         
-        // 1. 恢复surface_container背景色
+        // 1. 移除透明触摸拦截层
+        if (pipTouchBlocker != null) {
+            pipTouchBlocker.setVisibility(View.GONE);
+            if (getRootView() instanceof ViewGroup) {
+                try {
+                    ((ViewGroup) getRootView()).removeView(pipTouchBlocker);
+                } catch (Exception e) {
+                    // ignore
+                }
+            }
+            pipTouchBlocker = null;
+        }
+        
+        // 2. 解锁屏幕，恢复GSY内部手势和点击响应
+        this.mLockCurScreen = false;
+        
+        // 3. 恢复surface_container背景色
         View surfaceContainer = findViewById(R.id.surface_container);
         if (surfaceContainer != null) {
             surfaceContainer.setBackgroundColor(android.graphics.Color.BLACK);
         }
         
-        // 2. 恢复手势操作
+        // 4. 恢复手势操作
         setIsTouchWiget(true);
         
-        // 3. 恢复所有自定义UI控件
+        // 5. 恢复所有自定义UI控件
         View layoutTop = findViewById(R.id.layout_top);
         if (layoutTop != null) layoutTop.setVisibility(View.VISIBLE);
         
@@ -503,7 +546,7 @@ public class AlistClientVideoPlayer extends NormalGSYVideoPlayer {
         View bottomProgressbar = findViewById(R.id.bottom_progressbar);
         if (bottomProgressbar != null) bottomProgressbar.setVisibility(View.VISIBLE);
         
-        // 4. 根据当前播放状态恢复对应的UI
+        // 6. 根据当前播放状态恢复对应的UI
         int state = getCurrentPlayer().getCurrentState();
         if (state == GSYVideoView.CURRENT_STATE_PLAYING
             || state == GSYVideoView.CURRENT_STATE_PLAYING_BUFFERING_START) {

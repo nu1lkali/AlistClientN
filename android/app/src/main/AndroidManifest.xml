@@ -59,8 +59,7 @@
             android:theme="@style/PlayerTheme"
             android:configChanges="keyboard|keyboardHidden|orientation|screenSize|screenLayout|smallestScreenSize|uiMode|density|locale|layoutDirection|fontScale"
             android:supportsPictureInPicture="true"
-            android:launchMode="singleTask"
-            android:screenOrientation="portrait" />
+            android:launchMode="singleTask" />
         
         <activity
             android:name="com.github.alist.activity.HeicViewerActivity"
