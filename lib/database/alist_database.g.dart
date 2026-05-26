@@ -81,7 +81,7 @@ class _$AlistDatabase extends AlistDatabase {
     Callback? callback,
   ]) async {
     final databaseOptions = sqflite.OpenDatabaseOptions(
-      version: 6,
+      version: 7,
       onConfigure: (database) async {
         await database.execute('PRAGMA foreign_keys = ON');
         await callback?.onConfigure?.call(database);
@@ -103,7 +103,7 @@ class _$AlistDatabase extends AlistDatabase {
         await database.execute(
             'CREATE TABLE IF NOT EXISTS `file_password` (`id` INTEGER PRIMARY KEY AUTOINCREMENT, `server_url` TEXT NOT NULL, `user_id` TEXT NOT NULL, `remote_path` TEXT NOT NULL, `password` TEXT NOT NULL, `create_time` INTEGER NOT NULL)');
         await database.execute(
-            'CREATE TABLE IF NOT EXISTS `server` (`id` INTEGER PRIMARY KEY AUTOINCREMENT, `name` TEXT NOT NULL, `server_url` TEXT NOT NULL, `user_id` TEXT NOT NULL, `password` TEXT NOT NULL, `token` TEXT NOT NULL, `guest` INTEGER NOT NULL, `ignore_ssl_error` INTEGER NOT NULL, `create_time` INTEGER NOT NULL, `update_time` INTEGER NOT NULL)');
+            'CREATE TABLE IF NOT EXISTS `server` (`id` INTEGER PRIMARY KEY AUTOINCREMENT, `name` TEXT NOT NULL, `server_url` TEXT NOT NULL, `user_id` TEXT NOT NULL, `password` TEXT NOT NULL, `token` TEXT NOT NULL, `guest` INTEGER NOT NULL, `ignore_ssl_error` INTEGER NOT NULL, `create_time` INTEGER NOT NULL, `update_time` INTEGER NOT NULL, `remark` TEXT)');
         await database.execute(
             'CREATE TABLE IF NOT EXISTS `file_viewing_record` (`id` INTEGER PRIMARY KEY AUTOINCREMENT, `server_url` TEXT NOT NULL, `user_id` TEXT NOT NULL, `remote_path` TEXT NOT NULL, `name` TEXT NOT NULL, `size` INTEGER NOT NULL, `sign` TEXT, `thumb` TEXT, `modified` INTEGER NOT NULL, `provider` TEXT NOT NULL, `create_time` INTEGER NOT NULL, `path` TEXT NOT NULL)');
         await database.execute(
@@ -504,7 +504,8 @@ class _$ServerDao extends ServerDao {
                   'guest': item.guest ? 1 : 0,
                   'ignore_ssl_error': item.ignoreSSLError ? 1 : 0,
                   'create_time': item.createTime,
-                  'update_time': item.updateTime
+                  'update_time': item.updateTime,
+                  'remark': item.remark
                 },
             changeListener),
         _serverUpdateAdapter = UpdateAdapter(
@@ -521,7 +522,8 @@ class _$ServerDao extends ServerDao {
                   'guest': item.guest ? 1 : 0,
                   'ignore_ssl_error': item.ignoreSSLError ? 1 : 0,
                   'create_time': item.createTime,
-                  'update_time': item.updateTime
+                  'update_time': item.updateTime,
+                  'remark': item.remark
                 },
             changeListener),
         _serverDeletionAdapter = DeletionAdapter(
@@ -538,7 +540,8 @@ class _$ServerDao extends ServerDao {
                   'guest': item.guest ? 1 : 0,
                   'ignore_ssl_error': item.ignoreSSLError ? 1 : 0,
                   'create_time': item.createTime,
-                  'update_time': item.updateTime
+                  'update_time': item.updateTime,
+                  'remark': item.remark
                 },
             changeListener);
 
@@ -571,7 +574,8 @@ class _$ServerDao extends ServerDao {
             guest: (row['guest'] as int) != 0,
             ignoreSSLError: (row['ignore_ssl_error'] as int) != 0,
             createTime: row['create_time'] as int,
-            updateTime: row['update_time'] as int),
+            updateTime: row['update_time'] as int,
+            remark: row['remark'] as String?),
         arguments: [serverUrl, userId]);
   }
 
@@ -589,7 +593,8 @@ class _$ServerDao extends ServerDao {
             guest: (row['guest'] as int) != 0,
             ignoreSSLError: (row['ignore_ssl_error'] as int) != 0,
             createTime: row['create_time'] as int,
-            updateTime: row['update_time'] as int),
+            updateTime: row['update_time'] as int,
+            remark: row['remark'] as String?),
         queryableName: 'server',
         isView: false);
   }

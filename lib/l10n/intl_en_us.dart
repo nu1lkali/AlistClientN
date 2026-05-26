@@ -235,4 +235,10 @@ const translationsEnUS = {
   "cacheManagement_tips_clearing_cache": "Clearing cache...",
   "playerSettings_player_in_use": "Player in use",
   "tips_request_raw_url_failed": "Failed to get playback link",
+  "loginScreen_label_remark": "Server Alias",
+  "loginScreen_hint_remark": "Enter server alias",
+  "unnamedServer": "Unnamed Server",
+  "editServer": "Edit Server",
+  "save": "Save",
+  "cancel": "Cancel",
 };

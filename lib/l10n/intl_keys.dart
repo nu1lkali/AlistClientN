@@ -14,6 +14,8 @@ class Intl {
   static const String loginScreen_label_username = "loginScreen_label_username";
   static const String loginScreen_label_password = "loginScreen_label_password";
   static const String loginScreen_label_serverUrl = "loginScreen_label_serverUrl";
+  static const String loginScreen_label_remark = "loginScreen_label_remark";
+  static const String loginScreen_hint_remark = "loginScreen_hint_remark";
   static const String loginScreen_button_login = "loginScreen_button_login";
   static const String loginScreen_button_guestMode = "loginScreen_button_guestMode";
   static const String loginScreen_tips_serverUrlError = "loginScreen_tips_serverUrlError";
@@ -219,4 +221,8 @@ class Intl {
   static const String cacheManagement_tips_clearing_cache = "cacheManagement_tips_clearing_cache";
   static const String playerSettings_player_in_use = "playerSettings_player_in_use";
   static const String tips_request_raw_url_failed = "tips_request_raw_url_failed";
+  static const String unnamedServer = "unnamedServer";
+  static const String editServer = "editServer";
+  static const String save = "save";
+  static const String cancel = "cancel";
 }

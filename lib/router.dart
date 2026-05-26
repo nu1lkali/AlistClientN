@@ -1,4 +1,6 @@
+import 'package:alist/database/table/server.dart';
 import 'package:alist/screen/aboute_screen.dart';
+import 'package:get/get.dart';
 import 'package:alist/screen/account_screen.dart';
 import 'package:alist/screen/audio_player_screen.dart';
 import 'package:alist/screen/cache_manager.dart';
@@ -67,5 +69,14 @@ class AlistRouter {
     GetPage(name: NamedRouter.iptvPlayer, page: () => const IptvPlayerScreen()),
     // WMV 播放器 (media_kit / libmpv)
     GetPage(name: NamedRouter.mediaKitPlayer, page: () => const MediaKitPlayerScreen()),
+    // 编辑服务器
+    GetPage(
+      name: NamedRouter.editServer,
+      page: () {
+        final args = Get.arguments as Map<String, dynamic>?;
+        final server = args?['server'] as Server?;
+        return LoginScreen(isEditMode: true, server: server);
+      },
+    ),
   ];
 }

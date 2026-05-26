@@ -224,4 +224,10 @@ const translationsZhCN = {
   "cacheManagement_tips_clearing_cache": "缓存清理中...",
   "playerSettings_player_in_use": "当前播放器",
   "tips_request_raw_url_failed": "获取播放链接失败",
+  "loginScreen_label_remark": "服务器别名",
+  "loginScreen_hint_remark": "输入服务器备注名称",
+  "unnamedServer": "未命名服务器",
+  "editServer": "编辑服务器",
+  "save": "保存",
+  "cancel": "取消",
 };

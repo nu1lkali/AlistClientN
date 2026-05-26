@@ -62,6 +62,7 @@ class AccountScreen extends StatelessWidget {
       currentAccount: controller.currentAccount.value,
       list: controller.accountList,
       handleDeleteItem: controller._handleDeleteItem,
+      handleEditItem: (server) => controller.editServer(server),
       onItemTap: () {
         if (controller.currentAccount.value == itemData) {
           return;
@@ -172,7 +173,14 @@ class AccountScreenController extends GetxController {
     }
   }
 
-  @override
+  /// 编辑服务器 - 跳转到编辑页面
+  void editServer(Server server) {
+    Get.toNamed(
+      NamedRouter.editServer,
+      arguments: {'server': server},
+    );
+  }
+
   Widget build(BuildContext context) {
     if (loading.value) {
       return const LinearProgressIndicator(
@@ -189,6 +197,7 @@ class AccountScreenController extends GetxController {
           currentAccount: currentAccount.value,
           list: accountList,
           handleDeleteItem: _handleDeleteItem,
+          handleEditItem: (server) => editServer(server),
           onItemTap: () {
             if (currentAccount.value == itemData) {
               return;
@@ -262,6 +271,7 @@ class _ListItem extends StatelessWidget {
     required this.currentAccount,
     required this.list,
     required this.handleDeleteItem,
+    required this.handleEditItem,
     required this.onItemTap,
   }) : super(key: key);
 
@@ -269,6 +279,7 @@ class _ListItem extends StatelessWidget {
   final Server? currentAccount;
   final List<Server>? list;
   final Function handleDeleteItem;
+  final Function handleEditItem;
   final GestureTapCallback? onItemTap;
 
   @override
@@ -278,16 +289,29 @@ class _ListItem extends StatelessWidget {
       key: Key(data.id?.toString() ?? ""),
       endActionPane: ActionPane(
         motion: const DrawerMotion(),
-        extentRatio: 0.25,
+        extentRatio: 0.5,
         children: [
           SlidableAction(
             onPressed: (context) {
-              LogUtil.d("删除");
+              handleEditItem(data);
+            },
+            backgroundColor: Colors.blue,
+            foregroundColor: Colors.white,
+            icon: Icons.edit,
+            label: '编辑',
+            flex: 1,
+            spacing: 2,
+          ),
+          SlidableAction(
+            onPressed: (context) {
               handleDeleteItem(list!, data);
             },
             backgroundColor: Colors.red,
             foregroundColor: Colors.white,
-            label: Intl.fileList_menu_delete.tr,
+            icon: Icons.delete,
+            label: '删除',
+            flex: 1,
+            spacing: 2,
           ),
         ],
       ),
@@ -296,8 +320,31 @@ class _ListItem extends StatelessWidget {
         leading: ExcludeSemantics(
           child: Image.asset(Images.accountIcon),
         ),
-        title: Text(data.serverUrl),
-        subtitle: Text(data.name ?? ''),
+        title: Text(
+          (data.remark != null && data.remark!.isNotEmpty)
+              ? data.remark!
+              : Intl.unnamedServer.tr,
+          style: const TextStyle(fontWeight: FontWeight.w500),
+        ),
+        subtitle: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              data.serverUrl,
+              style: TextStyle(
+                fontSize: 13,
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
+            ),
+            Text(
+              data.userId,
+              style: TextStyle(
+                fontSize: 12,
+                color: Theme.of(context).colorScheme.onSurfaceVariant.withOpacity(0.7),
+              ),
+            ),
+          ],
+        ),
         trailing: currentAccount?.id == data.id
             ? Image.asset(Images.accountIconChoosed)
             : null,

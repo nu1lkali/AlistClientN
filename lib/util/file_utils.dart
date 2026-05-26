@@ -377,17 +377,13 @@ extension FileListRespContentExtensions on FileListRespContent {
 
   DateTime? parseModifiedTime() {
     var modifyTimeStr = modified;
-    var indexOnMs = modifyTimeStr.lastIndexOf(".");
-    if (indexOnMs > -1) {
-      modifyTimeStr = "${modifyTimeStr.substring(0, indexOnMs)}Z";
-    }
     DateTime? modifyTime;
     try {
-      if (modifyTimeStr.contains("+")) {
-        modifyTime = DateTime.parse(modifyTimeStr);
-      } else {
-        modifyTime = isoDateFormat.parse(modifyTimeStr);
-      }
+      // 服务端返回的时间字符串是本地时间，但带 Z 后缀表示 UTC
+      // DateTime.parse 会把 Z 当作 UTC 时间解析
+      // 然后 .toLocal() 转成本地时间（中国 +8 = 21:58）
+      DateTime utcTime = DateTime.parse(modifyTimeStr);
+      modifyTime = utcTime.toLocal();
     } catch (e) {
       LogUtil.e(e);
     }

@@ -70,6 +70,12 @@ class AlistDatabaseController extends GetxController {
         'CREATE TABLE IF NOT EXISTS `search_history` (`id` INTEGER PRIMARY KEY AUTOINCREMENT, `server_url` TEXT NOT NULL, `user_id` TEXT NOT NULL, `keyword` TEXT NOT NULL, `timestamp` INTEGER NOT NULL)');
   });
 
+  // create migration: add remark column to server table
+  final _migration6to7 = Migration(6, 7, (database) async {
+    await database.execute(
+        'ALTER TABLE `server` ADD `remark` TEXT');
+  });
+
   Future<void> init() async {
     var dbName = "alist.db";
     if (Platform.isIOS) {
@@ -91,6 +97,7 @@ class AlistDatabaseController extends GetxController {
       _migration3to4,
       _migration4to5,
       _migration5to6,
+      _migration6to7,
     ]).build();
     videoViewingRecordDao = database.videoViewingRecordDao;
     downloadRecordRecordDao = database.downloadRecordRecordDao;

@@ -32,6 +32,9 @@ class Server {
   @ColumnInfo(name: 'update_time')
   final int updateTime;
 
+  @ColumnInfo(name: 'remark')
+  final String? remark;
+
   Server({
     this.id,
     required this.name,
@@ -43,5 +46,6 @@ class Server {
     required this.ignoreSSLError,
     required this.createTime,
     required this.updateTime,
+    this.remark,
   });
 }

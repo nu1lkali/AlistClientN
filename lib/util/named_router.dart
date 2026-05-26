@@ -73,4 +73,7 @@ class NamedRouter {
 
   // media_kit player (WMV support)
   static const mediaKitPlayer = "/mediaKitPlayer";
+
+  // edit server
+  static const editServer = "/editServer";
 }
