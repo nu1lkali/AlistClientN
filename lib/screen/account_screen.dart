@@ -216,16 +216,17 @@ class AccountScreenController extends GetxController {
     return SlidableAutoCloseBehavior(child: listView);
   }
 
-  void _login(Server itemData) {
+  Future<void> _login(Server itemData) async {
     var baseUrl = "${itemData.serverUrl}api/";
     DioUtils.instance.configAgain(baseUrl, itemData.ignoreSSLError);
-    _userController.login(User(
+    await _userController.login(User(
       baseUrl: baseUrl,
       serverUrl: itemData.serverUrl,
       username: itemData.name,
       password: itemData.password,
       token: itemData.token,
       guest: itemData.guest,
+      remark: itemData.remark,
     ));
   }
 
@@ -297,7 +298,6 @@ class _ListItem extends StatelessWidget {
             },
             backgroundColor: Colors.blue,
             foregroundColor: Colors.white,
-            icon: Icons.edit,
             label: '编辑',
             flex: 1,
             spacing: 2,
@@ -308,7 +308,6 @@ class _ListItem extends StatelessWidget {
             },
             backgroundColor: Colors.red,
             foregroundColor: Colors.white,
-            icon: Icons.delete,
             label: '删除',
             flex: 1,
             spacing: 2,

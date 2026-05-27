@@ -9,6 +9,8 @@ class FileListRespEntity {
 	late String readme;
 	late bool write;
 	late String provider;
+	late bool hasMore;
+	late int pagesTotal;
 
 	FileListRespEntity();
 

@@ -242,7 +242,7 @@ class _SplashScreenState extends State<SplashScreen> {
     );
   }
 
-  void makeSureLoginUserInfo(String? token) {
+  Future<void> makeSureLoginUserInfo(String? token) async {
     UserController userController = Get.find();
     String? serverUrl =
         SpUtil.getString(AlistConstant.serverUrl, defValue: null);
@@ -256,7 +256,17 @@ class _SplashScreenState extends State<SplashScreen> {
     int fileNameMaxLines =
         SpUtil.getInt(AlistConstant.fileNameMaxLines, defValue: 1) ?? 1;
     Global.fileNameMaxLines.value = fileNameMaxLines;
-    userController.login(
+    
+    // 从数据库查询服务器备注
+    String? remark;
+    try {
+      var server = await _databaseController.serverDao.findServer(serverUrl ?? "", username ?? "guest");
+      remark = server?.remark;
+    } catch (e) {
+      // 忽略错误
+    }
+    
+    await userController.login(
       User(
         baseUrl: baseUrl ?? "",
         serverUrl: serverUrl ?? "",
@@ -266,6 +276,7 @@ class _SplashScreenState extends State<SplashScreen> {
         token: token,
         basePath: basePath,
         useDemoServer: useDemoServer,
+        remark: remark,
       ),
       fromCache: true,
     );

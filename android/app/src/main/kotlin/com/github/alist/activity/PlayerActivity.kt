@@ -35,6 +35,7 @@ import com.github.alist.client.BuildConfig
 import com.github.alist.client.R
 import com.github.alist.utils.FlutterMethods
 import com.github.alist.utils.GsonUtils
+import com.github.alist.utils.VideoDataHolder
 import com.github.alist.widget.AlistClientVideoPlayer
 import com.shuyu.gsyvideoplayer.GSYVideoManager
 import com.shuyu.gsyvideoplayer.builder.GSYVideoOptionBuilder
@@ -277,17 +278,29 @@ class PlayerActivity : AppCompatActivity(), GSYVideoProgressListener {
     }
 
     private fun initData(args: Bundle?) {
-        headersStr = args?.getString("headers") ?: headersStr
-        videosStr = args?.getString("videos") ?: videosStr
-        index = args?.getInt("index", 0) ?: index
-        playerType = args?.getString("playerType") ?: ""
-        if (videosStr.isNotEmpty()) {
-            videos = GsonUtils.parseList(videosStr)
+        val useDataHolder = args?.getBoolean("useVideoDataHolder", false) ?: false
+        
+        if (useDataHolder && VideoDataHolder.hasData()) {
+            // 从内存中获取数据，避免 Binder 溢出
+            videos = VideoDataHolder.getVideos()
+            index = VideoDataHolder.getIndex()
+            headers = VideoDataHolder.getHeaders()
+            playerType = VideoDataHolder.getPlayerType() ?: ""
+            Debuger.printfLog("Loaded ${videos.size} videos from VideoDataHolder")
+        } else {
+            // 兼容旧版：从 Intent extras 读取（小数据量场景）
+            headersStr = args?.getString("headers") ?: headersStr
+            videosStr = args?.getString("videos") ?: videosStr
+            index = args?.getInt("index", 0) ?: index
+            playerType = args?.getString("playerType") ?: ""
+            if (videosStr.isNotEmpty()) {
+                videos = GsonUtils.parseList(videosStr)
+            }
+            if (headersStr.isNotEmpty()) {
+                headers = GsonUtils.parseMap(headersStr)
+            }
         }
-        if (headersStr.isNotEmpty()) {
-            headers = GsonUtils.parseMap(headersStr)
-            Debuger.printfLog("headers=$headers")
-        }
+        Debuger.printfLog("headers=$headers")
 
         if (playerType == "ijkplayer") {
             Debuger.printfError("player = $playerType")

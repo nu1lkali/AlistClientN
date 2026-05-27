@@ -225,4 +225,7 @@ class Intl {
   static const String editServer = "editServer";
   static const String save = "save";
   static const String cancel = "cancel";
+  static const String settingsScreen_item_extensionFilter = "settingsScreen_item_extensionFilter";
+  static const String extensionFilterDialog_title = "extensionFilterDialog_title";
+  static const String extensionFilterDialog_hint = "extensionFilterDialog_hint";
 }

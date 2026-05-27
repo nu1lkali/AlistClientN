@@ -43,10 +43,14 @@ class _MediaKitPlayerScreenState extends State<MediaKitPlayerScreen>
   Duration _duration = Duration.zero;
   bool _playing = false;
   bool _buffering = false;
+  bool _playbackError = false;
   StreamSubscription? _posSub;
   StreamSubscription? _durSub;
   StreamSubscription? _playSub;
   StreamSubscription? _bufSub;
+  StreamSubscription? _errSub;
+  StreamSubscription? _playAtSub;
+  StreamSubscription? _compSub;
 
   bool _isDraggingSlider = false;
   bool _seeking = false;
@@ -137,12 +141,24 @@ class _MediaKitPlayerScreenState extends State<MediaKitPlayerScreen>
     });
     
     // 监听播放完成，自动切换到下一个视频
-    _player.stream.completed.listen((completed) {
+    _compSub = _player.stream.completed.listen((completed) {
       if (completed && mounted && _videos.length > 1) {
         if (_index < _videos.length - 1) {
           _playAt(_index + 1);
         }
       }
+    });
+
+    // 监听播放错误，防止静默闪退
+    _errSub = _player.stream.error.listen((error) {
+      if (!mounted) return;
+      debugPrint("MediaKit player error: $error");
+      setState(() {
+        _playbackError = true;
+        _buffering = false;
+        _isSwitching = false;
+      });
+      _showToast("播放出错: $error");
     });
 
     WidgetsBinding.instance.addPostFrameCallback((_) => _playAt(_index));
@@ -194,6 +210,9 @@ class _MediaKitPlayerScreenState extends State<MediaKitPlayerScreen>
     _durSub?.cancel();
     _playSub?.cancel();
     _bufSub?.cancel();
+    _errSub?.cancel();
+    _playAtSub?.cancel();
+    _compSub?.cancel();
     WidgetsBinding.instance.removeObserver(this);
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
     SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
@@ -214,10 +233,15 @@ class _MediaKitPlayerScreenState extends State<MediaKitPlayerScreen>
 
   void _playAt(int index) {
     if (index < 0 || index >= _videos.length) return;
+    // 先清理可能残留的上次播放监听
+    _playAtSub?.cancel();
+    _playAtSub = null;
+    
     setState(() {
       _index = index;
       _isSwitching = true;
       _buffering = true;
+      _playbackError = false;
     });
     
     // 延迟执行视频切换，让遮罩先显示
@@ -225,15 +249,37 @@ class _MediaKitPlayerScreenState extends State<MediaKitPlayerScreen>
       if (!mounted) return;
       final video = _videos[index];
       final url = video["url"] ?? "";
-      if (url.isNotEmpty) {
+      if (url.isEmpty) {
+        _showToast("视频地址为空");
+        setState(() {
+          _isSwitching = false;
+          _buffering = false;
+        });
+        return;
+      }
+      try {
         _player.open(Media(url), play: true);
+      } catch (e) {
+        debugPrint("MediaKit player open error: $e");
+        if (mounted) {
+          setState(() {
+            _playbackError = true;
+            _isSwitching = false;
+            _buffering = false;
+          });
+          _showToast("播放失败: $e");
+        }
+        return;
       }
       _hidePlaylist();
       _checkFavoriteStatus();
       
-      // 新视频开始播放后移除遮罩
-      _player.stream.playing.listen((playing) {
+      // 新视频开始播放后移除遮罩 - 只监听一次，不再泄漏订阅
+      _playAtSub = _player.stream.playing.listen((playing) {
         if (playing && mounted) {
+          // 第一次收到 playing=true 后立即取消监听
+          _playAtSub?.cancel();
+          _playAtSub = null;
           Future.delayed(const Duration(milliseconds: 300), () {
             if (mounted) {
               setState(() => _isSwitching = false);

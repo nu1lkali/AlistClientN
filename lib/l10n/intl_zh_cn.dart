@@ -230,4 +230,7 @@ const translationsZhCN = {
   "editServer": "编辑服务器",
   "save": "保存",
   "cancel": "取消",
+  "settingsScreen_item_extensionFilter": "扩展名过滤",
+  "extensionFilterDialog_title": "编辑扩展名过滤",
+  "extensionFilterDialog_hint": "输入要过滤的扩展名，用英文逗号分隔，如 nfo,html,txt",
 };

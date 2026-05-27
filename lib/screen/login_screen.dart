@@ -44,9 +44,11 @@ class LoginScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     final controller = Get.put(LoginScreenController());
 
-    // 如果是编辑模式，初始化控制器数据
+    // 编辑模式：初始化控制器数据（只在控制器首次创建或 server 变化时执行）
     if (isEditMode && server != null) {
-      controller.initForEdit(server!);
+      if (controller.editingServerId != server!.id) {
+        controller.initForEdit(server!);
+      }
     }
 
     return AlistScaffold(
@@ -384,6 +386,7 @@ class LoginScreenController extends GetxController with WidgetsBindingObserver {
   // 编辑模式相关
   Server? _editingServer;
   bool get isEditingServer => _editingServer != null;
+  int? get editingServerId => _editingServer?.id;
 
   @override
   void onInit() {
@@ -558,6 +561,7 @@ class LoginScreenController extends GetxController with WidgetsBindingObserver {
       Options(followRedirects: false, headers: {AlistConstant.noAuth: 1}),
       cancelToken: _cancelToken,
       onSuccess: (data) {
+        var remark = remarkController.text.trim();
         var user = User(
           baseUrl: baseUrl,
           serverUrl: address,
@@ -565,6 +569,7 @@ class LoginScreenController extends GetxController with WidgetsBindingObserver {
           password: password,
           token: data!.token,
           guest: false,
+          remark: remark.isEmpty ? null : remark,
         );
         userController.login(user);
         SpUtil.putBool(AlistConstant.ignoreSSLError, ignoreSSLError.value);
@@ -656,6 +661,7 @@ class LoginScreenController extends GetxController with WidgetsBindingObserver {
         password: password,
         token: _editingServer!.token,
         guest: _editingServer!.guest,
+        remark: remark.isEmpty ? null : remark,
       ));
     }
   }

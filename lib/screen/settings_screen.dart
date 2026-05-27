@@ -13,6 +13,7 @@ import 'package:alist/util/named_router.dart';
 import 'package:alist/util/user_controller.dart';
 import 'package:alist/util/widget_utils.dart';
 import 'package:alist/widget/alist_scaffold.dart';
+import 'package:flutter_smart_dialog/flutter_smart_dialog.dart';
 import 'package:flustars/flustars.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
@@ -93,6 +94,7 @@ class _SettingsContainerState extends State<_SettingsContainer>
         m.menuId == MenuId.audioPlayerUi ||
         m.menuId == MenuId.groupedRandomSort ||
         m.menuId == MenuId.enableMediaKitPlayer ||
+        m.menuId == MenuId.extensionFilter ||
         m.menuId == MenuId.playerSettings ||
         m.menuId == MenuId.iptvUrl ||
         m.menuId == MenuId.slideshowInterval ||
@@ -435,6 +437,9 @@ class _SettingsContainerState extends State<_SettingsContainer>
           "title": Intl.settingsScreen_item_privacyPolicy.tr,
         });
         break;
+      case MenuId.extensionFilter:
+        _showExtensionFilterDialog(context);
+        break;
       case MenuId.iptvUrl:
         _showUrlInputDialog(context);
         break;
@@ -570,6 +575,60 @@ class _SettingsContainerState extends State<_SettingsContainer>
     );
   }
 
+  void _showExtensionFilterDialog(BuildContext context) {
+    final currentFilter = SpUtil.getString(AlistConstant.extensionFilter);
+    final defaultValue = currentFilter?.isNotEmpty == true ? currentFilter : 'nfo';
+    final controller = TextEditingController(text: defaultValue);
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(Intl.extensionFilterDialog_title.tr),
+            const SizedBox(height: 4),
+            Text(
+              Intl.extensionFilterDialog_hint.tr,
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
+            ),
+          ],
+        ),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          decoration: const InputDecoration(
+            hintText: 'nfo, html, txt',
+            border: OutlineInputBorder(),
+            isDense: true,
+            contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: Text(Intl.cancel.tr),
+          ),
+          FilledButton(
+            onPressed: () {
+              final text = controller.text.trim();
+              SpUtil.putString(AlistConstant.extensionFilter, text);
+              Navigator.pop(ctx);
+              if (text.isNotEmpty) {
+                SmartDialog.showToast('已设置: $text');
+              } else {
+                SmartDialog.showToast('已清除扩展名过滤');
+              }
+            },
+            child: Text(Intl.save.tr),
+          ),
+        ],
+      ),
+    );
+  }
+
   void _showThemeColorPicker(BuildContext context) {
     const colors = [
       Color(0xFF0060A9), // 蓝
@@ -684,6 +743,11 @@ class _SettingsContainerState extends State<_SettingsContainer>
           icon: Images.settingsScreenPlayer,
           iconData: Icons.play_circle_filled),
       SettingsMenu(
+          menuId: MenuId.extensionFilter,
+          name: Intl.settingsScreen_item_extensionFilter.tr,
+          icon: Images.settingsScreenPlayer,
+          iconData: Icons.filter_list_off_rounded),
+      SettingsMenu(
           menuId: MenuId.themeColor,
           name: "主题颜色",
           icon: Images.settingsScreenPlayer,
@@ -785,6 +849,7 @@ enum MenuId {
   audioPlayerUi,
   groupedRandomSort,
   enableMediaKitPlayer,
+  extensionFilter,
   playerSettings,
   themeColor,
   iptvUrl,

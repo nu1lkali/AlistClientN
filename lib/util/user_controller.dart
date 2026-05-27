@@ -1,3 +1,4 @@
+import 'package:alist/database/alist_database_controller.dart';
 import 'package:alist/entity/my_info_resp.dart';
 import 'package:alist/entity/public_settings_resp.dart';
 import 'package:alist/net/dio_utils.dart';
@@ -18,8 +19,26 @@ class UserController extends GetxController {
     fileDeletedSignal.value++;
   }
 
-  void login(User user, {bool fromCache = false}) {
-    this.user.value = user;
+  Future<void> login(User user, {bool fromCache = false}) async {
+    // 如果没有传入 remark，尝试从数据库查询
+    String? remark = user.remark;
+    if (remark == null || remark.isEmpty) {
+      remark = await _queryRemarkFromDatabase(user.serverUrl, user.username);
+    }
+    
+    var userWithRemark = User(
+      baseUrl: user.baseUrl,
+      serverUrl: user.serverUrl,
+      guest: user.guest,
+      username: user.username,
+      password: user.password,
+      token: user.token,
+      basePath: user.basePath,
+      useDemoServer: user.useDemoServer,
+      remark: remark,
+    );
+    
+    this.user.value = userWithRemark;
     searchIndex.value = "";
 
     SpUtil.putString(AlistConstant.serverUrl, user.serverUrl);
@@ -35,6 +54,19 @@ class UserController extends GetxController {
       requestBasePath(user);
     }
     loadSettings();
+  }
+
+  /// 从数据库查询服务器的备注（别名）
+  Future<String?> _queryRemarkFromDatabase(String serverUrl, String username) async {
+    try {
+      final dbController = Get.find<AlistDatabaseController>();
+      // 使用 findServer 方法异步查询
+      var server = await dbController.serverDao.findServer(serverUrl, username);
+      return server?.remark;
+    } catch (e) {
+      // 数据库查询失败，返回 null
+    }
+    return null;
   }
 
   void loadSettings() {
@@ -98,6 +130,7 @@ class UserController extends GetxController {
             token: originalUser.token,
             basePath: data.basePath,
             useDemoServer: originalUser.useDemoServer,
+            remark: originalUser.remark,
           );
         }
       },
@@ -117,6 +150,7 @@ class User {
   final String? token;
   final String? basePath;
   final bool useDemoServer;
+  final String? remark;
 
   User({
     required this.baseUrl,
@@ -127,5 +161,6 @@ class User {
     this.token,
     this.basePath,
     this.useDemoServer = false,
+    this.remark,
   });
 }

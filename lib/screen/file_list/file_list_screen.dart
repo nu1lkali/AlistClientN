@@ -167,25 +167,17 @@ class _FileListScreenState extends State<FileListScreen>
     // restore view mode
     final savedViewMode = SpUtil.getBool(AlistConstant.fileViewMode) ?? false;
     _menuAnchorController.isGridView.value = savedViewMode;
-    if (savedViewMode) {
-      // will load folder thumbs after files are loaded
-    }
-
-    if (_isRootPath(path)) {
-      _pageName = Intl.appName.tr;
-    } else {
-      _pageName = path.substring(path.lastIndexOf('/') + 1);
-    }
-    Log.d("path=$path pageName=$_pageName}", tag: tag);
-
+    
+    _updatePageName();
+    
     var user = _userController.user.value;
     _currentUser = user;
     if (path == "/") {
       _userStreamSubscription = _userController.user.stream.listen((event) {
         if (_currentUser?.username != event.username ||
             _currentUser?.serverUrl != event.serverUrl) {
+          // 用户切换了，刷新文件列表
           _currentUser = event;
-
           _queryPassword = true;
           _password = null;
           _refreshController.requestRefresh();
@@ -193,10 +185,21 @@ class _FileListScreenState extends State<FileListScreen>
             _data = null;
             _files = [];
           });
+          // 更新页面名称（remark 可能变化）
+          _updatePageName();
           LogUtil.d("切换User ${_userController.user.value.username}");
+        } else if (_currentUser?.remark != event.remark) {
+          // remark 变化了，更新页面标题
+          _currentUser = event;
+          if (mounted) {
+            setState(() {
+              _updatePageName();
+            });
+          }
         }
       });
     }
+     
     LogUtil.d("initState ${DateTime.now().millisecondsSinceEpoch}", tag: tag);
     _loadFiles();
 
@@ -362,67 +365,96 @@ class _FileListScreenState extends State<FileListScreen>
   }
 
   Future<void> _loadFilesInner() async {
-    var body = {
-      "path": path,
-      "password": _password ?? "",
-      "page": 1,
-      "per_page": 0,
-      "refresh": _forceRefresh
-    };
-
     _cancelToken?.cancel();
     _cancelToken = dio.CancelToken();
-    return DioUtils.instance.requestNetwork<FileListRespEntity>(
+    
+    // 分页加载所有文件，使用服务端最大限制500
+    const int pageSize = 500;
+    int currentPage = 1;
+    List<FileItemVO> allFiles = [];
+    FileListRespEntity? lastData;
+    bool hasMore = false;
+    int pagesTotal = 1;
+
+    Future<void> loadPage(int page) async {
+      final body = {
+        "path": path,
+        "password": _password ?? "",
+        "page": page,
+      "per_page": 500,
+        "refresh": _forceRefresh
+      };
+
+      await DioUtils.instance.requestNetwork<FileListRespEntity>(
         Method.post, "fs/list", cancelToken: _cancelToken, params: body,
         onSuccess: (data) async {
-      _passwordRetrying = false;
-      _forceRefresh = false;
-      _menuAnchorController.hasWritePermission.value = data?.write == true;
-      _hasWritePermission = data?.write == true;
-      var fileItemVOs = <FileItemVO>[];
-      var files = data?.content ?? [];
-      for (var file in files) {
-        var fileItemVO = _fileResp2VO(data?.provider ?? "", file);
-        fileItemVOs.add(fileItemVO);
-      }
-      _sort(fileItemVOs);
-      setState(() {
-        _files = fileItemVOs;
-      });
-      _data = data;
-      _refreshController.refreshCompleted();
-      // async load folder thumbnails in grid view
-      if (_menuAnchorController.isGridView.value) {
-        _loadFolderThumbs(fileItemVOs);
-      }
-      // async load video watch progress
-      _loadVideoProgress(fileItemVOs);
-      // cache this result and preload subdirectories
-      _preloadCache[path] = fileItemVOs;
-      
-      // Check if aggressive cache is enabled
-      final enableAggressiveCache = SpUtil.getBool(AlistConstant.enableAggressiveCache, defValue: true) ?? true;
-      if (enableAggressiveCache) {
-        // Aggressively preload subdirectories for LAN environments
-        // Preload from any directory, not just root
-        final hasFolders = fileItemVOs.any((f) => f.isDir);
-        if (hasFolders) {
-          _preloadSubdirectories(fileItemVOs);
-        }
-      }
-    }, onError: (code, msg) {
-      _refreshController.refreshFailed();
-      _forceRefresh = false;
-      if (code == 403) {
-        _showDirectorPasswordDialog();
-        if (_passwordRetrying) {
-          SmartDialog.showToast(msg);
-        }
-      } else {
-        SmartDialog.showToast(msg);
-      }
-      debugPrint(msg);
+          if (data == null) return;
+          lastData = data;
+          final files = data.content ?? [];
+          
+          for (var file in files) {
+            var fileItemVO = _fileResp2VO(data.provider ?? "", file);
+            allFiles.add(fileItemVO);
+          }
+          
+          // 使用服务端返回的 hasMore 和 pagesTotal 判断是否还有更多数据
+          hasMore = data.hasMore;
+          pagesTotal = data.pagesTotal;
+          
+          // 如果还有更多数据，增加页码
+          if (hasMore && currentPage < pagesTotal) {
+            currentPage++;
+          }
+        },
+        onError: (code, msg) {
+          debugPrint(msg);
+        },
+      );
+    }
+
+    // 加载第一页
+    await loadPage(currentPage);
+    
+    // 根据 hasMore 和 pagesTotal 继续加载后续页面
+    while (mounted && hasMore && currentPage <= pagesTotal) {
+      await loadPage(currentPage);
+    }
+
+    if (!mounted) return;
+
+    _passwordRetrying = false;
+    _forceRefresh = false;
+    
+    // 使用最后一个响应数据获取权限等信息
+    if (lastData != null) {
+      _menuAnchorController.hasWritePermission.value = lastData!.write;
+      _hasWritePermission = lastData!.write;
+      _data = lastData;
+    }
+    
+    _sort(allFiles);
+    setState(() {
+      _files = allFiles;
     });
+    _refreshController.refreshCompleted();
+    
+    // async load folder thumbnails in grid view
+    if (_menuAnchorController.isGridView.value) {
+      _loadFolderThumbs(allFiles);
+    }
+    // async load video watch progress
+    _loadVideoProgress(allFiles);
+    // cache this result and preload subdirectories
+    _preloadCache[path] = allFiles;
+    
+    // Check if aggressive cache is enabled
+    final enableAggressiveCache = SpUtil.getBool(AlistConstant.enableAggressiveCache, defValue: true) ?? true;
+    if (enableAggressiveCache) {
+      final hasFolders = allFiles.any((f) => f.isDir);
+      if (hasFolders) {
+        _preloadSubdirectories(allFiles);
+      }
+    }
   }
 
   Future<dynamic> _showDirectorPasswordDialog() {
@@ -887,7 +919,7 @@ class _FileListScreenState extends State<FileListScreen>
       "path": startPath,
       "password": _password ?? "",
       "page": 1,
-      "per_page": 0,
+      "per_page": 500,
       "refresh": false
     };
 
@@ -1466,18 +1498,37 @@ class _FileListScreenState extends State<FileListScreen>
 
   List<FileItemVO> get _filteredFiles {
     final mode = _menuAnchorController.filterMode.value;
+    List<FileItemVO> result;
     switch (mode) {
       case FilterMode.videoOnly:
-        return _files
+        result = _files
             .where((f) => f.isDir || f.type == FileType.video)
             .toList();
+        break;
       case FilterMode.imageOnly:
-        return _files
+        result = _files
             .where((f) => f.isDir || f.type == FileType.image)
             .toList();
+        break;
       case FilterMode.none:
-        return _files;
+        result = _files;
+        break;
     }
+    // 扩展名过滤：过滤掉配置的扩展名文件（默认 nfo）
+    final filterStr = SpUtil.getString(AlistConstant.extensionFilter);
+    final effectiveFilter = (filterStr != null && filterStr.isNotEmpty) ? filterStr : 'nfo';
+    if (effectiveFilter.isNotEmpty) {
+      final exts = effectiveFilter.split(',').map((e) => e.trim().toLowerCase()).where((e) => e.isNotEmpty).toSet();
+      result = result.where((f) {
+        if (f.isDir) return true;
+        final name = f.name;
+        final dotIdx = name.lastIndexOf('.');
+        if (dotIdx < 0 || dotIdx == name.length - 1) return true;
+        final ext = name.substring(dotIdx + 1).toLowerCase();
+        return !exts.contains(ext);
+      }).toList();
+    }
+    return result;
   }
 
   IconButton _menuMoreIcon() {
@@ -1754,6 +1805,28 @@ class _FileListScreenState extends State<FileListScreen>
 
   @override
   bool get wantKeepAlive => _isRootPath(path);
+
+  void _updatePageName() {
+    var user = _userController.user.value;
+    
+    // 只在首页（根目录 "/"）显示服务器别名，其他路径显示正常的路径名称
+    if (_isRootPath(path)) {
+      var remark = user.remark;
+      if (remark != null && remark.isNotEmpty) {
+        _pageName = remark;
+      } else {
+        _pageName = user.username;
+      }
+    } else {
+      // 非首页显示当前目录名称
+      var segments = path.split('/').where((s) => s.isNotEmpty).toList();
+      if (segments.isNotEmpty) {
+        _pageName = segments.last;
+      } else {
+        _pageName = "/";
+      }
+    }
+  }
 
   @transaction
   Future<void> rememberPassword(String password) async {

@@ -241,4 +241,7 @@ const translationsEnUS = {
   "editServer": "Edit Server",
   "save": "Save",
   "cancel": "Cancel",
+  "settingsScreen_item_extensionFilter": "Extension Filter",
+  "extensionFilterDialog_title": "Edit Extension Filter",
+  "extensionFilterDialog_hint": "Enter extensions to filter, separated by commas, e.g. nfo,html,txt",
 };

@@ -23,6 +23,7 @@ import com.github.alist.utils.FlutterMethods
 import com.github.alist.utils.FileProviderUtils
 import com.github.alist.utils.GsonUtils
 import com.github.alist.utils.PackageManagerUtils
+import com.github.alist.utils.VideoDataHolder
 import io.flutter.embedding.engine.plugins.FlutterPlugin
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
@@ -100,10 +101,15 @@ class AlistPlugin(private val activity: Activity, private val scope: CoroutineSc
 
             "playVideoWithInternalPlayer" -> {
                 val videos = call.argument<String>("videos")
-                val index = call.argument<Int>("index")
+                val index = call.argument<Int>("index") ?: 0
                 val headers = call.argument<String?>("headers")
                 val playerType = call.argument<String>("playerType")
                 val autoPipEnabled = call.argument<Boolean>("autoPipEnabled") ?: true
+
+                // Store large video list in memory to avoid Binder buffer overflow
+                if (!videos.isNullOrEmpty()) {
+                    VideoDataHolder.store(videos, index, headers, playerType, autoPipEnabled)
+                }
 
                 // Set up PiP callback for Flutter to trigger PiP mode
                 FlutterMethods.pipCallback = {
@@ -113,11 +119,7 @@ class AlistPlugin(private val activity: Activity, private val scope: CoroutineSc
                 }
 
                 val intent = Intent(activity, PlayerActivity::class.java)
-                intent.putExtra("videos", videos)
-                intent.putExtra("index", index)
-                intent.putExtra("headers", headers)
-                intent.putExtra("playerType", playerType)
-                intent.putExtra("autoPipEnabled", autoPipEnabled)
+                intent.putExtra("useVideoDataHolder", true)
                 activity.startActivity(intent)
             }
 
