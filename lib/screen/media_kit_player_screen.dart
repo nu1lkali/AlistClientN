@@ -150,8 +150,38 @@ class _MediaKitPlayerScreenState extends State<MediaKitPlayerScreen>
         return;
       }
       _closeSheetAndPanel(); _checkFavoriteStatus();
-      _playAtSub = _player.stream.playing.listen((playing) {
-        if (playing && mounted) { _playAtSub?.cancel(); _playAtSub = null; Future.delayed(const Duration(milliseconds: 800), () { if (mounted) setState(() => _isSwitching = false); }); }
+      // Combined conditions: video params ready + buffering finished + 150ms delay
+      bool videoParamsReady = false;
+      bool bufferingReady = false;
+      void tryRemoveMask() {
+        if (videoParamsReady && bufferingReady && mounted) {
+          _playAtSub?.cancel();
+          _playAtSub = null;
+          Future.delayed(const Duration(milliseconds: 150), () {
+            if (mounted) setState(() => _isSwitching = false);
+          });
+        }
+      }
+      _playAtSub = _player.stream.videoParams.listen((params) {
+        if (params != null && (params.dw ?? 0) > 0 && (params.dh ?? 0) > 0) {
+          videoParamsReady = true;
+          tryRemoveMask();
+        }
+      });
+      _bufSub?.cancel();
+      _bufSub = _player.stream.buffering.listen((b) {
+        if (!b) {
+          bufferingReady = true;
+          tryRemoveMask();
+        }
+      });
+      // Safety net: remove mask after 5 seconds
+      Future.delayed(const Duration(seconds: 5), () {
+        if (_playAtSub != null && mounted) {
+          _playAtSub?.cancel();
+          _playAtSub = null;
+          if (mounted) setState(() => _isSwitching = false);
+        }
       });
     });
   }
