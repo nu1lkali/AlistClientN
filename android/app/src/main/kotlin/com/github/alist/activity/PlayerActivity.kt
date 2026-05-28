@@ -67,6 +67,7 @@ class PlayerActivity : AppCompatActivity(), GSYVideoProgressListener {
     private var videos: List<VideoItem> = emptyList()
     private var headers: Map<String, String> = emptyMap()
     private var index = 0
+    private var autoPipEnabled = true
     private var currentTime = 0L
     private var totalTime = 0L
     private val windowInsetsControllerCompat by lazy {
@@ -286,6 +287,7 @@ class PlayerActivity : AppCompatActivity(), GSYVideoProgressListener {
             index = VideoDataHolder.getIndex()
             headers = VideoDataHolder.getHeaders()
             playerType = VideoDataHolder.getPlayerType() ?: ""
+            autoPipEnabled = VideoDataHolder.getAutoPipEnabled()
             Debuger.printfLog("Loaded ${videos.size} videos from VideoDataHolder")
         } else {
             // 兼容旧版：从 Intent extras 读取（小数据量场景）
@@ -945,8 +947,7 @@ class PlayerActivity : AppCompatActivity(), GSYVideoProgressListener {
     override fun onUserLeaveHint() {
         super.onUserLeaveHint()
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            // 检查"自动小窗"开关（从Intent传入，默认开启）
-            val autoPipEnabled = intent?.getBooleanExtra("autoPipEnabled", true) ?: true
+            // 检查"自动小窗"开关（从VideoDataHolder读取，由Flutter设置页面控制）
             if (!autoPipEnabled) return
             
             if (gsyVideoPlayer.currentPlayer.currentState == GSYVideoView.CURRENT_STATE_PLAYING) {

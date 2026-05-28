@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-
-    <style name="Theme.MpvEx" parent="Theme.MaterialComponents.DayNight.NoActionBar" />
+    <style name="Theme.Material3.DynamicColors.DayNight.NoActionBar" parent="Theme.MaterialComponents.DayNight.NoActionBar">
+        <item name="colorPrimary">@android:color/white</item>
+    </style>
 </resources>
