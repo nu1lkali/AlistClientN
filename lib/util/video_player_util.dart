@@ -25,15 +25,12 @@ class VideoPlayerUtil {
         SpUtil.getString(AlistConstant.videoPlayerRouter) ?? "";
 
     if (videoPlayerRouter == "") {
-      // 默认使用内置的视频播放器
       _playUrlWithInternalPlayer(videos, index);
     } else {
-      // 交给设置的外部的视频播放器处理
       var item = videos[index];
       var playResult = await _playUrlWithExternalPlayer(videoPlayerRouter,
           item.provider, item.localPath, item.remotePath, item.sign, password);
       if (!playResult) {
-        // 遇到 Activity Not Found 错误，说明原外部播放器软件已被卸载
         SpUtil.remove(AlistConstant.videoPlayerRouter);
         SpUtil.remove(AlistConstant.videoPlayerName);
         _playUrlWithInternalPlayer(videos, index);
@@ -44,34 +41,28 @@ class VideoPlayerUtil {
   static void _playUrlWithInternalPlayer(List<VideoItem> videos, int index,
       {String? playerType}) async {
     if (Platform.isAndroid) {
-      // 检查是否启用全局 MPV 播放器开关
       final enableMediaKit = SpUtil.getBool(AlistConstant.enableMediaKitPlayer, defValue: false) ?? false;
-      
-      // auto-select ijkplayer for formats ExoPlayer handles poorly
+
       if (playerType == null) {
         playerType = SpUtil.getString(AlistConstant.playerType);
       }
-      // wmv/asf/msvideo 等格式强制用 media_kit(libmpv)，ijkplayer 可能不支持 VC-1 编码
       final ext = videos[index].name
           .substringAfterLast(".")
           ?.toLowerCase() ?? "";
-      // WMV 系列格式（Windows Media Video）- libmpv 兼容性更好
-      const forceMediaKitFormats = {
-        "wmv", "asf", "asx", "wmx", "wvx",    // WMV 容器
-      };
-      // 如果全局开关启用，或者格式强制需要，则使用 media_kit
-      if (enableMediaKit || forceMediaKitFormats.contains(ext)) {
-        playerType = "media_kit";  // 使用 libmpv (media_kit)
+
+      if (enableMediaKit) {
+        playerType = "media_kit";
       } else if (playerType == null || playerType.isEmpty) {
-        const ijkFormats = {
+        const mediaKitFormats = {
           "rmvb", "rm", "vob", "dat", "divx", "xvid",
           "avi", "m2ts", "mts", "tp", "trp", "dv",
-          "mxf", "wtv", "dvr-ms",
+          "mxf", "wtv", "dvr-ms", "wmv", "asf", "asx", "wmx", "wvx",
         };
-        if (ijkFormats.contains(ext)) {
-          playerType = "ijkplayer";
+        if (mediaKitFormats.contains(ext)) {
+          playerType = "media_kit";
         }
       }
+
       var videosParams = <Map<String, String?>>[];
       Map<String, String> headers = {};
 
@@ -97,9 +88,8 @@ class VideoPlayerUtil {
           headers["User-Agent"] = "pan.baidu.com";
         }
       }
-      // WMV 等格式使用 media_kit (libmpv)，其他使用原生播放器
+
       if (playerType == "media_kit") {
-        // 使用 media_kit 播放器（基于 libmpv，兼容 WMV）
         Get.toNamed(
           NamedRouter.mediaKitPlayer,
           arguments: {
@@ -135,12 +125,10 @@ class VideoPlayerUtil {
     if (localPath != null && localPath != "") {
       var packageName = videoPlayerRouter.substringBeforeLast("/")!;
       if (Platform.isAndroid) {
-        // 安卓传递本地文件路径使用FileProvider提供给外部播放器播发
         var activity = videoPlayerRouter.substringAfterLast("/")!;
         return AlistPlugin.playVideoWithExternalPlayer(
             packageName, activity, localPath);
       } else {
-        // ios使用本地服务提供url给外部播放器
         ProxyServer proxyServer = Get.find();
         await proxyServer.start();
         var videoUrl = proxyServer.makeFileUri(File(localPath)).toString();
@@ -166,7 +154,6 @@ class VideoPlayerUtil {
       var packageName = videoPlayerRouter.substringBeforeLast("/")!;
       if (Platform.isIOS) {
         if (packageName.startsWith("nplayer-")) {
-          // nplayer 不支持302跳转播放
           var rawUrl = await requestRawUrl(remotePath, password);
           if (rawUrl != null) {
             var uri = Uri.parse("$packageName$rawUrl");
@@ -227,12 +214,12 @@ class VideoPlayerUtil {
       exoplayer.activity = "";
       exoplayer.packageName = "exoplayer";
 
-      var ijkPlayer = ExternalPlayerEntity();
-      ijkPlayer.icon = Images.logo;
-      ijkPlayer.label = "IJKPlayer\n(AList Client)";
-      ijkPlayer.activity = "";
-      ijkPlayer.packageName = "ijkplayer";
-      playerList.insert(0, ijkPlayer);
+      var mediaKitPlayer = ExternalPlayerEntity();
+      mediaKitPlayer.icon = Images.logo;
+      mediaKitPlayer.label = "MediaKit\n(AList Client)";
+      mediaKitPlayer.activity = "";
+      mediaKitPlayer.packageName = "media_kit";
+      playerList.insert(0, mediaKitPlayer);
       playerList.insert(0, exoplayer);
     }
     return playerList;

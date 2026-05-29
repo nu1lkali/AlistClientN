@@ -39,13 +39,10 @@ import com.github.alist.utils.VideoDataHolder
 import com.github.alist.widget.AlistClientVideoPlayer
 import com.shuyu.gsyvideoplayer.GSYVideoManager
 import com.shuyu.gsyvideoplayer.builder.GSYVideoOptionBuilder
-import com.shuyu.gsyvideoplayer.model.VideoOptionModel
 import com.shuyu.gsyvideoplayer.listener.GSYSampleCallBack
 import com.shuyu.gsyvideoplayer.listener.GSYVideoProgressListener
-import com.shuyu.gsyvideoplayer.player.IjkPlayerManager
 import com.shuyu.gsyvideoplayer.player.PlayerFactory
 import com.shuyu.gsyvideoplayer.utils.Debuger
-import tv.danmaku.ijk.media.player.IjkMediaPlayer
 import com.shuyu.gsyvideoplayer.utils.OrientationUtils
 import com.shuyu.gsyvideoplayer.video.NormalGSYVideoPlayer
 import com.shuyu.gsyvideoplayer.video.base.GSYVideoView
@@ -261,23 +258,6 @@ class PlayerActivity : AppCompatActivity(), GSYVideoProgressListener {
         }
     }
 
-    private fun configureIjkPlayer() {
-        val optionModelList = ArrayList<VideoOptionModel>()
-        optionModelList.add(VideoOptionModel(IjkMediaPlayer.OPT_CATEGORY_PLAYER, "mediacodec", 0))
-        optionModelList.add(VideoOptionModel(IjkMediaPlayer.OPT_CATEGORY_PLAYER, "mediacodec-auto-rotate", 0))
-        optionModelList.add(VideoOptionModel(IjkMediaPlayer.OPT_CATEGORY_PLAYER, "mediacodec-handle-resolution-change", 0))
-        optionModelList.add(VideoOptionModel(IjkMediaPlayer.OPT_CATEGORY_FORMAT, "analyzeduration", "500000"))
-        optionModelList.add(VideoOptionModel(IjkMediaPlayer.OPT_CATEGORY_FORMAT, "probesize", "204800"))
-        optionModelList.add(VideoOptionModel(IjkMediaPlayer.OPT_CATEGORY_FORMAT, "max-buffer-size", "4194304"))
-        optionModelList.add(VideoOptionModel(IjkMediaPlayer.OPT_CATEGORY_FORMAT, "min-buffer-duration", "1000"))
-        optionModelList.add(VideoOptionModel(IjkMediaPlayer.OPT_CATEGORY_FORMAT, "max-buffer-duration", "3000"))
-        optionModelList.add(VideoOptionModel(IjkMediaPlayer.OPT_CATEGORY_PLAYER, "framedrop", 5))
-        optionModelList.add(VideoOptionModel(IjkMediaPlayer.OPT_CATEGORY_PLAYER, "infbuf", 1))
-        optionModelList.add(VideoOptionModel(IjkMediaPlayer.OPT_CATEGORY_PLAYER, "opensles", 0))
-        optionModelList.add(VideoOptionModel(IjkMediaPlayer.OPT_CATEGORY_FORMAT, "rtsp_transport", "tcp"))
-        GSYVideoManager.instance().optionModelList = optionModelList
-    }
-
     private fun initData(args: Bundle?) {
         val useDataHolder = args?.getBoolean("useVideoDataHolder", false) ?: false
         
@@ -304,14 +284,8 @@ class PlayerActivity : AppCompatActivity(), GSYVideoProgressListener {
         }
         Debuger.printfLog("headers=$headers")
 
-        if (playerType == "ijkplayer") {
-            Debuger.printfError("player = $playerType")
-            PlayerFactory.setPlayManager(IjkPlayerManager::class.java)
-            configureIjkPlayer()
-        } else {
-            Debuger.printfError("player = $playerType")
-            PlayerFactory.setPlayManager(Exo2PlayerManager::class.java)
-        }
+        Debuger.printfError("player = $playerType")
+        PlayerFactory.setPlayManager(Exo2PlayerManager::class.java)
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
@@ -426,28 +400,13 @@ class PlayerActivity : AppCompatActivity(), GSYVideoProgressListener {
 
                 override fun onPlayError(url: String?, vararg objects: Any?) {
                     super.onPlayError(url, *objects)
-                    if (totalTime > 0) {
-                        gsyVideoPlayer.seekOnStart = currentTime
-                        gsyVideoPlayer.currentPlayer.seekOnStart = currentTime
-                    }
                     Debuger.printfError("***** onPlayError ****")
-                    if (playerType != "ijkplayer") {
-                        Debuger.printfError("ExoPlayer failed, switching to ijkplayer")
-                        playerType = "ijkplayer"
-                        PlayerFactory.setPlayManager(IjkPlayerManager::class.java)
-                        configureIjkPlayer()
-                        val seekPos = if (totalTime > 0) currentTime else 0L
-                        gsyVideoPlayer.currentPlayer.seekOnStart = seekPos
-                        startPlay(index, videos[index])
-                        SmartToast.show(this@PlayerActivity, "已切换到 IJKPlayer 重试")
-                    }
+                    // The Flutter side will handle fallback to VLC player
+                    SmartToast.show(this@PlayerActivity, "ExoPlayer 播放失败")
+                    finish()
                 }
             }).setLockClickListener { _, lock ->
                 orientationUtils.isEnable = !lock
-            }.apply {
-                if (playerType == "ijkplayer") {
-                    configureIjkPlayer()
-                }
             }.build(gsyVideoPlayer)
 
         gsyVideoPlayer.fullscreenButton.setOnClickListener {

@@ -990,6 +990,9 @@ class LoginScreenController extends GetxController with WidgetsBindingObserver {
 
   /// 非编辑模式时，从数据库恢复 remark（别名），防止 token 失效重新登录时丢失
   Future<void> _restoreRemarkFromDatabase() async {
+    // 编辑模式下不应从数据库恢复 remark，因为 initForEdit 已正确设置了被编辑服务器的别名
+    // 由于此方法是异步的，可能在 initForEdit 之后才完成，需要防止覆盖正确的值
+    if (isEditingServer) return;
     final currentUser = userController.user.value;
     if (currentUser.serverUrl.isEmpty) return;
     try {

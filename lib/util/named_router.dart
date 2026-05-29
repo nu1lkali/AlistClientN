@@ -1,4 +1,4 @@
-class NamedRouter {
+ class NamedRouter {
   // root
   static const root = "/index";
 
