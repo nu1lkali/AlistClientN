@@ -63,7 +63,7 @@ class _DislikedVideosScreenState extends State<DislikedVideosScreen> {
   Widget build(BuildContext context) {
     final user = _userController.user.value;
     return AlistScaffold(
-      appbarTitle: const Text('不喜欢列表'),
+      appbarTitle: const Text('不喜欢视频列表'),
       appbarActions: [
         IconButton(
           icon: const Icon(Icons.article_outlined),
@@ -71,7 +71,12 @@ class _DislikedVideosScreenState extends State<DislikedVideosScreen> {
           onPressed: () => _showLog(context),
         ),
         IconButton(
-          icon: const Icon(Icons.delete_sweep_rounded),
+          icon: const Icon(Icons.thumb_up_alt_rounded),
+          tooltip: '取消全部标记（不删除文件）',
+          onPressed: () => _unmarkAll(),
+        ),
+        IconButton(
+          icon: const Icon(Icons.delete_sweep_rounded, size: 28),
           tooltip: '全部删除（删除文件）',
           onPressed: () => _deleteAll(),
         ),
@@ -266,6 +271,41 @@ class _DislikedVideosScreenState extends State<DislikedVideosScreen> {
         SmartDialog.showToast('删除失败: $msg');
       },
     );
+  }
+
+  Future<void> _unmarkAll() async {
+    final user = _userController.user.value;
+    final dao = _databaseController.dislikedVideoDao;
+    final items = await dao.list(user.serverUrl, user.username).first;
+    if (items == null || items.isEmpty) {
+      SmartDialog.showToast('列表为空');
+      return;
+    }
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('确认取消全部标记'),
+        content: Text('确定要取消 ${items.length} 个视频的不喜欢标记吗？（不会删除文件）'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('确定'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+
+    for (final item in items) {
+      await dao.deleteByPath(user.serverUrl, user.username, item.remotePath);
+      await DislikeLog.append('批量取消标记', item.name, item.remotePath, user.username, user.serverUrl);
+    }
+    SmartDialog.showToast('已取消全部标记 (${items.length} 个)');
   }
 
   Future<void> _deleteAll() async {

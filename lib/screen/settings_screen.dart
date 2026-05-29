@@ -159,7 +159,7 @@ class _SettingsContainerState extends State<_SettingsContainer>
               : Padding(padding: const EdgeInsets.all(8), child: Image.asset(settingsMenu.icon, color: isDark ? Colors.white.withOpacity(0.9) : scheme.primary)),
         ),
         title: Text(settingsMenu.name, style: TextStyle(fontSize: 15, fontWeight: FontWeight.w500, letterSpacing: -0.2)),
-        subtitle: Text('适合局域网环境，提前加载子文件夹', style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant)),
+        subtitle: Text('适合局域网环境，提前加载子文件夹', style: TextStyle(fontSize: 11, color: scheme.onSurfaceVariant)),
         trailing: Obx(() => Switch(value: _aggressiveCacheEnabled.value, onChanged: (value) { SpUtil.putBool(AlistConstant.enableAggressiveCache, value); _aggressiveCacheEnabled.value = value; })),
       );
     }

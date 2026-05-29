@@ -425,6 +425,8 @@ class LoginScreenController extends GetxController with WidgetsBindingObserver {
       passwordController.text = userController
           .user()
           .password ?? "";
+      // 非编辑模式时，从数据库恢复 remark（别名），防止 token 失效重新登录时丢失
+      _restoreRemarkFromDatabase();
     }
     bool isAgreePrivacyPolicy =
         SpUtil.getBool(AlistConstant.isAgreePrivacyPolicy) ?? false;
@@ -584,6 +586,13 @@ class LoginScreenController extends GetxController with WidgetsBindingObserver {
   void _insertUser2Database(User user) async {
     var original = await _databaseController.serverDao
         .findServer(user.serverUrl, user.username);
+    String? remark = remarkController.text.trim().isEmpty 
+        ? null 
+        : remarkController.text.trim();
+    // 如果新 remark 为空但旧记录有 remark，保留旧 remark（防御性修复）
+    if (remark == null && original?.remark != null) {
+      remark = original!.remark;
+    }
     if (original != null) {
       await _databaseController.serverDao.deleteServer(original);
     }
@@ -599,7 +608,7 @@ class LoginScreenController extends GetxController with WidgetsBindingObserver {
         ignoreSSLError: ignoreSSLError.value,
         createTime: currentTimeMillis(),
         updateTime: currentTimeMillis(),
-        remark: remarkController.text.trim().isEmpty ? null : remarkController.text.trim(),
+        remark: remark,
       ),
     );
   }
@@ -977,6 +986,23 @@ class LoginScreenController extends GetxController with WidgetsBindingObserver {
         offset)}";
     addressController.selection =
         TextSelection.fromPosition(TextPosition(offset: offset + text.length));
+  }
+
+  /// 非编辑模式时，从数据库恢复 remark（别名），防止 token 失效重新登录时丢失
+  Future<void> _restoreRemarkFromDatabase() async {
+    final currentUser = userController.user.value;
+    if (currentUser.serverUrl.isEmpty) return;
+    try {
+      var server = await _databaseController.serverDao.findServer(
+        currentUser.serverUrl,
+        currentUser.username,
+      );
+      if (server?.remark != null && server!.remark!.isNotEmpty) {
+        remarkController.text = server.remark!;
+      }
+    } catch (_) {
+      // 忽略错误，remark 为空也是可接受的
+    }
   }
 
   void _showDavTipsDialog({bool isLogin = false}) {
