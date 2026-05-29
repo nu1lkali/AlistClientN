@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:alist/database/alist_database_controller.dart';
 import 'package:alist/database/table/disliked_video.dart';
 import 'package:alist/entity/file_remove_req.dart';
@@ -10,6 +12,41 @@ import 'package:alist/widget/alist_scaffold.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_smart_dialog/flutter_smart_dialog.dart';
 import 'package:get/get.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:intl/intl.dart';
+
+class DislikeLog {
+  static String _logPath = '';
+  static Future<String> get logPath async {
+    if (_logPath.isEmpty) {
+      final dir = await getApplicationDocumentsDirectory();
+      _logPath = '${dir.path}/dislike_log.txt';
+    }
+    return _logPath;
+  }
+
+  static Future<void> append(String action, String name, String path, String user, String server) async {
+    try {
+      final now = DateFormat('yyyy-MM-dd HH:mm:ss').format(DateTime.now());
+      final line = '[$now] $action | name=$name | path=$path | user=$user | server=$server\n';
+      final filePath = await logPath;
+      final file = File(filePath);
+      await file.parent.create(recursive: true);
+      await file.writeAsString(line, mode: FileMode.append);
+    } catch (_) {}
+  }
+
+  static Future<String> read() async {
+    try {
+      final filePath = await logPath;
+      final file = File(filePath);
+      if (!await file.exists()) return '暂无日志';
+      return await file.readAsString();
+    } catch (_) {
+      return '读取日志失败';
+    }
+  }
+}
 
 class DislikedVideosScreen extends StatefulWidget {
   const DislikedVideosScreen({super.key});
@@ -28,6 +65,11 @@ class _DislikedVideosScreenState extends State<DislikedVideosScreen> {
     return AlistScaffold(
       appbarTitle: const Text('不喜欢列表'),
       appbarActions: [
+        IconButton(
+          icon: const Icon(Icons.article_outlined),
+          tooltip: '查看日志',
+          onPressed: () => _showLog(context),
+        ),
         IconButton(
           icon: const Icon(Icons.delete_sweep_rounded),
           tooltip: '全部删除（删除文件）',
@@ -100,6 +142,64 @@ class _DislikedVideosScreenState extends State<DislikedVideosScreen> {
     );
   }
 
+  void _showLog(BuildContext context) async {
+    final content = await DislikeLog.read();
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (ctx) {
+        return SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 16, 8, 8),
+                child: Row(
+                  children: [
+                    const Text('操作日志', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                    const Spacer(),
+                    IconButton(
+                      icon: const Icon(Icons.delete_outline),
+                      tooltip: '清空日志',
+                      onPressed: () async {
+                        try {
+                          final path = await DislikeLog.logPath;
+                          await File(path).writeAsString('');
+                          if (ctx.mounted) Navigator.pop(ctx);
+                          SmartDialog.showToast('日志已清空');
+                        } catch (_) {
+                          SmartDialog.showToast('清空失败');
+                        }
+                      },
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.close),
+                      onPressed: () => Navigator.pop(ctx),
+                    ),
+                  ],
+                ),
+              ),
+              const Divider(height: 1),
+              Flexible(
+                child: SingleChildScrollView(
+                  padding: const EdgeInsets.all(16),
+                  child: SelectableText(
+                    content,
+                    style: const TextStyle(fontSize: 12, fontFamily: 'monospace', height: 1.5),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
   void _preview(DislikedVideo item) {
     final video = VideoItem(
       name: item.name,
@@ -117,6 +217,7 @@ class _DislikedVideosScreenState extends State<DislikedVideosScreen> {
     final user = _userController.user.value;
     await _databaseController.dislikedVideoDao
         .deleteByPath(user.serverUrl, user.username, item.remotePath);
+    await DislikeLog.append('取消标记', item.name, item.remotePath, user.username, user.serverUrl);
     SmartDialog.showToast('已取消标记');
   }
 
@@ -148,17 +249,19 @@ class _DislikedVideosScreenState extends State<DislikedVideosScreen> {
     req.names = [fileName];
 
     SmartDialog.showLoading(msg: '删除中...');
+    final user = _userController.user.value;
     await DioUtils.instance.requestNetwork<String?>(
       Method.post, 'fs/remove',
       params: req.toJson(),
       onSuccess: (_) {
-        final user = _userController.user.value;
         _databaseController.dislikedVideoDao
             .deleteByPath(user.serverUrl, user.username, item.remotePath);
         SmartDialog.dismiss();
+        DislikeLog.append('删除文件', item.name, item.remotePath, user.username, user.serverUrl);
         SmartDialog.showToast('删除成功');
       },
       onError: (_, msg) {
+        DislikeLog.append('删除失败', item.name, item.remotePath, user.username, user.serverUrl);
         SmartDialog.dismiss();
         SmartDialog.showToast('删除失败: $msg');
       },
@@ -212,9 +315,11 @@ class _DislikedVideosScreenState extends State<DislikedVideosScreen> {
         onSuccess: (_) {
           successCount++;
           dao.deleteByPath(user.serverUrl, user.username, item.remotePath);
+          DislikeLog.append('批量删除', item.name, item.remotePath, user.username, user.serverUrl);
         },
         onError: (_, __) {
           failCount++;
+          DislikeLog.append('批量删除失败', item.name, item.remotePath, user.username, user.serverUrl);
         },
       );
     }

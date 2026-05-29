@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:alist/database/alist_database_controller.dart';
+import 'package:alist/screen/disliked_videos_screen.dart';
 import 'package:alist/database/table/disliked_video.dart';
 import 'package:alist/database/table/favorite.dart';
 import 'package:alist/database/table/file_viewing_record.dart';
@@ -179,6 +180,7 @@ class MethodCallHandler {
         
         if (existing != null) {
           await dao.deleteByPath(user.serverUrl, user.username, path);
+          await DislikeLog.append('取消标记(原生)', name, path, user.username, user.serverUrl);
           return "false";
         } else {
           await dao.insertRecord(DislikedVideo(
@@ -194,6 +196,7 @@ class MethodCallHandler {
             provider: provider ?? "",
             createTime: DateTime.now().millisecondsSinceEpoch,
           ));
+          await DislikeLog.append('标记不喜欢(原生)', name, path, user.username, user.serverUrl);
           return "true";
         }
 

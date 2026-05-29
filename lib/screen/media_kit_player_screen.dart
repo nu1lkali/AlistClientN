@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:alist/database/alist_database_controller.dart';
 import 'package:alist/database/table/disliked_video.dart';
+import 'package:alist/screen/disliked_videos_screen.dart';
 import 'package:alist/database/table/favorite.dart';
 import 'package:alist/screen/video_player_screen.dart';
 import 'package:alist/util/alist_plugin.dart';
@@ -299,6 +300,7 @@ class _MediaKitPlayerScreenState extends State<MediaKitPlayerScreen>
       final user = Get.find<UserController>().user.value;
       if (_isDisliked) {
         await _database.dislikedVideoDao.deleteByPath(user.serverUrl, user.username, rp);
+        await DislikeLog.append('取消标记(MPV)', nm, rp, user.username, user.serverUrl);
         _showToast('已取消不喜欢标记');
       } else {
         await _database.dislikedVideoDao.insertRecord(DislikedVideo(
@@ -314,6 +316,7 @@ class _MediaKitPlayerScreenState extends State<MediaKitPlayerScreen>
           provider: v["provider"] ?? "",
           createTime: DateTime.now().millisecondsSinceEpoch,
         ));
+        await DislikeLog.append('标记不喜欢(MPV)', nm, rp, user.username, user.serverUrl);
         _showToast('已标记为不喜欢');
       }
       if (mounted) setState(() => _isDisliked = !_isDisliked);
