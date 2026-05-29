@@ -263,7 +263,6 @@ class FileListMenuAnchor extends StatelessWidget {
                 if (menuEntity.menuGroupId == MenuGroupId.sort) {
                   LogUtil.d("isUp = ${menuEntity.isUp}");
                   if (menuEntity.menuId == MenuId.random) {
-                    // random sort: just select it, no direction toggle
                     for (var value in menuEntities) {
                       if (value == menuEntity) {
                         value.isUp = true;

@@ -60,6 +60,7 @@ public class AlistClientVideoPlayer extends NormalGSYVideoPlayer {
     private boolean isInPipMode = false;
     // PiP模式下用于拦截触摸事件的透明覆盖层
     private View pipTouchBlocker = null;
+    protected View btnDislike;
 
     public interface OnDeleteClickListener {
         void onDeleteClick();
@@ -81,11 +82,16 @@ public class AlistClientVideoPlayer extends NormalGSYVideoPlayer {
         void onPipClick();
     }
 
+    public interface OnDislikeClickListener {
+        void onDislikeClick();
+    }
+
     private OnDeleteClickListener deleteClickListener;
     private OnPlaylistClickListener playlistClickListener;
     private OnInfoClickListener infoClickListener;
     private OnFavoriteClickListener favoriteClickListener;
     private OnPipClickListener pipClickListener;
+    private OnDislikeClickListener dislikeClickListener;
 
     public void setOnDeleteClickListener(OnDeleteClickListener listener) {
         this.deleteClickListener = listener;
@@ -132,6 +138,15 @@ public class AlistClientVideoPlayer extends NormalGSYVideoPlayer {
         }
     }
 
+    public void setOnDislikeClickListener(OnDislikeClickListener listener) {
+        this.dislikeClickListener = listener;
+        if (btnDislike != null) {
+            btnDislike.setOnClickListener(v -> {
+                if (dislikeClickListener != null) dislikeClickListener.onDislikeClick();
+            });
+        }
+    }
+
     public AlistClientVideoPlayer(Context context, Boolean fullFlag) {
         super(context, fullFlag);
     }
@@ -164,6 +179,7 @@ public class AlistClientVideoPlayer extends NormalGSYVideoPlayer {
         btnInfo = findViewById(R.id.btn_info);
         btnFavorite = findViewById(R.id.btn_favorite);
         btnPip = findViewById(R.id.btn_pip);
+        btnDislike = findViewById(R.id.btn_dislike);
         btnRewind.setVisibility(View.INVISIBLE);
         btnFfwd.setVisibility(View.INVISIBLE);
         btnScreenshot.setOnClickListener(v -> takeScreenshot());

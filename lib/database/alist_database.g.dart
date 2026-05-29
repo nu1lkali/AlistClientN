@@ -81,7 +81,7 @@ class _$AlistDatabase extends AlistDatabase {
     Callback? callback,
   ]) async {
     final databaseOptions = sqflite.OpenDatabaseOptions(
-      version: 7,
+      version: 8,
       onConfigure: (database) async {
         await database.execute('PRAGMA foreign_keys = ON');
         await callback?.onConfigure?.call(database);
@@ -110,6 +110,8 @@ class _$AlistDatabase extends AlistDatabase {
             'CREATE TABLE IF NOT EXISTS `favorite` (`id` INTEGER PRIMARY KEY AUTOINCREMENT, `is_dir` INTEGER NOT NULL, `server_url` TEXT NOT NULL, `user_id` TEXT NOT NULL, `remote_path` TEXT NOT NULL, `name` TEXT NOT NULL, `size` INTEGER NOT NULL, `sign` TEXT, `thumb` TEXT, `modified` INTEGER NOT NULL, `provider` TEXT NOT NULL, `create_time` INTEGER NOT NULL, `path` TEXT NOT NULL)');
         await database.execute(
             'CREATE TABLE IF NOT EXISTS `search_history` (`id` INTEGER PRIMARY KEY AUTOINCREMENT, `server_url` TEXT NOT NULL, `user_id` TEXT NOT NULL, `keyword` TEXT NOT NULL, `timestamp` INTEGER NOT NULL)');
+        await database.execute(
+            'CREATE TABLE IF NOT EXISTS `disliked_video` (`id` INTEGER PRIMARY KEY AUTOINCREMENT, `server_url` TEXT NOT NULL, `user_id` TEXT NOT NULL, `remote_path` TEXT NOT NULL, `name` TEXT NOT NULL, `size` INTEGER NOT NULL, `sign` TEXT, `thumb` TEXT, `modified` INTEGER NOT NULL, `provider` TEXT NOT NULL, `create_time` INTEGER NOT NULL, `path` TEXT NOT NULL)');
 
         await callback?.onCreate?.call(database, version);
       },
@@ -155,6 +157,14 @@ class _$AlistDatabase extends AlistDatabase {
   SearchHistoryDao get searchHistoryDao {
     return _searchHistoryDaoInstance ??=
         _$SearchHistoryDao(database, changeListener);
+  }
+
+  DislikedVideoDao? _dislikedVideoDaoInstance;
+
+  @override
+  DislikedVideoDao get dislikedVideoDao {
+    return _dislikedVideoDaoInstance ??=
+        _$DislikedVideoDao(database, changeListener);
   }
 }
 
@@ -988,5 +998,148 @@ class _$SearchHistoryDao extends SearchHistoryDao {
   Future<int> insertHistory(SearchHistory history) {
     return _searchHistoryInsertionAdapter.insertAndReturnId(
         history, OnConflictStrategy.abort);
+  }
+}
+
+class _$DislikedVideoDao extends DislikedVideoDao {
+  _$DislikedVideoDao(
+    this.database,
+    this.changeListener,
+  )   : _queryAdapter = QueryAdapter(database, changeListener),
+        _dislikedVideoInsertionAdapter = InsertionAdapter(
+            database,
+            'disliked_video',
+            (DislikedVideo item) => <String, Object?>{
+                  'id': item.id,
+                  'server_url': item.serverUrl,
+                  'user_id': item.userId,
+                  'remote_path': item.remotePath,
+                  'name': item.name,
+                  'size': item.size,
+                  'sign': item.sign,
+                  'thumb': item.thumb,
+                  'modified': item.modified,
+                  'provider': item.provider,
+                  'create_time': item.createTime,
+                  'path': item.path
+                },
+            changeListener),
+        _dislikedVideoDeletionAdapter = DeletionAdapter(
+            database,
+            'disliked_video',
+            ['id'],
+            (DislikedVideo item) => <String, Object?>{
+                  'id': item.id,
+                  'server_url': item.serverUrl,
+                  'user_id': item.userId,
+                  'remote_path': item.remotePath,
+                  'name': item.name,
+                  'size': item.size,
+                  'sign': item.sign,
+                  'thumb': item.thumb,
+                  'modified': item.modified,
+                  'provider': item.provider,
+                  'create_time': item.createTime,
+                  'path': item.path
+                },
+            changeListener);
+
+  final sqflite.DatabaseExecutor database;
+
+  final StreamController<String> changeListener;
+
+  final QueryAdapter _queryAdapter;
+
+  final InsertionAdapter<DislikedVideo> _dislikedVideoInsertionAdapter;
+
+  final DeletionAdapter<DislikedVideo> _dislikedVideoDeletionAdapter;
+
+  @override
+  Future<DislikedVideo?> findByPath(
+    String serverUrl,
+    String userId,
+    String remotePath,
+  ) async {
+    return _queryAdapter.query(
+        'SELECT * FROM disliked_video WHERE server_url = ?1 AND user_id=?2 AND remote_path=?3 LIMIT 1',
+        mapper: (Map<String, Object?> row) => DislikedVideo(
+            id: row['id'] as int?,
+            serverUrl: row['server_url'] as String,
+            userId: row['user_id'] as String,
+            remotePath: row['remote_path'] as String,
+            name: row['name'] as String,
+            path: row['path'] as String,
+            size: row['size'] as int,
+            sign: row['sign'] as String?,
+            thumb: row['thumb'] as String?,
+            modified: row['modified'] as int,
+            provider: row['provider'] as String,
+            createTime: row['create_time'] as int),
+        arguments: [serverUrl, userId, remotePath]);
+  }
+
+  @override
+  Stream<List<DislikedVideo>?> list(
+    String serverUrl,
+    String userId,
+  ) {
+    return _queryAdapter.queryListStream(
+        'SELECT * FROM disliked_video WHERE server_url = ?1 AND user_id=?2 ORDER BY id DESC',
+        mapper: (Map<String, Object?> row) => DislikedVideo(
+            id: row['id'] as int?,
+            serverUrl: row['server_url'] as String,
+            userId: row['user_id'] as String,
+            remotePath: row['remote_path'] as String,
+            name: row['name'] as String,
+            path: row['path'] as String,
+            size: row['size'] as int,
+            sign: row['sign'] as String?,
+            thumb: row['thumb'] as String?,
+            modified: row['modified'] as int,
+            provider: row['provider'] as String,
+            createTime: row['create_time'] as int),
+        arguments: [serverUrl, userId],
+        queryableName: 'disliked_video',
+        isView: false);
+  }
+
+  @override
+  Stream<int?> countStream() {
+    return _queryAdapter.queryStream('SELECT COUNT(id) FROM disliked_video',
+        mapper: (Map<String, Object?> row) => row.values.first as int,
+        queryableName: 'disliked_video',
+        isView: false);
+  }
+
+  @override
+  Future<void> deleteByPath(
+    String serverUrl,
+    String userId,
+    String remotePath,
+  ) async {
+    await _queryAdapter.queryNoReturn(
+        'DELETE FROM disliked_video WHERE server_url = ?1 AND user_id=?2 AND remote_path=?3',
+        arguments: [serverUrl, userId, remotePath]);
+  }
+
+  @override
+  Future<void> deleteAll(
+    String serverUrl,
+    String userId,
+  ) async {
+    await _queryAdapter.queryNoReturn(
+        'DELETE FROM disliked_video WHERE server_url = ?1 AND user_id=?2',
+        arguments: [serverUrl, userId]);
+  }
+
+  @override
+  Future<int> insertRecord(DislikedVideo video) {
+    return _dislikedVideoInsertionAdapter.insertAndReturnId(
+        video, OnConflictStrategy.abort);
+  }
+
+  @override
+  Future<int> deleteRecord(DislikedVideo video) {
+    return _dislikedVideoDeletionAdapter.deleteAndReturnChangedRows(video);
   }
 }

@@ -135,34 +135,43 @@
 
         <ImageView
             android:id="@+id/btn_pip"
-            android:layout_width="48dp"
-            android:layout_height="48dp"
-            android:padding="12dp"
+            android:layout_width="40dp"
+            android:layout_height="40dp"
+            android:padding="8dp"
             android:scaleType="centerInside"
             android:src="@drawable/ic_pip"
             android:contentDescription="画中画" />
 
         <ImageView
+            android:id="@+id/btn_dislike"
+            android:layout_width="36dp"
+            android:layout_height="36dp"
+            android:padding="8dp"
+            android:scaleType="centerInside"
+            android:src="@drawable/ic_dislike"
+            android:contentDescription="不喜欢" />
+
+        <ImageView
             android:id="@+id/btn_favorite"
-            android:layout_width="48dp"
-            android:layout_height="48dp"
-            android:padding="12dp"
+            android:layout_width="36dp"
+            android:layout_height="36dp"
+            android:padding="8dp"
             android:scaleType="centerInside"
             android:src="@drawable/ic_favorite" />
 
         <ImageView
             android:id="@+id/btn_info"
-            android:layout_width="48dp"
-            android:layout_height="48dp"
-            android:padding="12dp"
+            android:layout_width="36dp"
+            android:layout_height="36dp"
+            android:padding="8dp"
             android:scaleType="centerInside"
             android:src="@drawable/ic_info" />
 
         <ImageView
             android:id="@+id/btn_delete"
-            android:layout_width="48dp"
-            android:layout_height="48dp"
-            android:padding="12dp"
+            android:layout_width="36dp"
+            android:layout_height="36dp"
+            android:padding="8dp"
             android:scaleType="centerInside"
             android:src="@drawable/ic_delete" />
     </LinearLayout>

@@ -866,6 +866,71 @@ class _FileListScreenState extends State<FileListScreen>
     _goVideoPlayerScreen(context, randomVideo, videos, false);
   }
 
+  // Random walk algorithm to find a directory with videos (每层选1个随机子目录)
+  Future<_RandomVideoResult?> _randomWalkToFindVideos(String startPath, {int maxDepth = 10, int currentDepth = 0}) async {
+    if (currentDepth >= maxDepth) return null;
+
+    final body = {"path": startPath, "password": _password ?? "", "page": 1, "per_page": 500, "refresh": false};
+    final completer = Completer<_RandomVideoResult?>();
+
+    await DioUtils.instance.requestNetwork<FileListRespEntity>(
+      Method.post, "fs/list", params: body,
+      onSuccess: (data) async {
+        final files = data?.content ?? [];
+        final videoFiles = <FileItemVO>[];
+        final subDirs = <String>[];
+
+        for (var file in files) {
+          if (file.isDir) {
+            subDirs.add(startPath == '/' ? '/${file.name}' : '$startPath/${file.name}');
+          } else if (file.getFileType() == FileType.video) {
+            final filePath = startPath == '/' ? '/${file.name}' : '$startPath/${file.name}';
+            DateTime? modifyTime = file.parseModifiedTime();
+            videoFiles.add(FileItemVO(
+              name: file.name, path: filePath, size: file.size,
+              sizeDesc: file.formatBytes(), isDir: false,
+              modified: file.getReformatModified(modifyTime),
+              typeInt: file.type, type: FileType.video,
+              thumb: file.thumb, sign: file.sign,
+              icon: file.getFileIcon(),
+              modifiedMilliseconds: modifyTime?.millisecondsSinceEpoch ?? -1,
+              provider: data?.provider ?? "",
+            ));
+          }
+        }
+
+        final random = Random();
+        if (videoFiles.isNotEmpty && (subDirs.isEmpty || random.nextDouble() < 0.5)) {
+          completer.complete(_RandomVideoResult(dirPath: startPath, videoFiles: videoFiles));
+          return;
+        }
+        if (subDirs.isEmpty) {
+          completer.complete(videoFiles.isNotEmpty ? _RandomVideoResult(dirPath: startPath, videoFiles: videoFiles) : null);
+          return;
+        }
+
+        final candidates = subDirs.where((d) => !_recentPathsCache.contains(d)).toList();
+        final chosen = (candidates.isNotEmpty ? candidates : subDirs);
+        final nextDir = chosen[random.nextInt(chosen.length)];
+        final subResult = await _randomWalkToFindVideos(nextDir, maxDepth: maxDepth, currentDepth: currentDepth + 1);
+
+        if (subResult != null && subResult.videoFiles.isNotEmpty) {
+          completer.complete(subResult);
+        } else if (videoFiles.isNotEmpty) {
+          completer.complete(_RandomVideoResult(dirPath: startPath, videoFiles: videoFiles));
+        } else {
+          completer.complete(null);
+        }
+      },
+      onError: (code, msg) {
+        LogUtil.e('Failed to list directory $startPath: $msg');
+        completer.complete(null);
+      },
+    );
+
+    return completer.future;
+  }
+
   void _randomPlayVideoRecursive([String? fromPath]) async {
     SmartDialog.showLoading(msg: '随机探索中…', backDismiss: false, clickMaskDismiss: false);
     final targetPath = fromPath ?? path;
@@ -904,173 +969,51 @@ class _FileListScreenState extends State<FileListScreen>
     }
   }
 
-  // Random walk algorithm to find a directory with videos
-  // Uses hybrid exploration: breadth-first awareness with random selection
-  // Explores one random directory per level, avoiding deep-first bias
-  Future<_RandomVideoResult?> _randomWalkToFindVideos(String startPath, {int maxDepth = 10, int currentDepth = 0}) async {
-    if (currentDepth >= maxDepth) {
-      LogUtil.d('Max depth reached at $startPath');
-      return null;
-    }
-    
-    LogUtil.d('Exploring: $startPath (depth: $currentDepth)');
-    
-    final body = {
-      "path": startPath,
-      "password": _password ?? "",
-      "page": 1,
-      "per_page": 500,
-      "refresh": false
-    };
+  void _randomPlayN([String? fromPath]) async {
+    final n = SpUtil.getInt(AlistConstant.randomPlayCount, defValue: 10) ?? 10;
+    if (n <= 0 || !mounted) return;
 
-    final completer = Completer<_RandomVideoResult?>();
-    
-    await DioUtils.instance.requestNetwork<FileListRespEntity>(
-      Method.post, "fs/list",
-      params: body,
-      onSuccess: (data) async {
-        final files = data?.content ?? [];
-        final videoFiles = <FileItemVO>[];
-        final subDirs = <String>[];
-        
-        // Collect videos and subdirectories
-        for (var file in files) {
-          if (file.isDir) {
-            final subPath = startPath == '/' ? '/${file.name}' : '$startPath/${file.name}';
-            subDirs.add(subPath);
-          } else {
-            final fileType = file.getFileType();
-            if (fileType == FileType.video) {
-              final filePath = startPath == '/' ? '/${file.name}' : '$startPath/${file.name}';
-              DateTime? modifyTime = file.parseModifiedTime();
-              String? modifyTimeStr = file.getReformatModified(modifyTime);
-              
-              final fileItemVO = FileItemVO(
-                name: file.name,
-                path: filePath,
-                size: file.size,
-                sizeDesc: file.formatBytes(),
-                isDir: false,
-                modified: modifyTimeStr,
-                typeInt: file.type,
-                type: fileType,
-                thumb: file.thumb,
-                sign: file.sign,
-                icon: file.getFileIcon(),
-                modifiedMilliseconds: modifyTime?.millisecondsSinceEpoch ?? -1,
-                provider: data?.provider ?? "",
-              );
-              videoFiles.add(fileItemVO);
-            }
+    final targetPath = fromPath ?? path;
+
+    SmartDialog.showLoading(msg: '正在收集 $n 个视频…', backDismiss: false, clickMaskDismiss: false);
+    try {
+      final collected = <FileItemVO>[];
+      final maxAttempts = n * 3;
+
+      for (int i = 0; i < maxAttempts && collected.length < n && mounted; i++) {
+        final result = await _randomWalkToFindVideos(targetPath, maxDepth: 10);
+        if (result == null || result.videoFiles.isEmpty) continue;
+        // 取一个尚未收集的视频
+        for (final v in result.videoFiles) {
+          if (collected.length >= n) break;
+          if (!collected.any((c) => c.path == v.path)) {
+            collected.add(v);
+            break;
           }
         }
-        
-        LogUtil.d('Found ${videoFiles.length} videos and ${subDirs.length} folders in $startPath');
-        
-        // If current directory has videos, there's a chance to use them directly
-        if (videoFiles.isNotEmpty && subDirs.isEmpty) {
-          // No subdirectories, use current videos
-          LogUtil.d('Leaf directory with ${videoFiles.length} videos, using them');
-          completer.complete(_RandomVideoResult(dirPath: startPath, videoFiles: videoFiles));
-          return;
-        }
-        
-        if (videoFiles.isEmpty && subDirs.isEmpty) {
-          // Dead end - empty folder
-          LogUtil.d('Empty folder: $startPath');
-          completer.complete(null);
-          return;
-        }
-        
-        final random = Random();
-        
-        // Hybrid strategy: 
-        // - 30% chance to use current directory videos (if available)
-        // - 70% chance to explore subdirectories
-        if (videoFiles.isNotEmpty && random.nextDouble() < 0.3) {
-          LogUtil.d('Lucky! Using ${videoFiles.length} videos from current directory $startPath');
-          completer.complete(_RandomVideoResult(dirPath: startPath, videoFiles: videoFiles));
-          return;
-        }
-        
-        // Apply LRU path penalization: filter out recently visited paths with 80% probability
-        final availableSubDirs = <String>[];
-        final penalizedSubDirs = <String>[];
-        
-        for (final subDir in subDirs) {
-          if (_recentPathsCache.contains(subDir)) {
-            // This path was recently visited
-            // 80% chance to penalize (skip), 20% chance to allow
-            if (random.nextDouble() < 0.8) {
-              penalizedSubDirs.add(subDir);
-              LogUtil.d('Penalizing recently visited path: $subDir');
-              continue;
-            } else {
-              LogUtil.d('Lucky! Allowing recently visited path: $subDir');
-            }
-          }
-          availableSubDirs.add(subDir);
-        }
-        
-        // If all paths were penalized, use the penalized ones (fallback)
-        final dirsToTry = availableSubDirs.isNotEmpty ? availableSubDirs : penalizedSubDirs;
-        
-        if (dirsToTry.isEmpty) {
-          // No subdirectories to explore, use current videos if available
-          if (videoFiles.isNotEmpty) {
-            LogUtil.d('No subdirectories available, using ${videoFiles.length} videos from $startPath');
-            completer.complete(_RandomVideoResult(dirPath: startPath, videoFiles: videoFiles));
-          } else {
-            completer.complete(null);
-          }
-          return;
-        }
-        
-        // Shuffle directories to randomize selection
-        dirsToTry.shuffle(random);
-        
-        LogUtil.d('Will try ${dirsToTry.length} folders at depth $currentDepth (${penalizedSubDirs.length} penalized)');
-        
-        // Try directories one by one until we find videos
-        _RandomVideoResult? result;
-        for (final subDir in dirsToTry) {
-          LogUtil.d('Trying folder: $subDir');
-          
-          final subResult = await _randomWalkToFindVideos(
-            subDir, 
-            maxDepth: maxDepth, 
-            currentDepth: currentDepth + 1
-          );
-          
-          if (subResult != null && subResult.videoFiles.isNotEmpty) {
-            result = subResult;
-            LogUtil.d('Found ${subResult.videoFiles.length} videos in $subDir');
-            break; // Found videos, stop searching
-          } else {
-            LogUtil.d('$subDir was a dead end, trying next folder...');
-          }
-        }
-        
-        // After trying subdirectories
-        if (result != null) {
-          completer.complete(result);
-        } else if (videoFiles.isNotEmpty) {
-          // All subfolders were dead ends, but current dir has videos
-          LogUtil.d('All subfolders were dead ends, using ${videoFiles.length} videos from $startPath');
-          completer.complete(_RandomVideoResult(dirPath: startPath, videoFiles: videoFiles));
-        } else {
-          // No videos found anywhere
-          LogUtil.d('No videos found in $startPath or any subfolders');
-          completer.complete(null);
-        }
-      },
-      onError: (code, msg) {
-        LogUtil.e('Failed to list directory $startPath: $msg');
-        completer.complete(null);
-      },
-    );
-    
-    return completer.future;
+        // 避免重复漫步到同一目录
+        _recentPathsCache.add(result.dirPath);
+      }
+
+      SmartDialog.dismiss();
+
+      if (collected.isEmpty) {
+        SmartDialog.showToast('未找到视频文件');
+        return;
+      }
+
+      // 随机打乱收集结果并让第一个作为起始视频
+      collected.shuffle();
+      final firstVideo = collected.first;
+      collected.removeAt(0);
+      collected.insert(0, firstVideo);
+
+      _goVideoPlayerScreen(context, firstVideo, collected, false);
+    } catch (e) {
+      SmartDialog.dismiss();
+      SmartDialog.showToast('操作失败：$e');
+      LogUtil.e('Random play N error: $e');
+    }
   }
 
   void _doExtractAndOrganize(List<FileItemVO> filesFromSubdirs, List<String> allSubFolderPaths) async {
@@ -2185,7 +2128,6 @@ class _FileListScreenState extends State<FileListScreen>
                     title: const Text("多选"),
                     onTap: () async {
                       Navigator.pop(context);
-                      // Wait for dialog to close before updating state
                       await Future.delayed(const Duration(milliseconds: 100));
                       if (mounted) {
                         setState(() {
@@ -2237,6 +2179,15 @@ class _FileListScreenState extends State<FileListScreen>
                         }
                       },
                     ),
+                  if (file.isDir)
+                    ListTile(
+                      leading: const Icon(Icons.playlist_play_rounded),
+                      title: const Text("随机播放N个视频"),
+                      onTap: () {
+                        Navigator.pop(context);
+                        _randomPlayN(file.path);
+                      },
+                    ),
                   if (_hasWritePermission)
                     ListTile(
                       leading: const Icon(Icons.file_copy),
@@ -2276,9 +2227,7 @@ class _FileListScreenState extends State<FileListScreen>
                     ),
                   if (favorite != null)
                     ListTile(
-                      leading: const Icon(
-                        Icons.favorite_rounded,
-                      ),
+                      leading: const Icon(Icons.favorite_rounded),
                       title: Text(Intl.fileList_menu_cancel_favorite.tr),
                       onTap: () {
                         Navigator.pop(context);

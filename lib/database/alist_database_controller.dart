@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:alist/database/alist_database.dart';
+import 'package:alist/database/dao/disliked_video_dao.dart';
 import 'package:alist/database/dao/favorite_dao.dart';
 import 'package:alist/database/dao/file_download_record_dao.dart';
 import 'package:alist/database/dao/file_password_dao.dart';
@@ -23,6 +24,7 @@ class AlistDatabaseController extends GetxController {
   late final FileViewingRecordDao fileViewingRecordDao;
   late final FavoriteDao favoriteDao;
   late final SearchHistoryDao searchHistoryDao;
+  late final DislikedVideoDao dislikedVideoDao;
 
   // create migration
   final _migration1to2 = Migration(1, 2, (database) async {
@@ -76,6 +78,12 @@ class AlistDatabaseController extends GetxController {
         'ALTER TABLE `server` ADD `remark` TEXT');
   });
 
+  // create migration: add disliked_video table
+  final _migration7to8 = Migration(7, 8, (database) async {
+    await database.execute(
+        'CREATE TABLE IF NOT EXISTS `disliked_video` (`id` INTEGER PRIMARY KEY AUTOINCREMENT, `server_url` TEXT NOT NULL, `user_id` TEXT NOT NULL, `remote_path` TEXT NOT NULL, `name` TEXT NOT NULL, `size` INTEGER NOT NULL, `sign` TEXT, `thumb` TEXT, `modified` INTEGER NOT NULL, `provider` TEXT NOT NULL, `create_time` INTEGER NOT NULL, `path` TEXT NOT NULL)');
+  });
+
   Future<void> init() async {
     var dbName = "alist.db";
     if (Platform.isIOS) {
@@ -98,6 +106,7 @@ class AlistDatabaseController extends GetxController {
       _migration4to5,
       _migration5to6,
       _migration6to7,
+      _migration7to8,
     ]).build();
     videoViewingRecordDao = database.videoViewingRecordDao;
     downloadRecordRecordDao = database.downloadRecordRecordDao;
@@ -106,5 +115,6 @@ class AlistDatabaseController extends GetxController {
     fileViewingRecordDao = database.fileViewingRecordDao;
     favoriteDao = database.favoriteDao;
     searchHistoryDao = database.searchHistoryDao;
+    dislikedVideoDao = database.dislikedVideoDao;
   }
 }

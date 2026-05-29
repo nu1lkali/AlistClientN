@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:alist/database/alist_database_controller.dart';
+import 'package:alist/database/table/disliked_video.dart';
 import 'package:alist/database/table/favorite.dart';
 import 'package:alist/screen/video_player_screen.dart';
 import 'package:alist/util/alist_plugin.dart';
@@ -50,7 +51,7 @@ class _MediaKitPlayerScreenState extends State<MediaKitPlayerScreen>
   bool _isSwitching = false;
   late final AnimationController _playlistAnimationController;
   late final Animation<Offset> _playlistSlideAnimation;
-  bool _isFullscreen = false, _isCapturing = false, _isFavorite = false;
+  bool _isFullscreen = false, _isCapturing = false, _isFavorite = false, _isDisliked = false;
   VerticalDragType? _verticalDragType;
   bool _verticalDragging = false;
   double _systemVolumeValue = 0.5, _systemVolumeDragStartValue = 0.5;
@@ -88,6 +89,7 @@ class _MediaKitPlayerScreenState extends State<MediaKitPlayerScreen>
     _controller = VideoController(_player);
     _initBrightnessAndVolume();
     _checkFavoriteStatus();
+    _checkDislikedStatus();
     _hideSystemUI();
     WidgetsBinding.instance.addObserver(this);
     _posSub = _player.stream.position.listen((p) { if (mounted && !_isDraggingSlider) setState(() => _position = p); });
@@ -149,7 +151,7 @@ class _MediaKitPlayerScreenState extends State<MediaKitPlayerScreen>
         if (mounted) { setState(() { _playbackError = true; _isSwitching = false; _buffering = false; }); _showToast("播放失败: $e"); }
         return;
       }
-      _closeSheetAndPanel(); _checkFavoriteStatus();
+      _closeSheetAndPanel(); _checkFavoriteStatus(); _checkDislikedStatus();
       // Combined conditions: video params ready + buffering finished + 150ms delay
       bool videoParamsReady = false;
       bool bufferingReady = false;
@@ -279,6 +281,42 @@ class _MediaKitPlayerScreenState extends State<MediaKitPlayerScreen>
         _showToast('已添加到收藏');
       }
       if (mounted) setState(() => _isFavorite = !_isFavorite);
+    } catch (e) { _showToast('操作失败: $e'); }
+  }
+
+  void _checkDislikedStatus() async {
+    final remotePath = _videos[_index]["remotePath"] ?? ""; if (remotePath.isEmpty) return;
+    try {
+      final user = Get.find<UserController>().user.value;
+      final disliked = await _database.dislikedVideoDao.findByPath(user.serverUrl, user.username, remotePath);
+      if (mounted) setState(() => _isDisliked = disliked != null);
+    } catch (_) { if (mounted) setState(() => _isDisliked = false); }
+  }
+
+  void _toggleDisliked() async {
+    final v = _videos[_index]; final rp = v["remotePath"] ?? ""; final nm = v["name"] ?? ""; if (rp.isEmpty) return;
+    try {
+      final user = Get.find<UserController>().user.value;
+      if (_isDisliked) {
+        await _database.dislikedVideoDao.deleteByPath(user.serverUrl, user.username, rp);
+        _showToast('已取消不喜欢标记');
+      } else {
+        await _database.dislikedVideoDao.insertRecord(DislikedVideo(
+          serverUrl: user.serverUrl,
+          userId: user.username,
+          remotePath: rp,
+          name: nm,
+          path: rp,
+          size: int.tryParse(v["size"] ?? "0") ?? 0,
+          sign: v["sign"],
+          thumb: v["thumb"],
+          modified: int.tryParse(v["modifiedMilliseconds"] ?? "0") ?? 0,
+          provider: v["provider"] ?? "",
+          createTime: DateTime.now().millisecondsSinceEpoch,
+        ));
+        _showToast('已标记为不喜欢');
+      }
+      if (mounted) setState(() => _isDisliked = !_isDisliked);
     } catch (e) { _showToast('操作失败: $e'); }
   }
 
@@ -459,6 +497,7 @@ class _MediaKitPlayerScreenState extends State<MediaKitPlayerScreen>
   }
 
   Widget _buildMoreSheet() => _SheetContainer(title: '更多', onClose: _closeSheetAndPanel, child: SingleChildScrollView(child: Column(mainAxisSize: MainAxisSize.min, children: [
+    _moreTile(_isDisliked ? Icons.thumb_down : Icons.thumb_down_alt_outlined, _isDisliked ? '取消不喜欢' : '标记不喜欢', _isDisliked ? '已标记' : null, () { _closeSheetAndPanel(); _toggleDisliked(); }),
     _moreTile(Icons.swap_horiz_rounded, '交换亮度/音量位置', _swapVolumeAndBrightness ? '已交换' : null, () { setState(() => _swapVolumeAndBrightness = !_swapVolumeAndBrightness); _showToast(_swapVolumeAndBrightness ? '已交换' : '已恢复默认'); _closeSheetAndPanel(); }),
     _moreTile(Icons.camera_alt_rounded, '截图', null, () { _closeSheetAndPanel(); _captureFrame(); }),
     _moreTile(Icons.info_outline_rounded, '视频信息', null, () { _closeSheetAndPanel(); _showVideoInfo(); }),

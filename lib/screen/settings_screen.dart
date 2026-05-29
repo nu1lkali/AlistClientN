@@ -55,15 +55,10 @@ class _SettingsContainerState extends State<_SettingsContainer>
     super.initState();
     _initPackageInfo();
     
-    // Initialize aggressive cache setting
     _aggressiveCacheEnabled = (SpUtil.getBool(AlistConstant.enableAggressiveCache, defValue: true) ?? true).obs;
-    // Initialize audio player UI style
     _audioPlayerUiStyle = (SpUtil.getInt(AlistConstant.audioPlayerUiStyle, defValue: 0) ?? 0).obs;
-    // Initialize grouped random sort
     _groupedRandomSort = (SpUtil.getBool(AlistConstant.groupedRandomSort, defValue: false) ?? false).obs;
-    // Initialize media kit player
     _enableMediaKitPlayer = (SpUtil.getBool(AlistConstant.enableMediaKitPlayer, defValue: false) ?? false).obs;
-    // Initialize auto PiP setting
     _autoPipEnabled = (SpUtil.getBool(AlistConstant.autoPipEnabled, defValue: true) ?? true).obs;
 
     _serverStreamSubscription =
@@ -84,7 +79,6 @@ class _SettingsContainerState extends State<_SettingsContainer>
     final isDark = Theme.of(context).brightness == Brightness.dark;
     List<SettingsMenu> menus = _buildSettingsMenuItems(context);
 
-    // group: account/storage | tools | about
     final accountMenus = menus.where((m) =>
         m.menuId == MenuId.account || m.menuId == MenuId.signIn).toList();
     final toolMenus = menus.where((m) =>
@@ -99,7 +93,9 @@ class _SettingsContainerState extends State<_SettingsContainer>
         m.menuId == MenuId.iptvUrl ||
         m.menuId == MenuId.slideshowInterval ||
         m.menuId == MenuId.themeColor ||
-        m.menuId == MenuId.autoPip).toList();
+        m.menuId == MenuId.autoPip ||
+        m.menuId == MenuId.randomPlayCount ||
+        m.menuId == MenuId.dislikedVideos).toList();
     final aboutMenus = menus.where((m) =>
         m.menuId == MenuId.donate ||
         m.menuId == MenuId.privacyPolicy ||
@@ -148,216 +144,63 @@ class _SettingsContainerState extends State<_SettingsContainer>
   Widget _buildCardItem(SettingsMenu settingsMenu, BuildContext context, bool isDark) {
     final scheme = Theme.of(context).colorScheme;
     
-    // Special handling for aggressive cache toggle
     if (settingsMenu.menuId == MenuId.aggressiveCache) {
       return ListTile(
         contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
         leading: Container(
-          width: 44,
-          height: 44,
+          width: 44, height: 44,
           decoration: BoxDecoration(
-            gradient: LinearGradient(
-              colors: [
-                scheme.primaryContainer.withOpacity(0.8),
-                scheme.primaryContainer.withOpacity(0.5),
-              ],
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-            ),
+            gradient: LinearGradient(colors: [scheme.primaryContainer.withOpacity(0.8), scheme.primaryContainer.withOpacity(0.5)], begin: Alignment.topLeft, end: Alignment.bottomRight),
             borderRadius: BorderRadius.circular(12),
-            boxShadow: [
-              BoxShadow(
-                color: scheme.primary.withOpacity(0.1),
-                blurRadius: 8,
-                offset: const Offset(0, 2),
-              ),
-            ],
+            boxShadow: [BoxShadow(color: scheme.primary.withOpacity(0.1), blurRadius: 8, offset: const Offset(0, 2))],
           ),
           child: settingsMenu.iconData != null
-              ? Icon(settingsMenu.iconData, size: 22,
-                  color: isDark ? Colors.white.withOpacity(0.9) : scheme.primary)
-              : Padding(
-                  padding: const EdgeInsets.all(8),
-                  child: Image.asset(settingsMenu.icon,
-                      color: isDark ? Colors.white.withOpacity(0.9) : scheme.primary),
-                ),
+              ? Icon(settingsMenu.iconData, size: 22, color: isDark ? Colors.white.withOpacity(0.9) : scheme.primary)
+              : Padding(padding: const EdgeInsets.all(8), child: Image.asset(settingsMenu.icon, color: isDark ? Colors.white.withOpacity(0.9) : scheme.primary)),
         ),
-        title: Text(
-          settingsMenu.name,
-          style: TextStyle(
-            fontSize: 15,
-            fontWeight: FontWeight.w500,
-            letterSpacing: -0.2,
-          ),
-        ),
-        subtitle: Text(
-          '适合局域网环境，提前加载子文件夹',
-          style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
-        ),
-        trailing: Obx(() => Switch(
-          value: _aggressiveCacheEnabled.value,
-          onChanged: (value) {
-            SpUtil.putBool(AlistConstant.enableAggressiveCache, value);
-            _aggressiveCacheEnabled.value = value;
-          },
-        )),
+        title: Text(settingsMenu.name, style: TextStyle(fontSize: 15, fontWeight: FontWeight.w500, letterSpacing: -0.2)),
+        subtitle: Text('适合局域网环境，提前加载子文件夹', style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant)),
+        trailing: Obx(() => Switch(value: _aggressiveCacheEnabled.value, onChanged: (value) { SpUtil.putBool(AlistConstant.enableAggressiveCache, value); _aggressiveCacheEnabled.value = value; })),
       );
     }
 
-    // 音频播放器 UI 风格切换
     if (settingsMenu.menuId == MenuId.audioPlayerUi) {
       return ListTile(
         contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-        leading: Container(
-          width: 44,
-          height: 44,
-          decoration: BoxDecoration(
-            gradient: LinearGradient(
-              colors: [
-                scheme.primaryContainer.withOpacity(0.8),
-                scheme.primaryContainer.withOpacity(0.5),
-              ],
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-            ),
-            borderRadius: BorderRadius.circular(12),
-          ),
-          child: Icon(Icons.music_note_rounded, size: 22,
-              color: isDark ? Colors.white.withOpacity(0.9) : scheme.primary),
-        ),
-        title: const Text(
-          '音频播放器风格',
-          style: TextStyle(fontSize: 15, fontWeight: FontWeight.w500, letterSpacing: -0.2),
-        ),
-        subtitle: Obx(() => Text(
-          _audioPlayerUiStyle.value == 0 ? '经典黑胶风格' : '新风格',
-          style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
-        )),
-        trailing: Obx(() => Switch(
-          value: _audioPlayerUiStyle.value == 1,
-          onChanged: (value) {
-            final style = value ? 1 : 0;
-            SpUtil.putInt(AlistConstant.audioPlayerUiStyle, style);
-            _audioPlayerUiStyle.value = style;
-          },
-        )),
+        leading: Container(width: 44, height: 44, decoration: BoxDecoration(gradient: LinearGradient(colors: [scheme.primaryContainer.withOpacity(0.8), scheme.primaryContainer.withOpacity(0.5)], begin: Alignment.topLeft, end: Alignment.bottomRight), borderRadius: BorderRadius.circular(12)), child: Icon(Icons.music_note_rounded, size: 22, color: isDark ? Colors.white.withOpacity(0.9) : scheme.primary)),
+        title: const Text('音频播放器风格', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w500, letterSpacing: -0.2)),
+        subtitle: Obx(() => Text(_audioPlayerUiStyle.value == 0 ? '经典黑胶风格' : '新风格', style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant))),
+        trailing: Obx(() => Switch(value: _audioPlayerUiStyle.value == 1, onChanged: (value) { final style = value ? 1 : 0; SpUtil.putInt(AlistConstant.audioPlayerUiStyle, style); _audioPlayerUiStyle.value = style; })),
       );
     }
 
-    // 随机排序按类型分组
     if (settingsMenu.menuId == MenuId.groupedRandomSort) {
       return ListTile(
         contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-        leading: Container(
-          width: 44,
-          height: 44,
-          decoration: BoxDecoration(
-            gradient: LinearGradient(
-              colors: [
-                scheme.primaryContainer.withOpacity(0.8),
-                scheme.primaryContainer.withOpacity(0.5),
-              ],
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-            ),
-            borderRadius: BorderRadius.circular(12),
-          ),
-          child: Icon(Icons.shuffle_rounded, size: 22,
-              color: isDark ? Colors.white.withOpacity(0.9) : scheme.primary),
-        ),
-        title: const Text(
-          '随机排序按类型分组',
-          style: TextStyle(fontSize: 15, fontWeight: FontWeight.w500, letterSpacing: -0.2),
-        ),
-        subtitle: Text(
-          '随机排序时同类文件聚在一起',
-          style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
-        ),
-        trailing: Obx(() => Switch(
-          value: _groupedRandomSort.value,
-          onChanged: (value) {
-            SpUtil.putBool(AlistConstant.groupedRandomSort, value);
-            _groupedRandomSort.value = value;
-          },
-        )),
+        leading: Container(width: 44, height: 44, decoration: BoxDecoration(gradient: LinearGradient(colors: [scheme.primaryContainer.withOpacity(0.8), scheme.primaryContainer.withOpacity(0.5)], begin: Alignment.topLeft, end: Alignment.bottomRight), borderRadius: BorderRadius.circular(12)), child: Icon(Icons.shuffle_rounded, size: 22, color: isDark ? Colors.white.withOpacity(0.9) : scheme.primary)),
+        title: const Text('随机排序按类型分组', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w500, letterSpacing: -0.2)),
+        subtitle: Text('随机排序时同类文件聚在一起', style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant)),
+        trailing: Obx(() => Switch(value: _groupedRandomSort.value, onChanged: (value) { SpUtil.putBool(AlistConstant.groupedRandomSort, value); _groupedRandomSort.value = value; })),
       );
     }
 
-    // MPV 播放器开关
     if (settingsMenu.menuId == MenuId.enableMediaKitPlayer) {
       return ListTile(
         contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-        leading: Container(
-          width: 44,
-          height: 44,
-          decoration: BoxDecoration(
-            gradient: LinearGradient(
-              colors: [
-                scheme.primaryContainer.withOpacity(0.8),
-                scheme.primaryContainer.withOpacity(0.5),
-              ],
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-            ),
-            borderRadius: BorderRadius.circular(12),
-          ),
-          child: Icon(Icons.play_circle_filled, size: 22,
-              color: isDark ? Colors.white.withOpacity(0.9) : scheme.primary),
-        ),
-        title: const Text(
-          '启用 MPV 播放器',
-          style: TextStyle(fontSize: 15, fontWeight: FontWeight.w500, letterSpacing: -0.2),
-        ),
-        subtitle: Text(
-          '使用 libmpv 解码器播放视频',
-          style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
-        ),
-        trailing: Obx(() => Switch(
-          value: _enableMediaKitPlayer.value,
-          onChanged: (value) {
-            SpUtil.putBool(AlistConstant.enableMediaKitPlayer, value);
-            _enableMediaKitPlayer.value = value;
-          },
-        )),
+        leading: Container(width: 44, height: 44, decoration: BoxDecoration(gradient: LinearGradient(colors: [scheme.primaryContainer.withOpacity(0.8), scheme.primaryContainer.withOpacity(0.5)], begin: Alignment.topLeft, end: Alignment.bottomRight), borderRadius: BorderRadius.circular(12)), child: Icon(Icons.play_circle_filled, size: 22, color: isDark ? Colors.white.withOpacity(0.9) : scheme.primary)),
+        title: const Text('启用 MPV 播放器', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w500, letterSpacing: -0.2)),
+        subtitle: Text('使用 libmpv 解码器播放视频', style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant)),
+        trailing: Obx(() => Switch(value: _enableMediaKitPlayer.value, onChanged: (value) { SpUtil.putBool(AlistConstant.enableMediaKitPlayer, value); _enableMediaKitPlayer.value = value; })),
       );
     }
 
-    // 自动画中画开关
     if (settingsMenu.menuId == MenuId.autoPip) {
       return ListTile(
         contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-        leading: Container(
-          width: 44,
-          height: 44,
-          decoration: BoxDecoration(
-            gradient: LinearGradient(
-              colors: [
-                scheme.primaryContainer.withOpacity(0.8),
-                scheme.primaryContainer.withOpacity(0.5),
-              ],
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-            ),
-            borderRadius: BorderRadius.circular(12),
-          ),
-          child: Icon(Icons.picture_in_picture_alt_rounded, size: 22,
-              color: isDark ? Colors.white.withOpacity(0.9) : scheme.primary),
-        ),
-        title: const Text(
-          '自动画中画',
-          style: TextStyle(fontSize: 15, fontWeight: FontWeight.w500, letterSpacing: -0.2),
-        ),
-        subtitle: Text(
-          '按 Home 键时自动进入画中画',
-          style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
-        ),
-        trailing: Obx(() => Switch(
-          value: _autoPipEnabled.value,
-          onChanged: (value) {
-            SpUtil.putBool(AlistConstant.autoPipEnabled, value);
-            _autoPipEnabled.value = value;
-          },
-        )),
+        leading: Container(width: 44, height: 44, decoration: BoxDecoration(gradient: LinearGradient(colors: [scheme.primaryContainer.withOpacity(0.8), scheme.primaryContainer.withOpacity(0.5)], begin: Alignment.topLeft, end: Alignment.bottomRight), borderRadius: BorderRadius.circular(12)), child: Icon(Icons.picture_in_picture_alt_rounded, size: 22, color: isDark ? Colors.white.withOpacity(0.9) : scheme.primary)),
+        title: const Text('自动画中画', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w500, letterSpacing: -0.2)),
+        subtitle: Text('按 Home 键时自动进入画中画', style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant)),
+        trailing: Obx(() => Switch(value: _autoPipEnabled.value, onChanged: (value) { SpUtil.putBool(AlistConstant.autoPipEnabled, value); _autoPipEnabled.value = value; })),
       );
     }
     
@@ -365,45 +208,12 @@ class _SettingsContainerState extends State<_SettingsContainer>
       onTap: () => _handleMenuTap(settingsMenu, context),
       contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
       leading: Container(
-        width: 44,
-        height: 44,
-        decoration: BoxDecoration(
-          gradient: LinearGradient(
-            colors: [
-              scheme.primaryContainer.withOpacity(0.8),
-              scheme.primaryContainer.withOpacity(0.5),
-            ],
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-          ),
-          borderRadius: BorderRadius.circular(12),
-          boxShadow: [
-            BoxShadow(
-              color: scheme.primary.withOpacity(0.1),
-              blurRadius: 8,
-              offset: const Offset(0, 2),
-            ),
-          ],
-        ),
-        child: settingsMenu.iconData != null
-            ? Icon(settingsMenu.iconData, size: 22,
-                color: isDark ? Colors.white.withOpacity(0.9) : scheme.primary)
-            : Padding(
-                padding: const EdgeInsets.all(8),
-                child: Image.asset(settingsMenu.icon,
-                    color: isDark ? Colors.white.withOpacity(0.9) : scheme.primary),
-              ),
+        width: 44, height: 44,
+        decoration: BoxDecoration(gradient: LinearGradient(colors: [scheme.primaryContainer.withOpacity(0.8), scheme.primaryContainer.withOpacity(0.5)], begin: Alignment.topLeft, end: Alignment.bottomRight), borderRadius: BorderRadius.circular(12), boxShadow: [BoxShadow(color: scheme.primary.withOpacity(0.1), blurRadius: 8, offset: const Offset(0, 2))]),
+        child: settingsMenu.iconData != null ? Icon(settingsMenu.iconData, size: 22, color: isDark ? Colors.white.withOpacity(0.9) : scheme.primary) : Padding(padding: const EdgeInsets.all(8), child: Image.asset(settingsMenu.icon, color: isDark ? Colors.white.withOpacity(0.9) : scheme.primary)),
       ),
-      title: Text(
-        settingsMenu.name,
-        style: TextStyle(
-          fontSize: 15,
-          fontWeight: FontWeight.w500,
-          letterSpacing: -0.2,
-        ),
-      ),
-      trailing: Icon(Icons.chevron_right_rounded,
-          color: scheme.outlineVariant, size: 22),
+      title: Text(settingsMenu.name, style: TextStyle(fontSize: 15, fontWeight: FontWeight.w500, letterSpacing: -0.2)),
+      trailing: Icon(Icons.chevron_right_rounded, color: scheme.outlineVariant, size: 22),
     );
   }
 
@@ -418,6 +228,7 @@ class _SettingsContainerState extends State<_SettingsContainer>
       case MenuId.account:
       case MenuId.cacheManager:
       case MenuId.playerSettings:
+      case MenuId.dislikedVideos:
         Get.toNamed(settingsMenu.route!);
         break;
       case MenuId.aggressiveCache:
@@ -425,17 +236,16 @@ class _SettingsContainerState extends State<_SettingsContainer>
       case MenuId.groupedRandomSort:
       case MenuId.enableMediaKitPlayer:
       case MenuId.autoPip:
-        // toggle 类型，由 ListTile trailing Switch 处理，无需跳转
         break;
       case MenuId.themeColor:
         _showThemeColorPicker(context);
         break;
+      case MenuId.randomPlayCount:
+        _showRandomPlayCountDialog(context);
+        break;
       case MenuId.privacyPolicy:
         String local = Get.locale?.toString().startsWith("zh_") == true ? "zh" : "en_US";
-        Get.toNamed(NamedRouter.web, arguments: {
-          "url": "https://${Global.configServerHost}/alist_h5/privacyPolicy?version=${packageInfo?.version ?? ""}&lang=$local",
-          "title": Intl.settingsScreen_item_privacyPolicy.tr,
-        });
+        Get.toNamed(NamedRouter.web, arguments: {"url": "https://${Global.configServerHost}/alist_h5/privacyPolicy?version=${packageInfo?.version ?? ""}&lang=$local", "title": Intl.settingsScreen_item_privacyPolicy.tr});
         break;
       case MenuId.extensionFilter:
         _showExtensionFilterDialog(context);
@@ -448,262 +258,48 @@ class _SettingsContainerState extends State<_SettingsContainer>
         break;
       case MenuId.about:
         String local = Get.locale?.toString().startsWith("zh_") == true ? "zh" : "en_US";
-        Get.toNamed(NamedRouter.web, arguments: {
-          "url": "https://${Global.configServerHost}/alist_h5/declaration?version=${packageInfo?.version ?? ""}&lang=$local",
-          "title": Intl.screenName_about.tr,
-        });
+        Get.toNamed(NamedRouter.web, arguments: {"url": "https://${Global.configServerHost}/alist_h5/declaration?version=${packageInfo?.version ?? ""}&lang=$local", "title": Intl.screenName_about.tr});
         break;
     }
   }
 
-  ListTile _buildListItem(SettingsMenu settingsMenu, BuildContext context, bool isDarkMode) {
-    return ListTile(
-      onTap: () => _handleMenuTap(settingsMenu, context),
-      horizontalTitleGap: 2,
-      minVerticalPadding: 15,
-      leading: Image.asset(settingsMenu.icon),
-      title: Text(settingsMenu.name),
-      trailing: Image.asset(Images.iconArrowRight,
-          color: isDarkMode ? Colors.white : null),
+  void _showRandomPlayCountDialog(BuildContext context) {
+    final current = SpUtil.getInt(AlistConstant.randomPlayCount, defValue: 10) ?? 10;
+    final controller = TextEditingController(text: '$current');
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('随机播放数量'),
+        content: TextField(controller: controller, keyboardType: TextInputType.number, autofocus: true, decoration: const InputDecoration(hintText: '默认 10', border: OutlineInputBorder())),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('取消')),
+          FilledButton(onPressed: () { final v = int.tryParse(controller.text.trim()); if (v != null && v > 0) { SpUtil.putInt(AlistConstant.randomPlayCount, v); } Navigator.pop(ctx); }, child: const Text('确定')),
+        ],
+      ),
     );
   }
 
   void _showSlideshowIntervalDialog(BuildContext context) {
     final options = [1, 2, 3, 5, 8, 10, 15, 20, 30];
     final current = SpUtil.getInt(AlistConstant.slideshowIntervalSeconds, defValue: 3) ?? 3;
-    final customController = TextEditingController(
-      text: options.contains(current) ? '' : '$current',
-    );
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('幻灯片间隔时间'),
-        content: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              ...options.map((s) => RadioListTile<int>(
-                dense: true,
-                title: Text('$s 秒'),
-                value: s,
-                groupValue: current,
-                onChanged: (v) {
-                  if (v != null) {
-                    SpUtil.putInt(AlistConstant.slideshowIntervalSeconds, v);
-                    Navigator.pop(ctx);
-                  }
-                },
-              )),
-              const Divider(),
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 4),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: TextField(
-                        controller: customController,
-                        keyboardType: TextInputType.number,
-                        decoration: const InputDecoration(
-                          labelText: '自定义（秒）',
-                          hintText: '1 ~ 3600',
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    TextButton(
-                      onPressed: () {
-                        final v = int.tryParse(customController.text.trim());
-                        if (v != null && v >= 1 && v <= 3600) {
-                          SpUtil.putInt(AlistConstant.slideshowIntervalSeconds, v);
-                          Navigator.pop(ctx);
-                        }
-                      },
-                      child: const Text('确定'),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('取消'),
-          ),
-        ],
-      ),
-    );
+    showDialog(context: context, builder: (ctx) => AlertDialog(title: const Text('幻灯片间隔时间'), content: SingleChildScrollView(child: Column(mainAxisSize: MainAxisSize.min, children: [...options.map((s) => RadioListTile<int>(dense: true, title: Text('$s 秒'), value: s, groupValue: current, onChanged: (v) { if (v != null) { SpUtil.putInt(AlistConstant.slideshowIntervalSeconds, v); Navigator.pop(ctx); } }))])), actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('取消'))]));
   }
 
   void _showUrlInputDialog(BuildContext context) {
     final controller = TextEditingController();
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('输入流媒体地址'),
-        content: TextField(
-          controller: controller,
-          autofocus: true,
-          decoration: const InputDecoration(
-            hintText: 'http(s):// 或 rtmp:// 地址',
-          ),
-          keyboardType: TextInputType.url,
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('取消'),
-          ),
-          FilledButton(
-            onPressed: () {
-              final url = controller.text.trim();
-              Navigator.pop(ctx);
-              if (url.isEmpty) return;
-              // 所有地址直接进播放器，media_kit 自己处理 HLS/m3u8/rtmp 等格式
-              final channel = IptvChannel(name: url, url: url);
-              Get.toNamed(NamedRouter.iptvPlayer, arguments: {
-                'channel': channel,
-                'playlist': [channel],
-                'index': 0,
-              });
-            },
-            child: const Text('播放'),
-          ),
-        ],
-      ),
-    );
+    showDialog(context: context, builder: (ctx) => AlertDialog(title: const Text('输入流媒体地址'), content: TextField(controller: controller, autofocus: true, decoration: const InputDecoration(hintText: 'http(s):// 或 rtmp:// 地址'), keyboardType: TextInputType.url), actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('取消')), FilledButton(onPressed: () { final url = controller.text.trim(); Navigator.pop(ctx); if (url.isEmpty) return; Get.toNamed(NamedRouter.iptvPlayer, arguments: {'channel': IptvChannel(name: url, url: url), 'playlist': [IptvChannel(name: url, url: url)], 'index': 0}); }, child: const Text('播放'))]));
   }
 
   void _showExtensionFilterDialog(BuildContext context) {
     final currentFilter = SpUtil.getString(AlistConstant.extensionFilter);
     final defaultValue = currentFilter?.isNotEmpty == true ? currentFilter : 'nfo';
     final controller = TextEditingController(text: defaultValue);
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(Intl.extensionFilterDialog_title.tr),
-            const SizedBox(height: 4),
-            Text(
-              Intl.extensionFilterDialog_hint.tr,
-              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                color: Theme.of(context).colorScheme.onSurfaceVariant,
-              ),
-            ),
-          ],
-        ),
-        content: TextField(
-          controller: controller,
-          autofocus: true,
-          decoration: const InputDecoration(
-            hintText: 'nfo, html, txt',
-            border: OutlineInputBorder(),
-            isDense: true,
-            contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 12),
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: Text(Intl.cancel.tr),
-          ),
-          FilledButton(
-            onPressed: () {
-              final text = controller.text.trim();
-              SpUtil.putString(AlistConstant.extensionFilter, text);
-              Navigator.pop(ctx);
-              if (text.isNotEmpty) {
-                SmartDialog.showToast('已设置: $text');
-              } else {
-                SmartDialog.showToast('已清除扩展名过滤');
-              }
-            },
-            child: Text(Intl.save.tr),
-          ),
-        ],
-      ),
-    );
+    showDialog(context: context, builder: (ctx) => AlertDialog(title: Text(Intl.extensionFilterDialog_title.tr), content: TextField(controller: controller, autofocus: true, decoration: const InputDecoration(hintText: 'nfo, html, txt', border: OutlineInputBorder(), isDense: true, contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 12))), actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: Text(Intl.cancel.tr)), FilledButton(onPressed: () { final text = controller.text.trim(); SpUtil.putString(AlistConstant.extensionFilter, text); Navigator.pop(ctx); if (text.isNotEmpty) SmartDialog.showToast('已设置: $text'); else SmartDialog.showToast('已清除扩展名过滤'); }, child: Text(Intl.save.tr))]));
   }
 
   void _showThemeColorPicker(BuildContext context) {
-    const colors = [
-      Color(0xFF0060A9), // 蓝
-      Color(0xFF006E1C), // 绿
-      Color(0xFF9A4521), // 橙
-      Color(0xFF7B1FA2), // 紫
-      Color(0xFFC62828), // 红
-      Color(0xFF00695C), // 青绿
-      Color(0xFF1565C0), // 深蓝
-      Color(0xFF4A148C), // 深紫
-      Color(0xFF880E4F), // 玫红
-      Color(0xFF37474F), // 蓝灰
-      Color(0xFF4E342E), // 棕
-      Color(0xFF546E7A), // 灰蓝
-    ];
-
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: const Text("选择主题颜色", style: TextStyle(fontWeight: FontWeight.w600)),
-        content: Obx(() {
-          final currentColor = ThemeController.instance.seedColor.value.value;
-          return Wrap(
-            spacing: 16,
-            runSpacing: 16,
-            children: colors.map((color) {
-              final isSelected = currentColor == color.value;
-              return GestureDetector(
-                onTap: () {
-                  ThemeController.instance.setColor(color);
-                  Navigator.pop(ctx);
-                },
-                child: AnimatedContainer(
-                  duration: const Duration(milliseconds: 200),
-                  width: 52,
-                  height: 52,
-                  decoration: BoxDecoration(
-                    color: color,
-                    shape: BoxShape.circle,
-                    border: isSelected
-                        ? Border.all(
-                            color: Theme.of(context).brightness == Brightness.dark 
-                                ? Colors.white 
-                                : Colors.black, 
-                            width: 3)
-                        : null,
-                    boxShadow: [
-                      BoxShadow(
-                        color: color.withOpacity(isSelected ? 0.5 : 0.3),
-                        blurRadius: isSelected ? 12 : 8,
-                        offset: const Offset(0, 4),
-                      )
-                    ],
-                  ),
-                  child: isSelected
-                      ? Icon(Icons.check_rounded, 
-                          color: Theme.of(context).brightness == Brightness.dark 
-                              ? Colors.white 
-                              : Colors.black, 
-                          size: 24)
-                      : null,
-                ),
-              );
-            }).toList(),
-          );
-        }),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text("取消"),
-          ),
-        ],
-      ),
-    );
+    const colors = [Color(0xFF0060A9), Color(0xFF006E1C), Color(0xFF9A4521), Color(0xFF7B1FA2), Color(0xFFC62828), Color(0xFF00695C), Color(0xFF1565C0), Color(0xFF4A148C), Color(0xFF880E4F), Color(0xFF37474F), Color(0xFF4E342E), Color(0xFF546E7A)];
+    showDialog(context: context, builder: (ctx) => AlertDialog(shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)), title: const Text("选择主题颜色", style: TextStyle(fontWeight: FontWeight.w600)), content: Obx(() { final currentColor = ThemeController.instance.seedColor.value.value; return Wrap(spacing: 16, runSpacing: 16, children: colors.map((color) { final isSelected = currentColor == color.value; return GestureDetector(onTap: () { ThemeController.instance.setColor(color); Navigator.pop(ctx); }, child: AnimatedContainer(duration: const Duration(milliseconds: 200), width: 52, height: 52, decoration: BoxDecoration(color: color, shape: BoxShape.circle, border: isSelected ? Border.all(color: Theme.of(context).brightness == Brightness.dark ? Colors.white : Colors.black, width: 3) : null, boxShadow: [BoxShadow(color: color.withOpacity(isSelected ? 0.5 : 0.3), blurRadius: isSelected ? 12 : 8, offset: const Offset(0, 4))]), child: isSelected ? Icon(Icons.check_rounded, color: Theme.of(context).brightness == Brightness.dark ? Colors.white : Colors.black, size: 24) : null)); }).toList()); }), actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("取消"))]));
   }
 
   _initPackageInfo() async {
@@ -712,107 +308,28 @@ class _SettingsContainerState extends State<_SettingsContainer>
 
   List<SettingsMenu> _buildSettingsMenuItems(BuildContext context) {
     final settingsMenus = [
-      SettingsMenu(
-          menuId: MenuId.downloads,
-          name: Intl.settingsScreen_item_downloads.tr,
-          icon: Images.settingsScreenDownload,
-          route: NamedRouter.downloadManager),
-      SettingsMenu(
-          menuId: MenuId.cacheManager,
-          name: Intl.settingsScreen_item_cacheManagement.tr,
-          icon: Images.settingsScreenCacheManager,
-          route: NamedRouter.cacheManager),
-      SettingsMenu(
-          menuId: MenuId.aggressiveCache,
-          name: "智能预加载",
-          icon: Images.settingsScreenCacheManager,
-          iconData: Icons.speed_rounded),
-      SettingsMenu(
-          menuId: MenuId.audioPlayerUi,
-          name: "音频播放器风格",
-          icon: Images.settingsScreenPlayer,
-          iconData: Icons.music_note_rounded),
-      SettingsMenu(
-          menuId: MenuId.groupedRandomSort,
-          name: "随机排序按类型分组",
-          icon: Images.settingsScreenPlayer,
-          iconData: Icons.shuffle_rounded),
-      SettingsMenu(
-          menuId: MenuId.enableMediaKitPlayer,
-          name: "启用 MPV 播放器",
-          icon: Images.settingsScreenPlayer,
-          iconData: Icons.play_circle_filled),
-      SettingsMenu(
-          menuId: MenuId.extensionFilter,
-          name: Intl.settingsScreen_item_extensionFilter.tr,
-          icon: Images.settingsScreenPlayer,
-          iconData: Icons.filter_list_off_rounded),
-      SettingsMenu(
-          menuId: MenuId.themeColor,
-          name: "主题颜色",
-          icon: Images.settingsScreenPlayer,
-          iconData: Icons.palette_rounded),
-      SettingsMenu(
-          menuId: MenuId.playerSettings,
-          name: Intl.settingsScreen_item_videoPlayer.tr,
-          icon: Images.settingsScreenPlayer,
-          route: NamedRouter.playerSettings),
-      SettingsMenu(
-          menuId: MenuId.iptvUrl,
-          name: '流媒体地址播放',
-          icon: Images.settingsScreenPlayer,
-          iconData: Icons.live_tv_rounded),
-      SettingsMenu(
-          menuId: MenuId.slideshowInterval,
-          name: '幻灯片间隔时间',
-          icon: Images.settingsScreenPlayer,
-          iconData: Icons.slideshow_rounded),
-      SettingsMenu(
-          menuId: MenuId.autoPip,
-          name: '自动画中画',
-          icon: Images.settingsScreenPlayer,
-          iconData: Icons.picture_in_picture_alt_rounded),
-      SettingsMenu(
-          menuId: MenuId.privacyPolicy,
-          name: Intl.settingsScreen_item_privacyPolicy.tr,
-          icon: Images.settingsScreenPrivacyPolicy,
-          route: NamedRouter.donate),
-      SettingsMenu(
-        menuId: MenuId.about,
-        name: Intl.settingsScreen_item_about.tr,
-        icon: Images.settingsScreenAbout,
-        // route: NamedRouter.about,
-      ),
+      SettingsMenu(menuId: MenuId.downloads, name: Intl.settingsScreen_item_downloads.tr, icon: Images.settingsScreenDownload, route: NamedRouter.downloadManager),
+      SettingsMenu(menuId: MenuId.cacheManager, name: Intl.settingsScreen_item_cacheManagement.tr, icon: Images.settingsScreenCacheManager, route: NamedRouter.cacheManager),
+      SettingsMenu(menuId: MenuId.aggressiveCache, name: "智能预加载", icon: Images.settingsScreenCacheManager, iconData: Icons.speed_rounded),
+      SettingsMenu(menuId: MenuId.audioPlayerUi, name: "音频播放器风格", icon: Images.settingsScreenPlayer, iconData: Icons.music_note_rounded),
+      SettingsMenu(menuId: MenuId.groupedRandomSort, name: "随机排序按类型分组", icon: Images.settingsScreenPlayer, iconData: Icons.shuffle_rounded),
+      SettingsMenu(menuId: MenuId.enableMediaKitPlayer, name: "启用 MPV 播放器", icon: Images.settingsScreenPlayer, iconData: Icons.play_circle_filled),
+      SettingsMenu(menuId: MenuId.extensionFilter, name: Intl.settingsScreen_item_extensionFilter.tr, icon: Images.settingsScreenPlayer, iconData: Icons.filter_list_off_rounded),
+      SettingsMenu(menuId: MenuId.themeColor, name: "主题颜色", icon: Images.settingsScreenPlayer, iconData: Icons.palette_rounded),
+      SettingsMenu(menuId: MenuId.playerSettings, name: Intl.settingsScreen_item_videoPlayer.tr, icon: Images.settingsScreenPlayer, route: NamedRouter.playerSettings),
+      SettingsMenu(menuId: MenuId.iptvUrl, name: '流媒体地址播放', icon: Images.settingsScreenPlayer, iconData: Icons.live_tv_rounded),
+      SettingsMenu(menuId: MenuId.slideshowInterval, name: '幻灯片间隔时间', icon: Images.settingsScreenPlayer, iconData: Icons.slideshow_rounded),
+      SettingsMenu(menuId: MenuId.autoPip, name: '自动画中画', icon: Images.settingsScreenPlayer, iconData: Icons.picture_in_picture_alt_rounded),
+      SettingsMenu(menuId: MenuId.randomPlayCount, name: '随机播放数量', icon: Images.settingsScreenPlayer, iconData: Icons.playlist_play_rounded),
+      SettingsMenu(menuId: MenuId.dislikedVideos, name: '不喜欢视频列表', icon: Images.settingsScreenPlayer, iconData: Icons.thumb_down_alt_outlined, route: NamedRouter.dislikedVideos),
+      SettingsMenu(menuId: MenuId.privacyPolicy, name: Intl.settingsScreen_item_privacyPolicy.tr, icon: Images.settingsScreenPrivacyPolicy, route: NamedRouter.donate),
+      SettingsMenu(menuId: MenuId.about, name: Intl.settingsScreen_item_about.tr, icon: Images.settingsScreenAbout),
     ];
-    if (!Platform.isIOS) {
-      // ios app store no internal purchase allowed
-      settingsMenus.insert(
-        0,
-        SettingsMenu(
-            menuId: MenuId.donate,
-            name: Intl.settingsScreen_item_donate.tr,
-            icon: Images.settingsScreenDonate,
-            route: NamedRouter.donate),
-      );
-    }
-    if (_userCnt.value == 0 &&
-        SpUtil.getBool(AlistConstant.useDemoServer) == true) {
-      settingsMenus.insert(
-          0,
-          SettingsMenu(
-            menuId: MenuId.signIn,
-            name: Intl.settingsScreen_item_login.tr,
-            icon: Images.settingsScreenAccount,
-          ));
+    if (!Platform.isIOS) settingsMenus.insert(0, SettingsMenu(menuId: MenuId.donate, name: Intl.settingsScreen_item_donate.tr, icon: Images.settingsScreenDonate, route: NamedRouter.donate));
+    if (_userCnt.value == 0 && SpUtil.getBool(AlistConstant.useDemoServer) == true) {
+      settingsMenus.insert(0, SettingsMenu(menuId: MenuId.signIn, name: Intl.settingsScreen_item_login.tr, icon: Images.settingsScreenAccount));
     } else {
-      settingsMenus.insert(
-          0,
-          SettingsMenu(
-            menuId: MenuId.account,
-            name: Intl.settingsScreen_item_account.tr,
-            icon: Images.settingsScreenAccount,
-            route: NamedRouter.account,
-          ));
+      settingsMenus.insert(0, SettingsMenu(menuId: MenuId.account, name: Intl.settingsScreen_item_account.tr, icon: Images.settingsScreenAccount, route: NamedRouter.account));
     }
     return settingsMenus;
   }
@@ -824,35 +341,16 @@ class _SettingsContainerState extends State<_SettingsContainer>
 class SettingsMenu {
   final String name;
   final String icon;
-  final IconData? iconData; // optional Material icon override
+  final IconData? iconData;
   final String? route;
   final MenuId menuId;
-
-  SettingsMenu({
-    required this.name,
-    required this.icon,
-    this.iconData,
-    this.route,
-    required this.menuId,
-  });
+  SettingsMenu({required this.name, required this.icon, this.iconData, this.route, required this.menuId});
 }
 
 enum MenuId {
-  signIn,
-  account,
-  downloads,
-  donate,
-  privacyPolicy,
-  about,
-  cacheManager,
-  aggressiveCache,
-  audioPlayerUi,
-  groupedRandomSort,
-  enableMediaKitPlayer,
-  extensionFilter,
-  playerSettings,
-  themeColor,
-  iptvUrl,
-  slideshowInterval,
-  autoPip,
+  signIn, account, downloads, donate, privacyPolicy, about,
+  cacheManager, aggressiveCache, audioPlayerUi, groupedRandomSort,
+  enableMediaKitPlayer, extensionFilter, playerSettings,
+  themeColor, iptvUrl, slideshowInterval, autoPip,
+  randomPlayCount, dislikedVideos,
 }

@@ -324,6 +324,15 @@ class PlayerActivity : AppCompatActivity(), GSYVideoProgressListener {
         gsyVideoPlayer = findViewById(R.id.video_player)
         playerWrapper = PlayerWrapper(gsyVideoPlayer)
         playerWrapper.initViews()
+        // 不喜欢按钮
+        gsyVideoPlayer.setOnDislikeClickListener {
+            val item = videos[index]
+            FlutterMethods.toggleDislike(item) { isDisliked ->
+                runOnUiThread {
+                    SmartToast.show(this@PlayerActivity, if (isDisliked) "已标记为不喜欢" else "已取消不喜欢")
+                }
+            }
+        }
         gsyVideoPlayer.setGSYVideoProgressListener(this)
         orientationUtils = OrientationUtils(this, gsyVideoPlayer)
         orientationUtils.isEnable = false

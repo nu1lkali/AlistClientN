@@ -20,6 +20,7 @@ import 'package:alist/screen/office_reader_screen.dart';
 import 'package:alist/screen/pdf_reader_screen.dart';
 import 'package:alist/screen/player_settings_screen.dart';
 import 'package:alist/screen/settings_screen.dart';
+import 'package:alist/screen/disliked_videos_screen.dart';
 import 'package:alist/screen/splash_screen.dart';
 import 'package:alist/screen/txt_reader_screen.dart';
 import 'package:alist/screen/uploading_files_screen.dart';
@@ -77,6 +78,11 @@ class AlistRouter {
         final server = args?['server'] as Server?;
         return LoginScreen(isEditMode: true, server: server);
       },
+    ),
+    // 不喜欢视频列表
+    GetPage(
+      name: NamedRouter.dislikedVideos,
+      page: () => const DislikedVideosScreen(),
     ),
   ];
 }

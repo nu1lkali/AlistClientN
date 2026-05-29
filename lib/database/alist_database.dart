@@ -2,12 +2,14 @@
 
 import 'dart:async';
 
+import 'package:alist/database/dao/disliked_video_dao.dart';
 import 'package:alist/database/dao/favorite_dao.dart';
 import 'package:alist/database/dao/file_download_record_dao.dart';
 import 'package:alist/database/dao/file_password_dao.dart';
 import 'package:alist/database/dao/file_viewing_record_dao.dart';
 import 'package:alist/database/dao/search_history_dao.dart';
 import 'package:alist/database/dao/server_dao.dart';
+import 'package:alist/database/table/disliked_video.dart';
 import 'package:alist/database/table/favorite.dart';
 import 'package:alist/database/table/file_download_record.dart';
 import 'package:alist/database/table/file_password.dart';
@@ -22,7 +24,7 @@ import 'table/video_viewing_record.dart';
 
 part 'alist_database.g.dart'; // the generated code will be there
 
-@Database(version: 7, entities: [
+@Database(version: 8, entities: [
   VideoViewingRecord,
   FileDownloadRecord,
   FilePassword,
@@ -30,6 +32,7 @@ part 'alist_database.g.dart'; // the generated code will be there
   FileViewingRecord,
   Favorite,
   SearchHistory,
+  DislikedVideo,
 ])
 abstract class AlistDatabase extends FloorDatabase {
   VideoViewingRecordDao get videoViewingRecordDao;
@@ -45,4 +48,6 @@ abstract class AlistDatabase extends FloorDatabase {
   FavoriteDao get favoriteDao;
 
   SearchHistoryDao get searchHistoryDao;
+
+  DislikedVideoDao get dislikedVideoDao;
 }

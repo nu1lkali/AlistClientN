@@ -76,4 +76,7 @@ class NamedRouter {
 
   // edit server
   static const editServer = "/editServer";
+
+  // disliked videos
+  static const dislikedVideos = "/dislikedVideos";
 }

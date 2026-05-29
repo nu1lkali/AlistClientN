@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:alist/database/alist_database_controller.dart';
+import 'package:alist/database/table/disliked_video.dart';
 import 'package:alist/database/table/favorite.dart';
 import 'package:alist/database/table/file_viewing_record.dart';
 import 'package:alist/database/table/video_viewing_record.dart';
@@ -159,6 +160,42 @@ class MethodCallHandler {
           createTime: DateTime.now().millisecondsSinceEpoch,
         ));
         return "";
+
+      case "toggleDislike":
+        String path = call.arguments["path"];
+        String name = call.arguments["name"];
+        String size = call.arguments["size"];
+        String? sign = call.arguments["sign"];
+        String? thumb = call.arguments["thumb"];
+        String modifiedMilliseconds = call.arguments["modifiedMilliseconds"];
+        String? provider = call.arguments["provider"];
+
+        final AlistDatabaseController databaseController = Get.find();
+        final UserController userController = Get.find();
+        var user = userController.user.value;
+        var dao = databaseController.dislikedVideoDao;
+        
+        var existing = await dao.findByPath(user.serverUrl, user.username, path);
+        
+        if (existing != null) {
+          await dao.deleteByPath(user.serverUrl, user.username, path);
+          return "false";
+        } else {
+          await dao.insertRecord(DislikedVideo(
+            serverUrl: user.serverUrl,
+            userId: user.username,
+            remotePath: path,
+            name: name,
+            path: path,
+            size: int.tryParse(size) ?? 0,
+            sign: sign,
+            thumb: thumb,
+            modified: int.tryParse(modifiedMilliseconds) ?? 0,
+            provider: provider ?? "",
+            createTime: DateTime.now().millisecondsSinceEpoch,
+          ));
+          return "true";
+        }
 
       case "toggleFavorite":
         String path = call.arguments["path"];
