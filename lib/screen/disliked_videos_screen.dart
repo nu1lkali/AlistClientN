@@ -10,6 +10,7 @@ import 'package:alist/util/user_controller.dart';
 import 'package:alist/util/video_player_util.dart';
 import 'package:alist/widget/alist_scaffold.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_slidable/flutter_slidable.dart';
 import 'package:flutter_smart_dialog/flutter_smart_dialog.dart';
 import 'package:get/get.dart';
 import 'package:path_provider/path_provider.dart';
@@ -115,29 +116,35 @@ class _DislikedVideosScreenState extends State<DislikedVideosScreen> {
             separatorBuilder: (_, __) => const Divider(height: 1),
             itemBuilder: (_, i) {
               final item = items[i];
-              return ListTile(
-                leading: const Icon(Icons.videocam_rounded),
-                title: Text(
-                  item.name,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-                subtitle: Text(item.remotePath),
-                onTap: () => _preview(item),
-                trailing: Row(
-                  mainAxisSize: MainAxisSize.min,
+              return Slidable(
+                key: ValueKey(item.remotePath),
+                endActionPane: ActionPane(
+                  motion: const BehindMotion(),
+                  extentRatio: 0.5,
                   children: [
-                    IconButton(
-                      icon: const Icon(Icons.thumb_up_alt_rounded),
-                      tooltip: '取消标记',
-                      onPressed: () => _unmark(item),
+                    SlidableAction(
+                      onPressed: (_) => _unmark(item),
+                      backgroundColor: Colors.blue,
+                      foregroundColor: Colors.white,
+                      label: '取消',
                     ),
-                    IconButton(
-                      icon: const Icon(Icons.delete),
-                      tooltip: '删除文件',
-                      onPressed: () => _deleteSingle(item),
+                    SlidableAction(
+                      onPressed: (_) => _deleteSingle(item),
+                      backgroundColor: Colors.red,
+                      foregroundColor: Colors.white,
+                      label: '删除',
                     ),
                   ],
+                ),
+                child: ListTile(
+                  leading: const Icon(Icons.videocam_rounded),
+                  title: Text(
+                    item.name,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  subtitle: Text(item.remotePath),
+                  onTap: () => _preview(item),
                 ),
               );
             },

@@ -21,6 +21,7 @@ import 'package:volume_controller/volume_controller.dart';
 
 enum VerticalDragType { brightness, volume }
 enum PlayerSheet { none, playbackSpeed, more, playlist }
+enum PlayDirection { next, previous }
 
 class MediaKitPlayerScreen extends StatefulWidget {
   const MediaKitPlayerScreen({super.key});
@@ -43,6 +44,8 @@ class _MediaKitPlayerScreenState extends State<MediaKitPlayerScreen>
   bool _playing = false;
   bool _buffering = false;
   bool _playbackError = false;
+  // 记录上次播放方向，用于播放失败时决定跳过方向
+  PlayDirection _lastPlayDirection = PlayDirection.next;
   StreamSubscription? _posSub, _durSub, _playSub, _bufSub, _errSub, _playAtSub, _compSub;
   bool _isDraggingSlider = false;
   bool _seeking = false;
@@ -107,7 +110,38 @@ class _MediaKitPlayerScreenState extends State<MediaKitPlayerScreen>
     _errSub = _player.stream.error.listen((error) {
       if (!mounted) return;
       setState(() { _playbackError = true; _buffering = false; _isSwitching = false; });
-      _showToast("播放出错: $error");
+      _showToast("播放出错: $error，跳过此视频");
+      // 根据上次播放方向决定跳过方向
+      if (_lastPlayDirection == PlayDirection.next) {
+        // 尝试播放下一个
+        if (_index < _videos.length - 1) {
+          _lastPlayDirection = PlayDirection.next;
+          _playAt(_index + 1);
+          return;
+        }
+        // 如果没有下一个，尝试播放上一个
+        if (_index > 0) {
+          _lastPlayDirection = PlayDirection.previous;
+          _playAt(_index - 1);
+          return;
+        }
+      } else {
+        // 尝试播放上一个
+        if (_index > 0) {
+          _lastPlayDirection = PlayDirection.previous;
+          _playAt(_index - 1);
+          return;
+        }
+        // 如果没有上一个，尝试播放下一个
+        if (_index < _videos.length - 1) {
+          _lastPlayDirection = PlayDirection.next;
+          _playAt(_index + 1);
+          return;
+        }
+      }
+      // 没有其他视频可选，关闭播放器
+      _showToast("没有可播放的视频了");
+      Get.back();
     });
     WidgetsBinding.instance.addPostFrameCallback((_) => _playAt(_index));
     _playlistAnimationController = AnimationController(duration: const Duration(milliseconds: 250), vsync: this);

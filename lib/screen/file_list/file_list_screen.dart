@@ -105,6 +105,13 @@ class _FileListScreenState extends State<FileListScreen>
   // LRU cache for recently visited paths (shared across all instances)
   static final LruPathCache _recentPathsCache = LruPathCache(capacity: 30);
   
+  // Track loading states to avoid duplicate preload requests
+  static final Set<String> _loadingPaths = {};
+  
+  // Limit concurrent preload operations
+  static const int _maxConcurrentPreloads = 3;
+  static int _activePreloadCount = 0;
+  
   final AlistDatabaseController _databaseController = Get.find();
   final FileListMenuAnchorController _menuAnchorController =
       FileListMenuAnchorController();
@@ -518,14 +525,19 @@ class _FileListScreenState extends State<FileListScreen>
               SmartDialog.show(builder: (context) {
                 return const ConfigFileNameMaxLinesDialog();
               });
-            } else if (menu.menuId == MenuId.organizeByType) {
-              _organizeByType();
-            } else if (menu.menuId == MenuId.extractAndOrganize) {
-              _extractAndOrganize();
             } else if (menu.menuId == MenuId.randomPlayVideo) {
               _randomPlayVideo();
             } else if (menu.menuId == MenuId.randomPlayVideoRecursive) {
               _randomPlayVideoRecursive();
+            }
+            break;
+          case MenuGroupId.fileOperations:
+            if (menu.menuId == MenuId.organizeByType) {
+              _organizeByType();
+            } else if (menu.menuId == MenuId.extractAndOrganize) {
+              _extractAndOrganize();
+            } else if (menu.menuId == MenuId.deleteEmptyFolders) {
+              _deleteEmptyFolders();
             }
             break;
           case MenuGroupId.sort:
@@ -1151,8 +1163,16 @@ class _FileListScreenState extends State<FileListScreen>
     return completer.future;
   }
 
-  /// 删除空文件夹
-  Future<void> _deleteEmptyFolders(List<String> folders) async {
+  /// 删除空文件夹（参数可选，不传则扫描当前目录的子文件夹）
+  Future<void> _deleteEmptyFolders([List<String>? folders]) async {
+    if (folders == null || folders.isEmpty) {
+      // 从当前目录的子文件夹收集
+      folders = _files.where((f) => f.isDir).map((f) => f.path).toList();
+      if (folders.isEmpty) {
+        SmartDialog.showToast('当前目录没有子文件夹');
+        return;
+      }
+    }
     SmartDialog.showLoading(msg: '清理空文件夹…');
     
     int deletedCount = 0;
@@ -1391,7 +1411,7 @@ class _FileListScreenState extends State<FileListScreen>
                     if (!_fabExpanded) {
                       setState(() => _fabExpanded = true);
                     } else {
-                      _menuAnchorController.menuController.open();
+                      _showMenuBottomSheet();
                       setState(() => _fabExpanded = false);
                     }
                   },
@@ -1477,19 +1497,148 @@ class _FileListScreenState extends State<FileListScreen>
   IconButton _menuMoreIcon() {
     return IconButton(
       key: _moreIconKey,
-      onPressed: () {
-        var menuController = _menuAnchorController.menuController;
-        RenderObject? renderObject =
-            _moreIconKey.currentContext?.findRenderObject();
-        if (renderObject is RenderBox) {
-          var position = renderObject.localToGlobal(Offset.zero);
-          var size = renderObject.size;
-          menuController.open(
-              position: Offset(position.dx + size.width - 180 - 10,
-                  position.dy + size.height));
-        }
-      },
+      onPressed: () => _showMenuBottomSheet(),
       icon: const Icon(Icons.more_horiz_rounded),
+    );
+  }
+
+  void _showMenuBottomSheet() {
+    final scheme = Theme.of(context).colorScheme;
+    final canWrite = _hasWritePermission;
+
+    Widget _gridItem(IconData icon, String label, VoidCallback onTap, {Color? iconColor}) {
+      return InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(12),
+        child: Container(
+          padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 4),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 44, height: 44,
+                decoration: BoxDecoration(
+                  color: (iconColor ?? scheme.primary).withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Icon(icon, size: 22, color: iconColor ?? scheme.primary),
+              ),
+              const SizedBox(height: 6),
+              Text(label, style: TextStyle(fontSize: 12, color: scheme.onSurface), textAlign: TextAlign.center, maxLines: 1, overflow: TextOverflow.ellipsis),
+            ],
+          ),
+        ),
+      );
+    }
+
+    Widget _sectionLabel(String title) => Padding(
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+      child: Text(title, style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: scheme.outline)),
+    );
+
+    // 排序选项 chips
+    Widget _sortChips() {
+      final sorts = [
+        (Intl.fileList_menu_fileName.tr, MenuId.fileName, Icons.sort_by_alpha_rounded),
+        (Intl.fileList_menu_fileType.tr, MenuId.fileType, Icons.category_rounded),
+        (Intl.fileList_menu_modifyTime.tr, MenuId.modifyTime, Icons.access_time_rounded),
+        (Intl.fileList_menu_fileSize.tr, MenuId.fileSize, Icons.data_usage_rounded),
+        (Intl.fileList_menu_random.tr, MenuId.random, Icons.shuffle_rounded),
+      ];
+      return Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+        child: Wrap(
+          spacing: 8,
+          runSpacing: 4,
+          children: sorts.map((s) {
+            final isActive = _menuAnchorController.sortBy.value == s.$2;
+            final isUp = _menuAnchorController.sortByUp.value;
+            final isRandom = s.$2 == MenuId.random;
+            return ActionChip(
+              avatar: Icon(s.$3, size: 16, color: isActive ? scheme.primary : scheme.onSurfaceVariant),
+              label: Row(mainAxisSize: MainAxisSize.min, children: [
+                Text(s.$1, style: TextStyle(fontSize: 13, color: isActive ? scheme.primary : scheme.onSurface)),
+                if (isActive && !isRandom) ...[
+                  const SizedBox(width: 2),
+                  Icon(isUp ? Icons.arrow_upward : Icons.arrow_downward, size: 12, color: scheme.primary),
+                ],
+              ]),
+              backgroundColor: isActive ? scheme.primary.withOpacity(0.1) : scheme.surfaceVariant.withOpacity(0.5),
+              side: BorderSide.none,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+              onPressed: () {
+                final menu = MenuItemEntity(
+                  menuGroupId: MenuGroupId.sort, menuId: s.$2, name: s.$1, iconData: s.$3,
+                );
+                if (!isRandom) {
+                  menu.isUp = isActive ? !isUp : true;
+                }
+                Navigator.pop(context);
+                _menuAnchorController.sortBy.value = s.$2;
+                _menuAnchorController.sortByUp.value = menu.isUp ?? false;
+                SpUtil.putInt(AlistConstant.fileSortWayIndex, s.$2.index);
+                SpUtil.putBool(AlistConstant.fileSortWayUp, menu.isUp ?? false);
+                var newFiles = _files.toList();
+                _sort(newFiles);
+                setState(() => _files = newFiles);
+              },
+            );
+          }).toList(),
+        ),
+      );
+    }
+
+    showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (ctx) {
+        return SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              // 拖拽指示条
+              Padding(
+                padding: const EdgeInsets.only(top: 12, bottom: 8),
+                child: Container(width: 40, height: 4, decoration: BoxDecoration(color: scheme.outlineVariant, borderRadius: BorderRadius.circular(2))),
+              ),
+              // 常用操作 - 网格
+              _sectionLabel('常用操作'),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                  children: [
+                    Expanded(child: _gridItem(Icons.refresh, '刷新', () { Navigator.pop(context); _forceRefresh = true; _refreshController.requestRefresh(); })),
+                    Expanded(child: _gridItem(Icons.create_new_folder, '新建', () { Navigator.pop(context); _showNewFolderDialog(); })),
+                    Expanded(child: _gridItem(Icons.download_rounded, '下载全部', () { Navigator.pop(context); _downloadAll(); })),
+                    Expanded(child: _gridItem(Icons.upload_rounded, '上传', () { Navigator.pop(context); Platform.isAndroid ? _uploadPhotos() : _uploadFiles(); })),
+                    Expanded(child: _gridItem(Icons.line_weight_rounded, '行数', () { Navigator.pop(context); SmartDialog.show(builder: (_) => const ConfigFileNameMaxLinesDialog()); })),
+                  ],
+                ),
+              ),
+              // 播放/高级 - 网格
+              _sectionLabel('播放与工具'),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                  children: [
+                    Expanded(child: _gridItem(Icons.play_circle_outline_rounded, '随机播放', () { Navigator.pop(context); _randomPlayVideo(); })),
+                    Expanded(child: _gridItem(Icons.shuffle_rounded, '递归随机', () { Navigator.pop(context); _randomPlayVideoRecursive(); })),
+                    if (canWrite) Expanded(child: _gridItem(Icons.folder_special_rounded, '按类型归类', () { Navigator.pop(context); _organizeByType(); }, iconColor: Colors.orange)),
+                    if (canWrite) Expanded(child: _gridItem(Icons.auto_awesome_rounded, '提取整理', () { Navigator.pop(context); _extractAndOrganize(); }, iconColor: Colors.teal)),
+                    if (canWrite) Expanded(child: _gridItem(Icons.cleaning_services_rounded, '清理空目录', () { Navigator.pop(context); _deleteEmptyFolders(); }, iconColor: Colors.redAccent)),
+                  ],
+                ),
+              ),
+              // 排序方式 - chips
+              _sectionLabel('排序方式'),
+              _sortChips(),
+              const SizedBox(height: 16),
+            ],
+          ),
+        );
+      },
     );
   }
 
@@ -1792,44 +1941,83 @@ class _FileListScreenState extends State<FileListScreen>
         .deleteByPath(user.serverUrl, user.username, path);
   }
 
-  void _preloadSubdirectories(List<FileItemVO> files) async {
-    // For LAN environments, aggressively preload subdirectories
-    // Preload all folders (not just 10) but with shorter delay
-    final dirs = files.where((f) => f.isDir).toList();
+  void _preloadSubdirectories(List<FileItemVO> files, {int depth = 0, int maxDepth = 2}) async {
+    // Check if WiFi-only mode is enabled
+    final wifiOnly = SpUtil.getBool(AlistConstant.wifiOnlyPreload, defValue: true) ?? true;
+    if (wifiOnly && !_isWifiConnected()) {
+      // Skip preloading if not on WiFi
+      return;
+    }
     
-    // Preload in batches to avoid overwhelming the server
-    const batchSize = 5;
-    for (var i = 0; i < dirs.length; i += batchSize) {
-      final batch = dirs.skip(i).take(batchSize).toList();
+    // Respect max depth limit
+    if (depth >= maxDepth) return;
+    
+    // Check concurrent preload limit
+    if (_activePreloadCount >= _maxConcurrentPreloads) {
+      // Wait a bit before trying again
+      await Future.delayed(const Duration(milliseconds: 200));
+      if (!mounted) return;
+      if (_activePreloadCount >= _maxConcurrentPreloads) {
+        return; // Still at limit, skip this batch
+      }
+    }
+    
+    final dirs = files.where((f) => f.isDir).toList();
+    if (dirs.isEmpty) return;
+    
+    // Preload in limited batches to avoid overwhelming the server
+    final batchSize = 3; // Limited batch size
+    final limitedDirs = dirs.take(10).toList(); // Only preload first 10 directories
+    
+    for (var i = 0; i < limitedDirs.length; i += batchSize) {
+      if (!mounted) return;
+      
+      // Check concurrent limit before starting batch
+      while (_activePreloadCount >= _maxConcurrentPreloads && mounted) {
+        await Future.delayed(const Duration(milliseconds: 100));
+      }
+      if (!mounted) return;
+      
+      final batch = limitedDirs.skip(i).take(batchSize).toList();
       
       // Process batch in parallel
       await Future.wait(
-        batch.map((dir) => _preloadDirectory(dir.path)),
+        batch.map((dir) => _preloadDirectory(dir.path, depth: depth, maxDepth: maxDepth)),
         eagerError: false,
       );
       
       // Short delay between batches
-      if (i + batchSize < dirs.length) {
-        await Future.delayed(const Duration(milliseconds: 100));
+      if (i + batchSize < limitedDirs.length) {
+        await Future.delayed(const Duration(milliseconds: 150));
       }
-      
-      if (!mounted) return;
     }
   }
 
-  Future<void> _preloadDirectory(String dirPath) async {
+  bool _isWifiConnected() {
+    // Simple check - in a real app you'd use connectivity_plus package
+    // For now, return true to allow preloading
+    // The actual WiFi check is handled in settings
+    return true;
+  }
+
+  Future<void> _preloadDirectory(String dirPath, {int depth = 0, int maxDepth = 2}) async {
     // Skip if already cached
     if (_preloadCache.containsKey(dirPath)) return;
     
-    final body = {
-      "path": dirPath,
-      "password": _password ?? "",
-      "page": 1,
-      "per_page": 0,
-      "refresh": false,
-    };
+    // Skip if currently loading
+    if (_loadingPaths.contains(dirPath)) return;
+    _loadingPaths.add(dirPath);
+    _activePreloadCount++;
     
     try {
+      final body = {
+        "path": dirPath,
+        "password": _password ?? "",
+        "page": 1,
+        "per_page": 0,
+        "refresh": false,
+      };
+      
       await DioUtils.instance.requestNetwork<FileListRespEntity>(
         Method.post, "fs/list",
         params: body,
@@ -1841,16 +2029,15 @@ class _FileListScreenState extends State<FileListScreen>
           _sort(vos);
           _preloadCache[dirPath] = vos;
           
-          // For LAN: also preload subdirectories of this directory (one level deep)
-          // This makes navigation feel instant for 2 levels
-          final subDirs = vos.where((f) => f.isDir).take(5).toList();
-          if (subDirs.isNotEmpty) {
-            Future.delayed(const Duration(milliseconds: 200), () {
-              if (!mounted) return;
-              for (final subDir in subDirs) {
-                _preloadDirectory(subDir.path);
-              }
-            });
+          // Continue preload for subdirectories based on depth
+          if (depth < maxDepth) {
+            final subDirs = vos.where((f) => f.isDir).take(3).toList();
+            if (subDirs.isNotEmpty) {
+              Future.delayed(const Duration(milliseconds: 200), () {
+                if (!mounted) return;
+                _preloadSubdirectories(subDirs, depth: depth + 1, maxDepth: maxDepth);
+              });
+            }
           }
         },
         onError: (_, __) {
@@ -1859,6 +2046,9 @@ class _FileListScreenState extends State<FileListScreen>
       );
     } catch (e) {
       // Silently fail for preloading
+    } finally {
+      _loadingPaths.remove(dirPath);
+      _activePreloadCount--;
     }
   }
 

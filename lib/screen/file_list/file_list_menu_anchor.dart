@@ -49,18 +49,6 @@ final menuGroupOperations = MenuGroupEntity(
     ),
     MenuItemEntity(
       menuGroupId: MenuGroupId.operations,
-      menuId: MenuId.organizeByType,
-      name: "按类型归类",
-      iconData: Icons.folder_special_rounded,
-    ),
-    MenuItemEntity(
-      menuGroupId: MenuGroupId.operations,
-      menuId: MenuId.extractAndOrganize,
-      name: "提取并整理",
-      iconData: Icons.auto_awesome_rounded,
-    ),
-    MenuItemEntity(
-      menuGroupId: MenuGroupId.operations,
       menuId: MenuId.randomPlayVideo,
       name: "随机播放视频",
       iconData: Icons.play_circle_outline_rounded,
@@ -70,6 +58,30 @@ final menuGroupOperations = MenuGroupEntity(
       menuId: MenuId.randomPlayVideoRecursive,
       name: "递归随机播放",
       iconData: Icons.shuffle_rounded,
+    ),
+  ],
+);
+
+final menuGroupFileOperations = MenuGroupEntity(
+  menuGroupId: MenuGroupId.fileOperations,
+  children: [
+    MenuItemEntity(
+      menuGroupId: MenuGroupId.fileOperations,
+      menuId: MenuId.organizeByType,
+      name: "按类型归类",
+      iconData: Icons.folder_special_rounded,
+    ),
+    MenuItemEntity(
+      menuGroupId: MenuGroupId.fileOperations,
+      menuId: MenuId.extractAndOrganize,
+      name: "提取并整理",
+      iconData: Icons.auto_awesome_rounded,
+    ),
+    MenuItemEntity(
+      menuGroupId: MenuGroupId.fileOperations,
+      menuId: MenuId.deleteEmptyFolders,
+      name: "清理空文件夹",
+      iconData: Icons.cleaning_services_rounded,
     ),
   ],
 );
@@ -158,6 +170,29 @@ class FileListMenuAnchor extends StatelessWidget {
     ];
     if (canWrite) {
       _addMenus(menus, menuGroupOperations, onMenuClickCallback);
+      
+      // 添加分隔线和文件操作子菜单
+      menus.add(
+        Container(
+          color: Get.theme.colorScheme.surfaceVariant,
+          height: 3,
+        ),
+      );
+      // 文件操作标题
+      menus.add(
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
+          child: Text(
+            '文件操作',
+            style: TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+              color: Get.theme.colorScheme.outline,
+            ),
+          ),
+        ),
+      );
+      _addMenus(menus, menuGroupFileOperations, onMenuClickCallback);
     } else {
       final menuGroupOperations = MenuGroupEntity(
         menuGroupId: MenuGroupId.operations,
@@ -308,6 +343,7 @@ class FileListMenuAnchor extends StatelessWidget {
 
 enum MenuGroupId {
   operations,
+  fileOperations,
   sort,
 }
 
@@ -327,6 +363,8 @@ enum MenuId {
   extractAndOrganize,
   randomPlayVideo,
   randomPlayVideoRecursive,
+  fileOperations,
+  deleteEmptyFolders,
 }
 
 class MenuGroupEntity {
@@ -342,6 +380,7 @@ class MenuItemEntity {
   final String name;
   Rx<IconData?> iconData = Rx(null);
   bool? isUp;
+  bool isSubmenu;
 
   MenuItemEntity({
     required this.menuGroupId,
@@ -349,6 +388,7 @@ class MenuItemEntity {
     required this.name,
     IconData? iconData,
     this.isUp,
+    this.isSubmenu = false,
   }) {
     this.iconData.value = iconData;
   }

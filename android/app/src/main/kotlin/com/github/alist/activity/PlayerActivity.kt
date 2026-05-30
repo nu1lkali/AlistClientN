@@ -110,6 +110,10 @@ class PlayerActivity : AppCompatActivity(), GSYVideoProgressListener {
     private val pipUpdateHandler = Handler(Looper.getMainLooper())
     private var pipUpdateRunnable: Runnable? = null
 
+    // 记录上次播放方向，用于播放失败时决定跳过方向
+    private enum class PlayDirection { NEXT, PREVIOUS }
+    private var lastPlayDirection = PlayDirection.NEXT
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         if (BuildConfig.DEBUG) {
@@ -165,6 +169,7 @@ class PlayerActivity : AppCompatActivity(), GSYVideoProgressListener {
             }
             PIP_ACTION_PREVIOUS -> {
                 saveCurrentTime()
+                lastPlayDirection = PlayDirection.PREVIOUS
                 playPrevious()
                 // 切换视频后，新视频会自动开始播放，强制更新PiP按钮为暂停图标
                 // 使用延迟确保视频已开始播放
@@ -174,6 +179,7 @@ class PlayerActivity : AppCompatActivity(), GSYVideoProgressListener {
             }
             PIP_ACTION_NEXT -> {
                 saveCurrentTime()
+                lastPlayDirection = PlayDirection.NEXT
                 playNext()
                 // 切换视频后，新视频会自动开始播放，强制更新PiP按钮为暂停图标
                 Handler(Looper.getMainLooper()).postDelayed({
@@ -381,6 +387,7 @@ class PlayerActivity : AppCompatActivity(), GSYVideoProgressListener {
                     val currentSortedIndex = getCurrentSortedIndex()
                     if (!isFinishing && currentSortedIndex < sortedVideos.lastIndex) {
                         FlutterMethods.deleteVideoRecord(videos[index].remotePath)
+                        lastPlayDirection = PlayDirection.NEXT
                         playNext()
                     }
                 }
@@ -401,8 +408,36 @@ class PlayerActivity : AppCompatActivity(), GSYVideoProgressListener {
                 override fun onPlayError(url: String?, vararg objects: Any?) {
                     super.onPlayError(url, *objects)
                     Debuger.printfError("***** onPlayError ****")
-                    // The Flutter side will handle fallback to VLC player
-                    SmartToast.show(this@PlayerActivity, "ExoPlayer 播放失败")
+                    SmartToast.show(this@PlayerActivity, "ExoPlayer 播放失败，跳过此视频")
+                    // 根据上次播放方向决定跳过方向
+                    if (lastPlayDirection == PlayDirection.NEXT) {
+                        // 尝试播放下一个
+                        val currentSortedIndex = getCurrentSortedIndex()
+                        if (currentSortedIndex < sortedVideos.lastIndex) {
+                            playNext()
+                            return
+                        }
+                        // 如果没有下一个，尝试播放上一个
+                        if (currentSortedIndex > 0) {
+                            lastPlayDirection = PlayDirection.PREVIOUS
+                            playPrevious()
+                            return
+                        }
+                    } else {
+                        // 尝试播放上一个
+                        val currentSortedIndex = getCurrentSortedIndex()
+                        if (currentSortedIndex > 0) {
+                            playPrevious()
+                            return
+                        }
+                        // 如果没有上一个，尝试播放下一个
+                        if (currentSortedIndex < sortedVideos.lastIndex) {
+                            lastPlayDirection = PlayDirection.NEXT
+                            playNext()
+                            return
+                        }
+                    }
+                    // 没有其他视频可选，关闭播放器
                     finish()
                 }
             }).setLockClickListener { _, lock ->
@@ -988,10 +1023,12 @@ class PlayerActivity : AppCompatActivity(), GSYVideoProgressListener {
 
             btnPrevious.setOnClickListener {
                 saveCurrentTime()
+                lastPlayDirection = PlayDirection.PREVIOUS
                 playPrevious()
             }
             btnNext.setOnClickListener {
                 saveCurrentTime()
+                lastPlayDirection = PlayDirection.NEXT
                 playNext()
             }
             videoPlayer.setOnLongClickListener {

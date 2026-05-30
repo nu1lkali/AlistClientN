@@ -45,6 +45,7 @@ class _SettingsContainerState extends State<_SettingsContainer>
   StreamSubscription? _serverStreamSubscription;
   final _userCnt = 0.obs;
   late final RxBool _aggressiveCacheEnabled;
+  late final RxBool _wifiOnlyPreloadEnabled;
   late final RxInt _audioPlayerUiStyle;
   late final RxBool _groupedRandomSort;
   late final RxBool _enableMediaKitPlayer;
@@ -56,6 +57,7 @@ class _SettingsContainerState extends State<_SettingsContainer>
     _initPackageInfo();
     
     _aggressiveCacheEnabled = (SpUtil.getBool(AlistConstant.enableAggressiveCache, defValue: true) ?? true).obs;
+    _wifiOnlyPreloadEnabled = (SpUtil.getBool(AlistConstant.wifiOnlyPreload, defValue: true) ?? true).obs;
     _audioPlayerUiStyle = (SpUtil.getInt(AlistConstant.audioPlayerUiStyle, defValue: 0) ?? 0).obs;
     _groupedRandomSort = (SpUtil.getBool(AlistConstant.groupedRandomSort, defValue: false) ?? false).obs;
     _enableMediaKitPlayer = (SpUtil.getBool(AlistConstant.enableMediaKitPlayer, defValue: false) ?? false).obs;
@@ -85,6 +87,7 @@ class _SettingsContainerState extends State<_SettingsContainer>
         m.menuId == MenuId.downloads ||
         m.menuId == MenuId.cacheManager ||
         m.menuId == MenuId.aggressiveCache ||
+        m.menuId == MenuId.wifiOnlyPreload ||
         m.menuId == MenuId.audioPlayerUi ||
         m.menuId == MenuId.groupedRandomSort ||
         m.menuId == MenuId.enableMediaKitPlayer ||
@@ -164,6 +167,25 @@ class _SettingsContainerState extends State<_SettingsContainer>
       );
     }
 
+    if (settingsMenu.menuId == MenuId.wifiOnlyPreload) {
+      return Obx(() {
+        final aggressiveEnabled = _aggressiveCacheEnabled.value;
+        // 智能预加载未开启时，强制关闭WiFi预加载
+        if (!aggressiveEnabled && _wifiOnlyPreloadEnabled.value) {
+          _wifiOnlyPreloadEnabled.value = false;
+          SpUtil.putBool(AlistConstant.wifiOnlyPreload, false);
+        }
+        return ListTile(
+          contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+          leading: Container(width: 44, height: 44, decoration: BoxDecoration(gradient: LinearGradient(colors: [scheme.primaryContainer.withOpacity(0.8), scheme.primaryContainer.withOpacity(0.5)], begin: Alignment.topLeft, end: Alignment.bottomRight), borderRadius: BorderRadius.circular(12)), child: Icon(Icons.wifi, size: 22, color: isDark ? Colors.white.withOpacity(0.9) : scheme.primary)),
+          title: Text(settingsMenu.name, style: TextStyle(fontSize: 15, fontWeight: FontWeight.w500, letterSpacing: -0.2, color: aggressiveEnabled ? null : scheme.outline)),
+          subtitle: Text(aggressiveEnabled ? '仅在 WiFi 环境下预加载' : '开启智能预加载后生效', style: TextStyle(fontSize: 11, color: scheme.onSurfaceVariant)),
+          trailing: Switch(value: _wifiOnlyPreloadEnabled.value, onChanged: aggressiveEnabled ? (value) { SpUtil.putBool(AlistConstant.wifiOnlyPreload, value); _wifiOnlyPreloadEnabled.value = value; } : null),
+          enabled: aggressiveEnabled,
+        );
+      });
+    }
+
     if (settingsMenu.menuId == MenuId.audioPlayerUi) {
       return ListTile(
         contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
@@ -179,7 +201,7 @@ class _SettingsContainerState extends State<_SettingsContainer>
         contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
         leading: Container(width: 44, height: 44, decoration: BoxDecoration(gradient: LinearGradient(colors: [scheme.primaryContainer.withOpacity(0.8), scheme.primaryContainer.withOpacity(0.5)], begin: Alignment.topLeft, end: Alignment.bottomRight), borderRadius: BorderRadius.circular(12)), child: Icon(Icons.shuffle_rounded, size: 22, color: isDark ? Colors.white.withOpacity(0.9) : scheme.primary)),
         title: const Text('随机排序按类型分组', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w500, letterSpacing: -0.2)),
-        subtitle: Text('随机排序时同类文件聚在一起', style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant)),
+        subtitle: Text('随机排序时同类文件聚合在一起', style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant)),
         trailing: Obx(() => Switch(value: _groupedRandomSort.value, onChanged: (value) { SpUtil.putBool(AlistConstant.groupedRandomSort, value); _groupedRandomSort.value = value; })),
       );
     }
@@ -236,6 +258,8 @@ class _SettingsContainerState extends State<_SettingsContainer>
       case MenuId.groupedRandomSort:
       case MenuId.enableMediaKitPlayer:
       case MenuId.autoPip:
+        break;
+      case MenuId.wifiOnlyPreload:
         break;
       case MenuId.themeColor:
         _showThemeColorPicker(context);
@@ -311,6 +335,7 @@ class _SettingsContainerState extends State<_SettingsContainer>
       SettingsMenu(menuId: MenuId.downloads, name: Intl.settingsScreen_item_downloads.tr, icon: Images.settingsScreenDownload, route: NamedRouter.downloadManager),
       SettingsMenu(menuId: MenuId.cacheManager, name: Intl.settingsScreen_item_cacheManagement.tr, icon: Images.settingsScreenCacheManager, route: NamedRouter.cacheManager),
       SettingsMenu(menuId: MenuId.aggressiveCache, name: "智能预加载", icon: Images.settingsScreenCacheManager, iconData: Icons.speed_rounded),
+      SettingsMenu(menuId: MenuId.wifiOnlyPreload, name: "仅WiFi预加载", icon: Images.settingsScreenCacheManager, iconData: Icons.wifi),
       SettingsMenu(menuId: MenuId.audioPlayerUi, name: "音频播放器风格", icon: Images.settingsScreenPlayer, iconData: Icons.music_note_rounded),
       SettingsMenu(menuId: MenuId.groupedRandomSort, name: "随机排序按类型分组", icon: Images.settingsScreenPlayer, iconData: Icons.shuffle_rounded),
       SettingsMenu(menuId: MenuId.enableMediaKitPlayer, name: "启用 MPV 播放器", icon: Images.settingsScreenPlayer, iconData: Icons.play_circle_filled),
@@ -349,7 +374,7 @@ class SettingsMenu {
 
 enum MenuId {
   signIn, account, downloads, donate, privacyPolicy, about,
-  cacheManager, aggressiveCache, audioPlayerUi, groupedRandomSort,
+  cacheManager, aggressiveCache, wifiOnlyPreload, audioPlayerUi, groupedRandomSort,
   enableMediaKitPlayer, extensionFilter, playerSettings,
   themeColor, iptvUrl, slideshowInterval, autoPip,
   randomPlayCount, dislikedVideos,

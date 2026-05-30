@@ -37,6 +37,7 @@ class AlistConstant {
   static const String fileViewMode = 'fileViewMode'; // 0=list, 1=grid
   static const String themeColorValue = 'themeColorValue'; // int color value
   static const String enableAggressiveCache = 'enableAggressiveCache'; // aggressive preload cache
+  static const String wifiOnlyPreload = 'wifiOnlyPreload'; // 仅WiFi预加载
   static const String slideshowIntervalSeconds = 'slideshowIntervalSeconds'; // gallery slideshow interval
   static const String audioPlayerUiStyle = 'audioPlayerUiStyle'; // 0=classic, 1=bujuan
   static const String groupedRandomSort = 'groupedRandomSort'; // 随机排序时按类型分组
@@ -45,6 +46,9 @@ class AlistConstant {
   static const String autoPipEnabled = 'autoPipEnabled'; // 自动进入画中画
   static const String extensionFilter = 'extensionFilter'; // 扩展名过滤
   static const String randomPlayCount = 'randomPlayCount'; // 随机播放数量
+  static const String menuSortExpanded = 'menuSortExpanded'; // 排序方式展开
+  static const String menuPlayExpanded = 'menuPlayExpanded'; // 播放选项展开
+  static const String menuToolsExpanded = 'menuToolsExpanded'; // 整理工具展开
 
   static const String locale = 'locale';
 }
