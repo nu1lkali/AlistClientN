@@ -357,7 +357,7 @@ class PlayerActivity : AppCompatActivity(), GSYVideoProgressListener {
             .setIsTouchWiget(true)
             .setRotateViewAuto(true)
             .setLockLand(false)
-            .setAutoFullWithSize(true)
+            .setAutoFullWithSize(false)
             .setShowFullAnimation(false)
             .setMapHeadData(headers)
             .setNeedLockFull(true)
@@ -452,8 +452,12 @@ class PlayerActivity : AppCompatActivity(), GSYVideoProgressListener {
         ViewCompat.setOnApplyWindowInsetsListener(gsyVideoPlayer) { _, insets ->
             val navigationBars = insets.getInsets(WindowInsetsCompat.Type.navigationBars())
             val statusBars = insets.getInsets(WindowInsetsCompat.Type.statusBars())
-            playerWrapper.layoutTop.updateLayoutParams<MarginLayoutParams> {
-                topMargin = statusBars.top
+            // 使用padding+增加高度代替margin，让layout_top的背景（渐变）延伸到状态栏区域，
+            // 遮挡视频画面在状态栏区域的显示，解决部分视频画面超出顶部控制栏的问题
+            val topBarOriginalHeight = (48 * resources.displayMetrics.density).toInt()
+            playerWrapper.layoutTop.setPadding(0, statusBars.top, 0, 0)
+            playerWrapper.layoutTop.layoutParams = playerWrapper.layoutTop.layoutParams.apply {
+                height = topBarOriginalHeight + statusBars.top
             }
             playerWrapper.layoutBottom.updateLayoutParams<MarginLayoutParams> {
                 bottomMargin = navigationBars.bottom
