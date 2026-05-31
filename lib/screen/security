@@ -1,0 +1,228 @@
+import 'package:alist/util/security_lock_controller.dart';
+import 'package:alist/widget/pattern_lock_widget.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:get/get.dart';
+
+/// 安全锁验证页面 - 用于解锁或验证身份
+class SecurityLockScreen extends StatefulWidget {
+  /// 是否作为overlay模式（直接替换内容，不使用路由导航）
+  final bool isOverlay;
+  final VoidCallback? onVerified;
+
+  const SecurityLockScreen({
+    super.key,
+    this.isOverlay = false,
+    this.onVerified,
+  });
+
+  @override
+  State<SecurityLockScreen> createState() => _SecurityLockScreenState();
+}
+
+class _SecurityLockScreenState extends State<SecurityLockScreen> {
+  final SecurityLockController _lockController = Get.find();
+  final GlobalKey<PatternLockWidgetState> _patternKey = GlobalKey();
+  final _passwordEC = TextEditingController();
+  String _errorMessage = '';
+  bool _isVerifying = false;
+
+  @override
+  void dispose() {
+    _passwordEC.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    final content = Scaffold(
+      backgroundColor: isDark ? const Color(0xFF1A1C1E) : Colors.white,
+      body: SafeArea(
+        child: Center(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.symmetric(horizontal: 32),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                // 锁图标
+                Container(
+                  width: 80,
+                  height: 80,
+                  decoration: BoxDecoration(
+                    color: scheme.primaryContainer.withOpacity(0.3),
+                    shape: BoxShape.circle,
+                  ),
+                  child: Icon(
+                    Icons.lock_outline_rounded,
+                    size: 40,
+                    color: scheme.primary,
+                  ),
+                ),
+                const SizedBox(height: 24),
+                Text(
+                  '安全锁',
+                  style: TextStyle(
+                    fontSize: 24,
+                    fontWeight: FontWeight.w600,
+                    color: scheme.onSurface,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  _lockController.lockType.value == SecurityLockType.pattern
+                      ? '请绘制手势解锁'
+                      : '请输入密码解锁',
+                  style: TextStyle(
+                    fontSize: 14,
+                    color: scheme.onSurfaceVariant,
+                  ),
+                ),
+                const SizedBox(height: 32),
+
+                // 锁内容
+                if (_lockController.lockType.value ==
+                    SecurityLockType.pattern)
+                  _buildPatternLock(scheme)
+                else
+                  _buildPasswordLock(scheme),
+
+                // 错误消息
+                if (_errorMessage.isNotEmpty) ...[
+                  const SizedBox(height: 16),
+                  Text(
+                    _errorMessage,
+                    style: TextStyle(
+                      color: scheme.error,
+                      fontSize: 13,
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+
+    if (widget.isOverlay) {
+      // overlay模式：不允许返回
+      return WillPopScope(
+        onWillPop: () async => false,
+        child: content,
+      );
+    }
+
+    // 路由模式
+    return WillPopScope(
+      onWillPop: () async => false,
+      child: content,
+    );
+  }
+
+  Widget _buildPatternLock(ColorScheme scheme) {
+    final screenWidth = MediaQuery.of(context).size.width - 64;
+    final lockSize = screenWidth.clamp(0.0, 300.0);
+    return PatternLockWidget(
+      key: _patternKey,
+      size: lockSize,
+      onComplete: (pattern) {
+        _verifyPattern(pattern);
+      },
+    );
+  }
+
+  Widget _buildPasswordLock(ColorScheme scheme) {
+    return Column(
+      children: [
+        SizedBox(
+          width: 280,
+          child: TextField(
+            controller: _passwordEC,
+            obscureText: true,
+            autofocus: true,
+            textAlign: TextAlign.center,
+            style: const TextStyle(fontSize: 20, letterSpacing: 8),
+            decoration: InputDecoration(
+              hintText: '输入密码',
+              hintStyle: const TextStyle(letterSpacing: 1, fontSize: 14),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(16),
+              ),
+              contentPadding:
+                  const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+            ),
+            onSubmitted: (value) => _verifyPassword(value),
+          ),
+        ),
+        const SizedBox(height: 16),
+        FilledButton(
+          onPressed: () => _verifyPassword(_passwordEC.text),
+          style: FilledButton.styleFrom(
+            minimumSize: const Size(280, 48),
+            shape:
+                RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          ),
+          child: const Text('确认'),
+        ),
+      ],
+    );
+  }
+
+  void _verifyPattern(List<int> pattern) async {
+    if (_isVerifying) return;
+    setState(() {
+      _isVerifying = true;
+      _errorMessage = '';
+    });
+
+    await Future.delayed(const Duration(milliseconds: 200));
+
+    if (_lockController.verifyPattern(pattern)) {
+      HapticFeedback.lightImpact();
+      _onSuccess();
+    } else {
+      HapticFeedback.heavyImpact();
+      setState(() {
+        _errorMessage = '手势不正确，请重试';
+        _isVerifying = false;
+      });
+      _patternKey.currentState?.showErrorThenReset();
+    }
+  }
+
+  void _verifyPassword(String password) async {
+    if (_isVerifying || password.isEmpty) return;
+    setState(() {
+      _isVerifying = true;
+      _errorMessage = '';
+    });
+
+    await Future.delayed(const Duration(milliseconds: 200));
+
+    if (_lockController.verifyPassword(password)) {
+      HapticFeedback.lightImpact();
+      _onSuccess();
+    } else {
+      HapticFeedback.heavyImpact();
+      setState(() {
+        _errorMessage = '密码不正确，请重试';
+        _isVerifying = false;
+      });
+      _passwordEC.clear();
+    }
+  }
+
+  void _onSuccess() {
+    _lockController.unlock();
+    _lockController.recordActivity();
+    if (widget.onVerified != null) {
+      widget.onVerified!();
+    }
+    if (!widget.isOverlay) {
+      Get.back(result: true);
+    }
+  }
+}

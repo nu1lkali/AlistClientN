@@ -79,4 +79,10 @@
 
   // disliked videos
   static const dislikedVideos = "/dislikedVideos";
+
+  // security lock settings
+  static const securityLockSettings = "/securityLockSettings";
+
+  // security lock screen (verification)
+  static const securityLock = "/securityLock";
 }

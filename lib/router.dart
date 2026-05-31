@@ -21,6 +21,8 @@ import 'package:alist/screen/pdf_reader_screen.dart';
 import 'package:alist/screen/player_settings_screen.dart';
 import 'package:alist/screen/settings_screen.dart';
 import 'package:alist/screen/disliked_videos_screen.dart';
+import 'package:alist/screen/security_lock_screen.dart';
+import 'package:alist/screen/security_lock_settings_screen.dart';
 import 'package:alist/screen/splash_screen.dart';
 import 'package:alist/screen/txt_reader_screen.dart';
 import 'package:alist/screen/uploading_files_screen.dart';
@@ -83,6 +85,22 @@ class AlistRouter {
     GetPage(
       name: NamedRouter.dislikedVideos,
       page: () => const DislikedVideosScreen(),
+    ),
+    // 安全锁设置
+    GetPage(
+      name: NamedRouter.securityLockSettings,
+      page: () => const SecurityLockSettingsScreen(),
+    ),
+    // 安全锁验证
+    GetPage(
+      name: NamedRouter.securityLock,
+      page: () {
+        final args = Get.arguments as Map<String, dynamic>?;
+        return SecurityLockScreen(
+          isVerifyOnly: args?['isVerifyOnly'] ?? false,
+          onVerified: args?['onVerified'] as VoidCallback?,
+        );
+      },
     ),
   ];
 }

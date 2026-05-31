@@ -50,5 +50,12 @@ class AlistConstant {
   static const String menuPlayExpanded = 'menuPlayExpanded'; // 播放选项展开
   static const String menuToolsExpanded = 'menuToolsExpanded'; // 整理工具展开
 
+  // 安全锁相关
+  static const String securityLockEnabled = 'securityLockEnabled'; // 是否开启安全锁
+  static const String securityLockType = 'securityLockType'; // 锁类型: 0=手势, 1=密码
+  static const String securityLockPattern = 'securityLockPattern'; // 手势锁数据 (逗号分隔的数字)
+  static const String securityLockPassword = 'securityLockPassword'; // 密码锁数据 (SHA256哈希)
+  static const String securityLockAutoTimeout = 'securityLockAutoTimeout'; // 自动锁定超时(分钟), 0=不自动锁
+
   static const String locale = 'locale';
 }

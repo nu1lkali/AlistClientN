@@ -463,14 +463,19 @@ class _MediaKitPlayerScreenState extends State<MediaKitPlayerScreen>
             if (_showBrightnessSlider && _verticalDragging) Positioned(left: _swapVolumeAndBrightness ? null : 20, right: _swapVolumeAndBrightness ? 20 : null, top: 0, bottom: 0, child: Center(child: _VerticalSliderIndicator(icon: Icons.brightness_high_rounded, value: _systemBrightnessValue, color: Colors.amber))),
             if (_showVolumeSlider && _verticalDragging) Positioned(left: _swapVolumeAndBrightness ? 20 : null, right: _swapVolumeAndBrightness ? null : 20, top: 0, bottom: 0, child: Center(child: _VerticalSliderIndicator(icon: Icons.volume_up_rounded, value: _systemVolumeValue, color: Colors.blue))),
             if (_showSpeedIndicator) Container(padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12), decoration: BoxDecoration(color: Colors.black.withOpacity(0.6), borderRadius: BorderRadius.circular(12)), margin: const EdgeInsets.only(bottom: 120), child: Text('${_playbackSpeed.toStringAsFixed(2)}x', style: const TextStyle(color: Colors.white, fontSize: 32, fontWeight: FontWeight.bold))),
-            AnimatedOpacity(opacity: showOverlay ? 1.0 : 0.0, duration: const Duration(milliseconds: 200), child: IgnorePointer(ignoring: !showOverlay, child: SafeArea(child: Stack(children: <Widget>[
+            AnimatedOpacity(opacity: showOverlay ? 1.0 : 0.0, duration: const Duration(milliseconds: 200), child: IgnorePointer(ignoring: !showOverlay, child: Stack(children: <Widget>[
               Column(children: [
                 _buildTopBar(title),
                 Expanded(child: Center(child: _buildCenterControls())),
                 _buildBottomBar(isLive),
               ]),
-              if (_videos.length > 1 && !_isFullscreen) Positioned(left: 16, bottom: 80, child: _buildFloatingSwitchButton()),
-            ])))),
+              if (_videos.length > 1 && !_isFullscreen) Positioned(left: 16, bottom: 80 + MediaQuery.of(context).padding.bottom, child: Row(children: [
+                _buildFloatingSwitchButton(),
+                const SizedBox(width: 8),
+                _buildFloatingDislikeButton(),
+              ])),
+              if (_videos.length <= 1 && !_isFullscreen) Positioned(left: 16, bottom: 80 + MediaQuery.of(context).padding.bottom, child: _buildFloatingDislikeButton()),
+            ]))),
             if (_areControlsLocked) Positioned(left: 40, right: 40, bottom: 60, child: _SlideToUnlock(onUnlock: () { setState(() => _areControlsLocked = false); _startHideTimer(); })),
             if (hasSheet) _buildSheetOverlay(),
             if (_activeSheet == PlayerSheet.playlist) _buildPlaylistDrawer(),
@@ -481,6 +486,7 @@ class _MediaKitPlayerScreenState extends State<MediaKitPlayerScreen>
   }
 
   Widget _buildTopBar(String title) => Container(
+    padding: EdgeInsets.only(top: MediaQuery.of(context).padding.top),
     decoration: BoxDecoration(gradient: LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [Colors.black.withOpacity(0.8), Colors.transparent])),
     child: Row(children: [
       _CircularButton(icon: Icons.arrow_back_rounded, alwaysEnabled: true, onPressed: () { if (_isFullscreen) _toggleFullscreen(); else Get.back(); }),
@@ -504,7 +510,7 @@ class _MediaKitPlayerScreenState extends State<MediaKitPlayerScreen>
 
   Widget _buildBottomBar(bool isLive) => Container(
     decoration: BoxDecoration(gradient: LinearGradient(begin: Alignment.bottomCenter, end: Alignment.topCenter, colors: [Colors.black.withOpacity(0.8), Colors.transparent])),
-    padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+    padding: EdgeInsets.fromLTRB(16, 0, 16, 8 + MediaQuery.of(context).padding.bottom),
     child: Column(mainAxisSize: MainAxisSize.min, children: [
       if (!isLive) _NormalSeekBar(position: _position, duration: _duration, onSeek: (pos) { _isDraggingSlider = true; _hideTimer?.cancel(); setState(() => _position = pos); }, onSeekEnd: (pos) { _isDraggingSlider = false; _player.seek(pos); _startHideTimer(); }),
       Row(children: [
@@ -521,6 +527,23 @@ class _MediaKitPlayerScreenState extends State<MediaKitPlayerScreen>
     currentIndex: _index + 1, totalCount: _videos.length,
     onPrevious: () => _index > 0 ? _playAt(_index - 1) : _showToast('已经是第一个视频了'),
     onNext: () => _index < _videos.length - 1 ? _playAt(_index + 1) : _showToast('已经是最后一个视频了'),
+  );
+
+  Widget _buildFloatingDislikeButton() => GestureDetector(
+    onTap: _toggleDisliked,
+    child: Container(
+      width: 48, height: 48,
+      decoration: BoxDecoration(
+        color: Colors.white.withOpacity(0.15),
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(color: Colors.white.withOpacity(0.2)),
+      ),
+      child: Center(child: Icon(
+        _isDisliked ? Icons.thumb_down : Icons.thumb_down_alt_outlined,
+        color: _isDisliked ? Colors.red : Colors.white,
+        size: 22,
+      )),
+    ),
   );
 
   Widget _buildSheetOverlay() => GestureDetector(onTap: _closeSheetAndPanel, child: Container(color: Colors.black54, child: Align(alignment: Alignment.bottomCenter, child: GestureDetector(onTap: () {}, child: Container(constraints: BoxConstraints(maxHeight: _screenHeight * 0.55), width: double.infinity, decoration: const BoxDecoration(color: Color(0xFF1E1E1E), borderRadius: BorderRadius.only(topLeft: Radius.circular(20), topRight: Radius.circular(20))), child: _activeSheet == PlayerSheet.playbackSpeed ? _buildSpeedSheet() : _activeSheet == PlayerSheet.more ? _buildMoreSheet() : const SizedBox.shrink())))));

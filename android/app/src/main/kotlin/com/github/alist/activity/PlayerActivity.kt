@@ -309,6 +309,7 @@ class PlayerActivity : AppCompatActivity(), GSYVideoProgressListener {
             val item = videos[index]
             FlutterMethods.toggleDislike(item) { isDisliked ->
                 runOnUiThread {
+                    updateDislikeIcon(isDisliked)
                     SmartToast.show(this@PlayerActivity, if (isDisliked) "已标记为不喜欢" else "已取消不喜欢")
                 }
             }
@@ -531,6 +532,7 @@ class PlayerActivity : AppCompatActivity(), GSYVideoProgressListener {
         }
         
         checkFavoriteStatus()
+        checkDislikeStatus()
     }
 
     override fun onPause() {
@@ -711,6 +713,27 @@ class PlayerActivity : AppCompatActivity(), GSYVideoProgressListener {
         btnFavorite?.setImageResource(
             if (isFavorite) R.drawable.ic_favorite_filled else R.drawable.ic_favorite
         )
+    }
+
+    private fun checkDislikeStatus() {
+        if (videos.isEmpty()) return
+        val video = videos[index]
+
+        FlutterMethods.checkDislikeStatus(video) { isDisliked ->
+            runOnUiThread {
+                updateDislikeIcon(isDisliked)
+            }
+        }
+    }
+
+    private fun updateDislikeIcon(isDisliked: Boolean) {
+        val iconRes = if (isDisliked) R.drawable.ic_dislike_filled else R.drawable.ic_dislike
+        // 顶部栏的不喜欢按钮
+        val btnDislike = gsyVideoPlayer.findViewById<ImageView>(R.id.btn_dislike)
+        btnDislike?.setImageResource(iconRes)
+        // 悬浮快捷不喜欢按钮
+        val btnQuickDislike = gsyVideoPlayer.findViewById<ImageView>(R.id.btn_quick_dislike)
+        btnQuickDislike?.setImageResource(iconRes)
     }
 
     private object SmartToast {

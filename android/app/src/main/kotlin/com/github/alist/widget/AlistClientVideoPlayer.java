@@ -53,6 +53,7 @@ public class AlistClientVideoPlayer extends NormalGSYVideoPlayer {
     private View llQuickNav;
     private View btnQuickPrevious;
     private View btnQuickNext;
+    private View btnQuickDislike;
     protected boolean isEnableSeek;
     private boolean isLongPressing;
     private ValueAnimator ffwdIconAnimator;
@@ -169,6 +170,7 @@ public class AlistClientVideoPlayer extends NormalGSYVideoPlayer {
         llQuickNav = findViewById(R.id.ll_quick_nav);
         btnQuickPrevious = findViewById(R.id.btn_quick_previous);
         btnQuickNext = findViewById(R.id.btn_quick_next);
+        btnQuickDislike = findViewById(R.id.btn_quick_dislike);
         btnPrevious = findViewById(R.id.btn_previous);
         btnNext = findViewById(R.id.btn_next);
         btnRewind = findViewById(R.id.btn_rewind);
@@ -205,6 +207,7 @@ public class AlistClientVideoPlayer extends NormalGSYVideoPlayer {
         // 悬浮快捷按钮转发给中间按钮
         btnQuickPrevious.setOnClickListener(v -> btnPrevious.performClick());
         btnQuickNext.setOnClickListener(v -> btnNext.performClick());
+        btnQuickDislike.setOnClickListener(v -> btnDislike.performClick());
 
         llPlayingAtDoubleSpeed.setOutlineProvider(new ViewOutlineProvider() {
             @Override
@@ -409,6 +412,7 @@ public class AlistClientVideoPlayer extends NormalGSYVideoPlayer {
             fullPlayer.infoClickListener = this.infoClickListener;
             fullPlayer.favoriteClickListener = this.favoriteClickListener;
             fullPlayer.pipClickListener = this.pipClickListener;
+            fullPlayer.dislikeClickListener = this.dislikeClickListener;
             fullPlayer.btnScreenshot.setOnClickListener(v -> fullPlayer.takeScreenshot());
             if (fullPlayer.btnDelete != null && fullPlayer.deleteClickListener != null) {
                 fullPlayer.btnDelete.setOnClickListener(v -> {

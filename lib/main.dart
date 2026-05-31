@@ -8,6 +8,8 @@ import 'package:alist/util/image_utils.dart';
 import 'package:alist/util/log_utils.dart';
 import 'package:alist/util/named_router.dart';
 import 'package:alist/util/proxy.dart';
+import 'package:alist/screen/security_lock_screen.dart';
+import 'package:alist/util/security_lock_controller.dart';
 import 'package:alist/util/user_controller.dart';
 import 'package:flustars/flustars.dart';
 import 'package:flutter/foundation.dart';
@@ -20,10 +22,10 @@ import 'package:pull_to_refresh/pull_to_refresh.dart';
 
 import 'database/alist_database_controller.dart';
 
-void main() {
+Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   MediaKit.ensureInitialized();
-  SpUtil.getInstance();
+  await SpUtil.getInstance();
   Log.init();
   // 只对局域网地址绕过代理，公网地址仍走系统代理
   // 解决开启 VPN 时局域网图片/缩略图无法加载的问题
@@ -152,6 +154,51 @@ class ThemeController extends GetxController {
       );
 }
 
+/// 全局安全锁包装器 - 监听应用生命周期并显示锁屏
+class _SecurityLockWrapper extends StatefulWidget {
+  final Widget child;
+  const _SecurityLockWrapper({required this.child});
+
+  @override
+  State<_SecurityLockWrapper> createState() => _SecurityLockWrapperState();
+}
+
+class _SecurityLockWrapperState extends State<_SecurityLockWrapper>
+    with WidgetsBindingObserver {
+  final SecurityLockController _lockController = Get.find();
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    super.didChangeAppLifecycleState(state);
+    if (state == AppLifecycleState.resumed) {
+      // 从后台恢复时检查是否需要锁定
+      _lockController.checkAndLock();
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Obx(() {
+      if (_lockController.isLocked.value) {
+        return const SecurityLockScreen();
+      }
+      return widget.child;
+    });
+  }
+}
+
 class MyApp extends StatelessWidget {
   const MyApp({super.key});
 
@@ -181,20 +228,23 @@ class MyApp extends StatelessWidget {
     Get.put(AlistDatabaseController());
     Get.put(UserController());
     Get.put(ProxyServer());
+    Get.put(SecurityLockController());
 
     return MediaQuery(
       data: MediaQuery.of(context).copyWith(textScaleFactor: 1),
-      child: RefreshConfiguration(
-          headerBuilder: () {
-            return ClassicHeader(
-              idleText: Intl.pullRefresh_idleRefreshText.tr,
-              releaseText: Intl.pullRefresh_canRefreshText.tr,
-              refreshingText: Intl.pullRefresh_refreshingText.tr,
-              completeText: Intl.pullRefresh_refreshCompleteText.tr,
-              failedText: Intl.pullRefresh_refreshFailedText.tr,
-            );
-          },
-          child: smartDialogInit(context, widget)),
+      child: _SecurityLockWrapper(
+        child: RefreshConfiguration(
+            headerBuilder: () {
+              return ClassicHeader(
+                idleText: Intl.pullRefresh_idleRefreshText.tr,
+                releaseText: Intl.pullRefresh_canRefreshText.tr,
+                refreshingText: Intl.pullRefresh_refreshingText.tr,
+                completeText: Intl.pullRefresh_refreshCompleteText.tr,
+                failedText: Intl.pullRefresh_refreshFailedText.tr,
+              );
+            },
+            child: smartDialogInit(context, widget)),
+      ),
     );
   }
 }

@@ -283,6 +283,16 @@
             android:src="@drawable/ic_quick_next"
             android:alpha="1.0" />
 
+        <ImageView
+            android:id="@+id/btn_quick_dislike"
+            android:layout_width="44dp"
+            android:layout_height="44dp"
+            android:padding="10dp"
+            android:scaleType="centerInside"
+            android:src="@drawable/ic_dislike"
+            android:alpha="1.0"
+            android:contentDescription="不喜欢" />
+
     </LinearLayout>
 
     <ImageView

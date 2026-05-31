@@ -43,6 +43,7 @@ import 'package:alist/util/lru_path_cache.dart';
 import 'package:alist/util/markdown_utils.dart';
 import 'package:alist/util/named_router.dart';
 import 'package:alist/util/nature_sort.dart';
+import 'package:alist/util/security_lock_controller.dart';
 import 'package:alist/util/proxy.dart';
 import 'package:alist/util/string_utils.dart';
 import 'package:alist/util/user_controller.dart';
@@ -1613,6 +1614,14 @@ class _FileListScreenState extends State<FileListScreen>
                     Expanded(child: _gridItem(Icons.download_rounded, '下载全部', () { Navigator.pop(context); _downloadAll(); })),
                     Expanded(child: _gridItem(Icons.upload_rounded, '上传', () { Navigator.pop(context); Platform.isAndroid ? _uploadPhotos() : _uploadFiles(); })),
                     Expanded(child: _gridItem(Icons.line_weight_rounded, '行数', () { Navigator.pop(context); SmartDialog.show(builder: (_) => const ConfigFileNameMaxLinesDialog()); })),
+                    Obx(() {
+                      final lockController = Get.find<SecurityLockController>();
+                      if (!lockController.isEnabled.value) return const SizedBox.shrink();
+                      return Expanded(child: _gridItem(Icons.lock_rounded, '锁定', () {
+                        Navigator.pop(context);
+                        lockController.lock();
+                      }, iconColor: Colors.deepOrange));
+                    }),
                   ],
                 ),
               ),

@@ -116,6 +116,25 @@ object FlutterMethods {
         )
     }
 
+    fun checkDislikeStatus(video: VideoItem, callback: (Boolean) -> Unit) {
+        channel.invokeMethod(
+            "checkDislikeStatus",
+            mutableMapOf("path" to video.remotePath),
+            object : MethodChannel.Result {
+                override fun success(result: Any?) {
+                    val isDisliked = result == "true" || result == true
+                    callback(isDisliked)
+                }
+                override fun error(p0: String, p1: String?, p2: Any?) {
+                    callback(false)
+                }
+                override fun notImplemented() {
+                    callback(false)
+                }
+            }
+        )
+    }
+
     fun toggleFavorite(video: VideoItem, callback: (Boolean) -> Unit) {
         channel.invokeMethod(
             "toggleFavorite",

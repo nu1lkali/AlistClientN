@@ -257,6 +257,22 @@ class MethodCallHandler {
         
         return existing != null ? "true" : "false";
 
+      case "checkDislikeStatus":
+        String path = call.arguments["path"];
+        
+        final AlistDatabaseController databaseController = Get.find();
+        final UserController userController = Get.find();
+        var user = userController.user.value;
+        var dislikedDao = databaseController.dislikedVideoDao;
+        
+        var existing = await dislikedDao.findByPath(
+          user.serverUrl, 
+          user.username, 
+          path
+        );
+        
+        return existing != null ? "true" : "false";
+
       default:
         throw PlatformException(
             code: 'Method not implemented',
