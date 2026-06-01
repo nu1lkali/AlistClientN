@@ -167,16 +167,19 @@ class _SecurityLockScreenState extends State<SecurityLockScreen> {
     });
 
     await Future.delayed(const Duration(milliseconds: 200));
+    if (!mounted) return;
 
     if (_lockController.verifyPattern(pattern)) {
       HapticFeedback.lightImpact();
       _onSuccess();
     } else {
       HapticFeedback.heavyImpact();
-      setState(() {
-        _errorMessage = '手势不正确，请重试';
-        _isVerifying = false;
-      });
+      if (mounted) {
+        setState(() {
+          _errorMessage = '手势不正确，请重试';
+          _isVerifying = false;
+        });
+      }
       _patternKey.currentState?.showErrorThenReset();
     }
   }
@@ -189,16 +192,19 @@ class _SecurityLockScreenState extends State<SecurityLockScreen> {
     });
 
     await Future.delayed(const Duration(milliseconds: 200));
+    if (!mounted) return;
 
     if (_lockController.verifyPassword(password)) {
       HapticFeedback.lightImpact();
       _onSuccess();
     } else {
       HapticFeedback.heavyImpact();
-      setState(() {
-        _errorMessage = '密码不正确，请重试';
-        _isVerifying = false;
-      });
+      if (mounted) {
+        setState(() {
+          _errorMessage = '密码不正确，请重试';
+          _isVerifying = false;
+        });
+      }
       _passwordEC.clear();
     }
   }
@@ -208,10 +214,10 @@ class _SecurityLockScreenState extends State<SecurityLockScreen> {
     _lockController.recordActivity();
     if (widget.onVerified != null) {
       widget.onVerified!();
-    }
-    // 如果是从路由弹出的，返回；如果是overlay模式则不需要pop
-    if (Navigator.of(context, rootNavigator: false).canPop()) {
-      Get.back(result: true);
+    } else {
+      // 作为锁屏使用时，解锁后需要关闭锁屏页面
+      // 让 _SecurityLockWrapper 的 Obx 能正确响应状态变化并显示子页面
+      Navigator.of(context).pop();
     }
   }
 }

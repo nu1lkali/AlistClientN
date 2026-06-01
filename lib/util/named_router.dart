@@ -17,10 +17,7 @@
   // video player
   static const videoPlayer = "/videoPlayer";
 
-  // donate
-  static const donate = "/donate";
-
-  // donate
+  // about
   static const about = "/about";
 
   // gallery

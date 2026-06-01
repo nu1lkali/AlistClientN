@@ -44,7 +44,6 @@ class LoginScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     final controller = Get.put(LoginScreenController());
 
-    // 编辑模式：初始化控制器数据（只在控制器首次创建或 server 变化时执行）
     if (isEditMode && server != null) {
       if (controller.editingServerId != server!.id) {
         controller.initForEdit(server!);
@@ -63,11 +62,10 @@ class LoginScreen extends StatelessWidget {
               bottom: 0,
               left: 0,
               right: 0,
-              child: buildServerUrlBottomBar(
+              child: _buildServerUrlBottomBar(
                 context,
                 controller.bottomBarTypes,
-                controller.keyboardHeight.value > 0 &&
-                    controller.addressTextFieldIsFocused.value,
+                controller.keyboardHeight.value > 0 && controller.addressTextFieldIsFocused.value,
               ),
             )),
           ],
@@ -76,18 +74,12 @@ class LoginScreen extends StatelessWidget {
     );
   }
 
-  Widget buildServerUrlBottomBar(BuildContext context,
-      List<String> bottomBarTypes, bool visible) {
-    if (!visible) {
-      return const SizedBox();
-    }
+  Widget _buildServerUrlBottomBar(BuildContext context, List<String> bottomBarTypes, bool visible) {
+    if (!visible) return const SizedBox();
 
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 6),
-      color: Theme
-          .of(context)
-          .colorScheme
-          .surfaceVariant,
+      color: Theme.of(context).colorScheme.surfaceVariant,
       child: Row(
         children: [
           for (var value1 in bottomBarTypes)
@@ -96,11 +88,10 @@ class LoginScreen extends StatelessWidget {
                 padding: const EdgeInsets.symmetric(horizontal: 4),
                 child: ElevatedButton(
                   style: ButtonStyle(
-                      padding: MaterialStateProperty.all(EdgeInsets.zero),
-                      minimumSize:
-                      MaterialStateProperty.all(const Size(0, 30))),
-                  onPressed: () =>
-                      LoginScreenController.getInstance().appendServerUrlText(value1),
+                    padding: MaterialStateProperty.all(EdgeInsets.zero),
+                    minimumSize: MaterialStateProperty.all(const Size(0, 30)),
+                  ),
+                  onPressed: () => LoginScreenController.getInstance().appendServerUrlText(value1),
                   child: Text(value1),
                 ),
               ),
@@ -122,204 +113,186 @@ class LoginScreenContainer extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    final isDark = Theme.of(context).brightness == Brightness.dark;
     final controller = Get.find<LoginScreenController>();
-
-    InputDecoration fieldDecoration(String label, String hint, IconData icon) =>
-        InputDecoration(
-          labelText: label,
-          hintText: hint,
-          prefixIcon: Icon(icon, size: 22),
-          filled: true,
-          fillColor: isDark
-              ? scheme.surfaceVariant.withOpacity(0.5)
-              : scheme.surfaceVariant.withOpacity(0.3),
-          border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(12),
-            borderSide: BorderSide.none,
-          ),
-          enabledBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(12),
-            borderSide: BorderSide.none,
-          ),
-          focusedBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(12),
-            borderSide: BorderSide(color: scheme.primary, width: 2),
-          ),
-          contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
-        );
 
     return LayoutBuilder(
       builder: (context, constraints) {
         final h = constraints.maxHeight;
-        // 根据可用高度动态计算间距，最小 4，最大 20
-        final gap = (h * 0.02).clamp(4.0, 20.0);
-        final logoSize = (h * 0.08).clamp(40.0, 72.0);
-        final btnHeight = (h * 0.07).clamp(44.0, 56.0);
+        final gap = (h * 0.015).clamp(4.0, 16.0);
+        final logoSize = (h * 0.07).clamp(40.0, 64.0);
+        final btnHeight = (h * 0.065).clamp(44.0, 52.0);
 
-        return SingleChildScrollView(
-          padding: EdgeInsets.symmetric(horizontal: 24, vertical: gap),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              // logo
-              Container(
-                padding: EdgeInsets.all(gap),
-                decoration: BoxDecoration(
-                  color: scheme.primaryContainer.withOpacity(0.3),
-                  shape: BoxShape.circle,
-                ),
-                child: Image.asset(Images.logo, width: logoSize, height: logoSize),
-              ),
-              SizedBox(height: gap),
-              Text(
-                isEditMode ? Intl.editServer.tr : 'AList Client N',
-                style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                  fontWeight: FontWeight.bold,
-                  color: scheme.primary,
-                  letterSpacing: -0.5,
-                ),
-              ),
-              SizedBox(height: gap * 1.5),
-
-              // 备注/别名输入框（编辑模式或新建模式）
-              TextField(
-                decoration: fieldDecoration(
-                  Intl.loginScreen_label_remark.tr,
-                  Intl.loginScreen_hint_remark.tr,
-                  Icons.label_outline_rounded,
-                ),
-                controller: controller.remarkController,
-              ),
-              SizedBox(height: gap),
-
-              // scheme selector
-              Obx(() => Row(children: [
-                Expanded(
-                  child: SegmentedButton<String>(
-                    segments: const [
-                      ButtonSegment(value: 'http', label: Text('HTTP')),
-                      ButtonSegment(value: 'https', label: Text('HTTPS')),
-                    ],
-                    selected: {controller.scheme.value},
-                    onSelectionChanged: (s) =>
-                        controller.scheme.value = s.first,
-                  ),
-                ),
-              ])),
-              SizedBox(height: gap),
-
-              // host
-              TextField(
-                decoration: fieldDecoration(
-                  Intl.loginScreen_label_serverUrl.tr,
-                  'example.com',
-                  Icons.dns_rounded,
-                ),
-                controller: controller.addressController,
-                focusNode: controller.addressFocusNode,
-                keyboardType: TextInputType.url,
-              ),
-              SizedBox(height: gap),
-
-              // port
-              TextField(
-                decoration: fieldDecoration('端口', '5244', Icons.settings_ethernet_rounded),
-                controller: controller.portController,
-                keyboardType: TextInputType.number,
-              ),
-              SizedBox(height: gap),
-
-              // username
-              TextField(
-                decoration: fieldDecoration(
-                  Intl.loginScreen_label_username.tr,
-                  'guest',
-                  Icons.person_rounded,
-                ),
-                controller: controller.usernameController,
-              ),
-              SizedBox(height: gap),
-
-              // password
-              TextField(
-                decoration: fieldDecoration(
-                  Intl.loginScreen_label_password.tr,
-                  'password',
-                  Icons.lock_rounded,
-                ),
-                controller: controller.passwordController,
-                obscureText: true,
-              ),
-              SizedBox(height: gap * 0.5),
-
-              // SSL checkbox
-              Obx(() => buildSSLErrorIgnoreCheckbox(context, controller)),
-              SizedBox(height: gap),
-
-              // 保存按钮（编辑模式）或 登录按钮（新建模式）
-              SizedBox(
-                width: double.infinity,
-                height: btnHeight,
-                child: FilledButton(
-                  onPressed: () {
-                    KeyboardUtil.hideKeyboard(context);
-                    if (isEditMode) {
-                      controller.saveServer();
-                    } else {
-                      controller.twofaController.text = "";
-                      controller._onLoginButtonClick(context,
-                          address: controller._buildAddress());
-                    }
-                  },
-                  style: FilledButton.styleFrom(
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                  ),
-                  child: Text(
-                    isEditMode ? Intl.save.tr : Intl.loginScreen_button_login.tr,
-                    style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
-                  ),
-                ),
-              ),
-
-              // 非编辑模式时显示访客模式按钮
-              if (!isEditMode) ...[
-                SizedBox(height: gap),
-                SizedBox(
-                  width: double.infinity,
-                  height: btnHeight,
-                  child: OutlinedButton(
-                    onPressed: () {
-                      var address = controller._buildAddress();
-                      if (address.isEmpty || address == 'http://' || address == 'https://') {
-                        controller._tryEntryDefaultServer(context);
-                      } else {
-                        controller._enterVisitorMode(address);
-                      }
-                    },
-                    style: OutlinedButton.styleFrom(
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                      side: BorderSide(color: scheme.primary, width: 1.5),
-                    ),
-                    child: Text(
-                      Intl.loginScreen_button_guestMode.tr,
-                      style: TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.w600,
-                        color: scheme.primary,
-                      ),
-                    ),
-                  ),
-                ),
-              ],
-            ],
+        InputDecoration fieldDecoration(String label, String hint, IconData icon) => InputDecoration(
+          labelText: label,
+          hintText: hint,
+          prefixIcon: Icon(icon, size: 20),
+          filled: true,
+          fillColor: scheme.surfaceVariant.withOpacity(0.3),
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(12),
+            borderSide: BorderSide.none,
           ),
+          contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        );
+
+        return CustomScrollView(
+          slivers: [
+            SliverFillRemaining(
+              hasScrollBody: false,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 24),
+                child: Column(
+                  mainAxisSize: MainAxisSize.max,
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        SizedBox(height: gap),
+                        Container(
+                          padding: EdgeInsets.all(gap),
+                          decoration: BoxDecoration(
+                            color: scheme.primaryContainer.withOpacity(0.3),
+                            shape: BoxShape.circle,
+                          ),
+                          child: Image.asset(Images.logo, width: logoSize, height: logoSize),
+                        ),
+                        SizedBox(height: gap),
+                        Text(
+                          isEditMode ? Intl.editServer.tr : 'AList Client N',
+                          style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                            fontWeight: FontWeight.bold,
+                            color: scheme.primary,
+                            letterSpacing: -0.5,
+                          ),
+                        ),
+                        SizedBox(height: gap * 1.2),
+                        TextField(
+                          decoration: fieldDecoration(
+                            Intl.loginScreen_label_remark.tr,
+                            Intl.loginScreen_hint_remark.tr,
+                            Icons.label_outline_rounded,
+                          ),
+                          controller: controller.remarkController,
+                        ),
+                        SizedBox(height: gap),
+                        Obx(() => Row(children: [
+                          Expanded(
+                            child: SegmentedButton<String>(
+                              segments: const [
+                                ButtonSegment(value: 'http', label: Text('HTTP')),
+                                ButtonSegment(value: 'https', label: Text('HTTPS')),
+                              ],
+                              selected: {controller.scheme.value},
+                              onSelectionChanged: (s) => controller.scheme.value = s.first,
+                            ),
+                          ),
+                        ])),
+                        SizedBox(height: gap),
+                        TextField(
+                          decoration: fieldDecoration(
+                            Intl.loginScreen_label_serverUrl.tr,
+                            'example.com',
+                            Icons.dns_rounded,
+                          ),
+                          controller: controller.addressController,
+                          focusNode: controller.addressFocusNode,
+                          keyboardType: TextInputType.url,
+                        ),
+                        SizedBox(height: gap),
+                        TextField(
+                          decoration: fieldDecoration('端口', '5244', Icons.settings_ethernet_rounded),
+                          controller: controller.portController,
+                          keyboardType: TextInputType.number,
+                        ),
+                        SizedBox(height: gap),
+                        TextField(
+                          decoration: fieldDecoration(
+                            Intl.loginScreen_label_username.tr,
+                            'guest',
+                            Icons.person_rounded,
+                          ),
+                          controller: controller.usernameController,
+                        ),
+                        SizedBox(height: gap),
+                        TextField(
+                          decoration: fieldDecoration(
+                            Intl.loginScreen_label_password.tr,
+                            'password',
+                            Icons.lock_rounded,
+                          ),
+                          controller: controller.passwordController,
+                          obscureText: true,
+                        ),
+                        SizedBox(height: gap * 0.5),
+                        Obx(() => _buildSSLErrorIgnoreCheckbox(context, controller)),
+                      ],
+                    ),
+                    Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        SizedBox(height: gap),
+                        SizedBox(
+                          width: double.infinity,
+                          height: btnHeight,
+                          child: FilledButton(
+                            onPressed: () {
+                              KeyboardUtil.hideKeyboard(context);
+                              if (isEditMode) {
+                                controller.saveServer();
+                              } else {
+                                controller.twofaController.text = "";
+                                controller._onLoginButtonClick(context, address: controller._buildAddress());
+                              }
+                            },
+                            style: FilledButton.styleFrom(
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                            ),
+                            child: Text(
+                              isEditMode ? Intl.save.tr : Intl.loginScreen_button_login.tr,
+                              style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+                            ),
+                          ),
+                        ),
+                        if (!isEditMode) ...[
+                          SizedBox(height: gap),
+                          SizedBox(
+                            width: double.infinity,
+                            height: btnHeight,
+                            child: OutlinedButton(
+                              onPressed: () {
+                                var address = controller._buildAddress();
+                                if (address.isEmpty || address == 'http://' || address == 'https://') {
+                                  controller._tryEntryDefaultServer(context);
+                                } else {
+                                  controller._enterVisitorMode(address);
+                                }
+                              },
+                              style: OutlinedButton.styleFrom(
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                                side: BorderSide(color: scheme.primary, width: 1.5),
+                              ),
+                              child: Text(
+                                Intl.loginScreen_button_guestMode.tr,
+                                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: scheme.primary),
+                              ),
+                            ),
+                          ),
+                        ],
+                        SizedBox(height: gap + 16),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
         );
       },
     );
   }
 
-  Row buildSSLErrorIgnoreCheckbox(BuildContext context, LoginScreenController controller) {
+  Widget _buildSSLErrorIgnoreCheckbox(BuildContext context, LoginScreenController controller) {
     return Row(
       children: [
         SizedBox(
@@ -333,10 +306,7 @@ class LoginScreenContainer extends StatelessWidget {
           ),
         ),
         GestureDetector(
-          onTap: () {
-            controller.ignoreSSLError.value =
-                !controller.ignoreSSLError.value;
-          },
+          onTap: () => controller.ignoreSSLError.value = !controller.ignoreSSLError.value,
           child: Text(
             Intl.loginScreen_checkbox_ignoreSSLError.tr,
             style: Theme.of(context).textTheme.bodyMedium,
@@ -345,19 +315,6 @@ class LoginScreenContainer extends StatelessWidget {
       ],
     );
   }
-}
-
-class LoginInputDecoration extends InputDecoration {
-  LoginInputDecoration({required String hintText, required String labelText})
-      : super(
-    hintText: hintText,
-    border: const OutlineInputBorder(),
-    isCollapsed: true,
-    label: Text(labelText),
-    isDense: true,
-    contentPadding:
-    const EdgeInsets.symmetric(horizontal: 11, vertical: 12),
-  );
 }
 
 class LoginScreenController extends GetxController with WidgetsBindingObserver {
@@ -383,7 +340,6 @@ class LoginScreenController extends GetxController with WidgetsBindingObserver {
   var scheme = 'http'.obs;
   var ignoreSSLError = false.obs;
 
-  // 编辑模式相关
   Server? _editingServer;
   bool get isEditingServer => _editingServer != null;
   int? get editingServerId => _editingServer?.id;
@@ -396,10 +352,8 @@ class LoginScreenController extends GetxController with WidgetsBindingObserver {
       var text = addressController.text.trim();
       bottomBarTypes.value = text.isEmpty ? _bottomBarTypes1 : _bottomBarTypes2;
     });
-    ignoreSSLError.value =
-        SpUtil.getBool(AlistConstant.ignoreSSLError) ?? false;
+    ignoreSSLError.value = SpUtil.getBool(AlistConstant.ignoreSSLError) ?? false;
 
-    // 解析已保存的 serverUrl，拆分出 scheme、host、port
     final savedUrl = userController.user().serverUrl;
     if (savedUrl.isNotEmpty && !isEditingServer) {
       try {
@@ -415,24 +369,17 @@ class LoginScreenController extends GetxController with WidgetsBindingObserver {
     } else {
       portController.text = '5244';
     }
-    String username = userController
-        .user()
-        .username ?? "";
+    String username = userController.user().username ?? "";
     if ("guest" != username && !isEditingServer) {
       usernameController.text = username;
     }
     if (!isEditingServer) {
-      passwordController.text = userController
-          .user()
-          .password ?? "";
-      // 非编辑模式时，从数据库恢复 remark（别名），防止 token 失效重新登录时丢失
+      passwordController.text = userController.user().password ?? "";
       _restoreRemarkFromDatabase();
     }
-    bool isAgreePrivacyPolicy =
-        SpUtil.getBool(AlistConstant.isAgreePrivacyPolicy) ?? false;
+    bool isAgreePrivacyPolicy = SpUtil.getBool(AlistConstant.isAgreePrivacyPolicy) ?? false;
     if (!isAgreePrivacyPolicy && !isEditingServer) {
-      Future.delayed(const Duration(microseconds: 200))
-          .then((value) => _showAgreementDialog());
+      Future.delayed(const Duration(microseconds: 200)).then((value) => _showAgreementDialog());
     }
     WidgetsBinding.instance.addObserver(this);
     addressFocusNode.addListener(() {
@@ -442,8 +389,6 @@ class LoginScreenController extends GetxController with WidgetsBindingObserver {
 
   void initForEdit(Server server) {
     _editingServer = server;
-
-    // 解析服务器URL
     try {
       final uri = Uri.parse(server.serverUrl);
       scheme.value = uri.scheme == 'https' ? 'https' : 'http';
@@ -454,8 +399,6 @@ class LoginScreenController extends GetxController with WidgetsBindingObserver {
       addressController.text = server.serverUrl;
       portController.text = '5244';
     }
-
-    // 设置其他字段
     usernameController.text = server.userId;
     passwordController.text = server.password;
     remarkController.text = server.remark ?? '';
@@ -467,10 +410,7 @@ class LoginScreenController extends GetxController with WidgetsBindingObserver {
     super.didChangeMetrics();
     WidgetsBinding.instance.addPostFrameCallback((timeStamp) {
       if (Get.context != null) {
-        keyboardHeight.value = MediaQuery
-            .of(Get.context!)
-            .viewInsets
-            .bottom;
+        keyboardHeight.value = MediaQuery.of(Get.context!).viewInsets.bottom;
       }
     });
   }
@@ -483,44 +423,36 @@ class LoginScreenController extends GetxController with WidgetsBindingObserver {
   }
 
   static int currentTimeMillis() {
-    return DateTime
-        .now()
-        .millisecondsSinceEpoch;
+    return DateTime.now().millisecondsSinceEpoch;
   }
 
-  /// 把 scheme + host + port 拼成完整地址
   String _buildAddress() {
     final host = addressController.text.trim();
     final port = portController.text.trim();
     final s = scheme.value;
     if (host.startsWith('http://') || host.startsWith('https://')) {
-      // 用户直接粘贴了完整 URL，直接用
       return host;
     }
-    if (port.isEmpty || port == '80' && s == 'http' || port == '443' && s == 'https') {
+    if (port.isEmpty || (port == '80' && s == 'http') || (port == '443' && s == 'https')) {
       return '$s://$host';
     }
     return '$s://$host:$port';
   }
 
-  Future<void> _login(String address,
-      {bool ignoreDavCheck = false,
-        required LoginSuccessCallback onSuccess,
-        required LoginFailureCallback onFailure}) async {
+  Future<void> _login(String address, {
+    bool ignoreDavCheck = false,
+    required LoginSuccessCallback onSuccess,
+    required LoginFailureCallback onFailure,
+  }) async {
     if (address.isEmpty) {
       SmartDialog.showToast(Intl.loginScreen_tips_serverUrlError.tr);
       return;
     }
-
-    if (!address.endsWith("/")) {
-      address = "$address/";
-    }
-
+    if (!address.endsWith("/")) address = "$address/";
     if (!ignoreDavCheck && address.endsWith("/dav/")) {
       _showDavTipsDialog(isLogin: true);
       return;
     }
-
     var username = usernameController.text.trim();
     var password = passwordController.text.trim();
     var twofaCode = twofaController.text.trim();
@@ -528,7 +460,6 @@ class LoginScreenController extends GetxController with WidgetsBindingObserver {
       _enterVisitorMode(address);
       return;
     }
-
     if (!_checkServerUrl(address)) {
       SmartDialog.showToast(Intl.loginScreen_tips_serverUrlError.tr);
       return;
@@ -540,27 +471,20 @@ class LoginScreenController extends GetxController with WidgetsBindingObserver {
       SmartDialog.showToast(Intl.loginScreen_tips_usernameOrPasswordEmpty.tr);
       return;
     }
-
     try {
       Uri.parse(address);
     } catch (e) {
       SmartDialog.showToast(Intl.loginScreen_tips_serverUrlError.tr);
       return;
     }
-
     SmartDialog.showLoading();
     var baseUrl = "${address}api/";
     DioUtils.instance.configAgain(baseUrl, ignoreSSLError.value);
     DioUtils.instance.requestNetwork<LoginRespEntity>(
       Method.post,
       "auth/login",
-      params: {
-        'username': username,
-        'password': password,
-        'otp_code': twofaCode,
-      },
-      options:
-      Options(followRedirects: false, headers: {AlistConstant.noAuth: 1}),
+      params: {'username': username, 'password': password, 'otp_code': twofaCode},
+      options: Options(followRedirects: false, headers: {AlistConstant.noAuth: 1}),
       cancelToken: _cancelToken,
       onSuccess: (data) {
         var remark = remarkController.text.trim();
@@ -584,19 +508,14 @@ class LoginScreenController extends GetxController with WidgetsBindingObserver {
 
   @transaction
   void _insertUser2Database(User user) async {
-    var original = await _databaseController.serverDao
-        .findServer(user.serverUrl, user.username);
-    String? remark = remarkController.text.trim().isEmpty 
-        ? null 
-        : remarkController.text.trim();
-    // 如果新 remark 为空但旧记录有 remark，保留旧 remark（防御性修复）
+    var original = await _databaseController.serverDao.findServer(user.serverUrl, user.username);
+    String? remark = remarkController.text.trim().isEmpty ? null : remarkController.text.trim();
     if (remark == null && original?.remark != null) {
       remark = original!.remark;
     }
     if (original != null) {
       await _databaseController.serverDao.deleteServer(original);
     }
-
     await _databaseController.serverDao.insertServer(
       Server(
         name: user.username,
@@ -613,32 +532,24 @@ class LoginScreenController extends GetxController with WidgetsBindingObserver {
     );
   }
 
-  /// 保存服务器信息（编辑模式）
   Future<void> saveServer() async {
     var address = _buildAddress();
     if (address.isEmpty) {
       SmartDialog.showToast(Intl.loginScreen_tips_serverUrlError.tr);
       return;
     }
-
-    if (!address.endsWith("/")) {
-      address = "$address/";
-    }
-
+    if (!address.endsWith("/")) address = "$address/";
     if (!_checkServerUrl(address)) {
       SmartDialog.showToast(Intl.loginScreen_tips_serverUrlError.tr);
       return;
     }
-
     var username = usernameController.text.trim();
     var password = passwordController.text.trim();
     var remark = remarkController.text.trim();
-
     if (username.isEmpty || password.isEmpty) {
       SmartDialog.showToast(Intl.loginScreen_tips_usernameOrPasswordEmpty.tr);
       return;
     }
-
     final updatedServer = Server(
       id: _editingServer!.id,
       name: username,
@@ -652,15 +563,11 @@ class LoginScreenController extends GetxController with WidgetsBindingObserver {
       updateTime: currentTimeMillis(),
       remark: remark.isEmpty ? null : remark,
     );
-
     await _databaseController.serverDao.updateServer(updatedServer);
     SmartDialog.showToast(Intl.save.tr);
     Get.back();
-
-    // 如果编辑的是当前账户，更新当前登录状态
     final currentUser = userController.user.value;
-    if (currentUser.serverUrl == _editingServer!.serverUrl &&
-        currentUser.username == _editingServer!.userId) {
+    if (currentUser.serverUrl == _editingServer!.serverUrl && currentUser.username == _editingServer!.userId) {
       var baseUrl = "${address}api/";
       DioUtils.instance.configAgain(baseUrl, ignoreSSLError.value);
       userController.login(User(
@@ -676,20 +583,13 @@ class LoginScreenController extends GetxController with WidgetsBindingObserver {
   }
 
   bool _checkServerUrl(String serverUrl) {
-    if (serverUrl.isEmpty) {
-      return false;
-    }
-    if (serverUrl.contains(" ")) {
-      return false;
-    }
+    if (serverUrl.isEmpty) return false;
+    if (serverUrl.contains(" ")) return false;
     return true;
   }
 
-  _enterVisitorMode(String address,
-      {bool useDemoServer = false, bool ignoreDavCheck = false}) {
-    if (!address.endsWith("/")) {
-      address = "$address/";
-    }
+  void _enterVisitorMode(String address, {bool useDemoServer = false, bool ignoreDavCheck = false}) {
+    if (!address.endsWith("/")) address = "$address/";
     if (!_checkServerUrl(address)) {
       SmartDialog.showToast(Intl.loginScreen_tips_serverUrlError.tr);
       return;
@@ -701,43 +601,34 @@ class LoginScreenController extends GetxController with WidgetsBindingObserver {
       _showDavTipsDialog(isLogin: false);
       return;
     }
-
     var baseUrl = "${address}api/";
     DioUtils.instance.configAgain(baseUrl, ignoreSSLError.value);
-    SmartDialog.showLoading(
-        msg: "checking...", backDismiss: false, clickMaskDismiss: false);
-    DioUtils.instance.requestNetwork<MyInfoResp>(Method.get, "me",
-        options:
-        Options(followRedirects: false, headers: {AlistConstant.noAuth: 1}),
-        onSuccess: (data) {
-          if (data?.disabled == true) {
-            SmartDialog.showToast(
-                Intl.loginScreen_tips_guestAccountDisabled.tr);
-          } else {
-            _doAfterEnterVisitorMode(
-              baseUrl,
-              address,
-              data?.username,
-              data?.basePath,
-              useDemoServer: useDemoServer,
-            );
-          }
-          SmartDialog.dismiss();
-        }, onError: (code, message) {
-          if (code == 301) {
-            var baseUrl = message.substringBeforeLast("api/me")!;
-            addressController.text = baseUrl;
-            _enterVisitorMode(baseUrl, useDemoServer: useDemoServer);
-            return;
-          }
-          SmartDialog.showToast(message);
-          SmartDialog.dismiss();
-        });
+    SmartDialog.showLoading(msg: "checking...", backDismiss: false, clickMaskDismiss: false);
+    DioUtils.instance.requestNetwork<MyInfoResp>(
+      Method.get, "me",
+      options: Options(followRedirects: false, headers: {AlistConstant.noAuth: 1}),
+      onSuccess: (data) {
+        if (data?.disabled == true) {
+          SmartDialog.showToast(Intl.loginScreen_tips_guestAccountDisabled.tr);
+        } else {
+          _doAfterEnterVisitorMode(baseUrl, address, data?.username, data?.basePath, useDemoServer: useDemoServer);
+        }
+        SmartDialog.dismiss();
+      },
+      onError: (code, message) {
+        if (code == 301) {
+          var baseUrl = message.substringBeforeLast("api/me")!;
+          addressController.text = baseUrl;
+          _enterVisitorMode(baseUrl, useDemoServer: useDemoServer);
+          return;
+        }
+        SmartDialog.showToast(message);
+        SmartDialog.dismiss();
+      },
+    );
   }
 
-  void _doAfterEnterVisitorMode(String baseUrl, String address,
-      String? username, String? basePath,
-      {bool useDemoServer = false}) {
+  void _doAfterEnterVisitorMode(String baseUrl, String address, String? username, String? basePath, {bool useDemoServer = false}) {
     SpUtil.putBool(AlistConstant.ignoreSSLError, ignoreSSLError.value);
     var user = User(
       baseUrl: baseUrl,
@@ -750,9 +641,7 @@ class LoginScreenController extends GetxController with WidgetsBindingObserver {
       useDemoServer: useDemoServer,
     );
     userController.login(user);
-    if (!useDemoServer) {
-      _insertUser2Database(user);
-    }
+    if (!useDemoServer) _insertUser2Database(user);
     _goHomeScreen();
   }
 
@@ -763,25 +652,13 @@ class LoginScreenController extends GetxController with WidgetsBindingObserver {
         content: Text(Intl.guestModeDialog_content.tr),
         actions: [
           TextButton(
-            onPressed: () {
-              SmartDialog.dismiss();
-            },
-            child: Text(
-              Intl.guestModeDialog_btn_cancel.tr,
-              style: TextStyle(color: Theme
-                  .of(context)
-                  .colorScheme
-                  .secondary),
-            ),
+            onPressed: () => SmartDialog.dismiss(),
+            child: Text(Intl.guestModeDialog_btn_cancel.tr, style: TextStyle(color: Theme.of(context).colorScheme.secondary)),
           ),
           TextButton(
             onPressed: () {
               SmartDialog.dismiss();
-              Future.delayed(Duration.zero).then(
-                    (value) =>
-                    _enterVisitorMode(Global.demoServerBaseUrl,
-                        useDemoServer: true),
-              );
+              Future.delayed(Duration.zero).then((value) => _enterVisitorMode(Global.demoServerBaseUrl, useDemoServer: true));
             },
             child: Text(Intl.guestModeDialog_btn_ok.tr),
           ),
@@ -790,109 +667,74 @@ class LoginScreenController extends GetxController with WidgetsBindingObserver {
     });
   }
 
-  _onLoginButtonClick(BuildContext context,
-      {bool ignoreDavCheck = false, String? address}) {
+  void _onLoginButtonClick(BuildContext context, {bool ignoreDavCheck = false, String? address}) {
     address ??= addressController.text.trim();
-    _login(
-      address,
-      ignoreDavCheck: ignoreDavCheck,
-      onSuccess: () {
-        SmartDialog.dismiss();
-        _goHomeScreen();
-      },
-      onFailure: (code, message, address) {
-        SmartDialog.dismiss();
-        if (!context.mounted) {
-          return;
-        }
-
-        if (code == 301) {
-          // redirect
-          addressController.text = message;
-          _onLoginButtonClick(context);
-          return;
-        }
-        if (code == 402) {
-          // need 2FA code
-          if (twofaController.text.isNotEmpty) {
-            twofaController.clear();
-            SmartDialog.showToast(message);
-          }
-          FocusManager.instance.primaryFocus?.unfocus();
-          _showType2FACodeDialog(context);
-          return;
-        }
-        if (code == 404) {
-          SmartDialog.showToast(Intl.loginScreen_tips_serverUrlError.tr);
-          return;
-        }
+    _login(address, ignoreDavCheck: ignoreDavCheck, onSuccess: () {
+      SmartDialog.dismiss();
+      _goHomeScreen();
+    }, onFailure: (code, message, address) {
+      SmartDialog.dismiss();
+      if (!context.mounted) return;
+      if (code == 301) {
+        addressController.text = message;
+        _onLoginButtonClick(context);
+        return;
+      }
+      if (code == 402) {
+        if (twofaController.text.isNotEmpty) twofaController.clear();
         SmartDialog.showToast(message);
-      },
-    );
+        FocusManager.instance.primaryFocus?.unfocus();
+        _showType2FACodeDialog(context);
+        return;
+      }
+      if (code == 404) {
+        SmartDialog.showToast(Intl.loginScreen_tips_serverUrlError.tr);
+        return;
+      }
+      SmartDialog.showToast(message);
+    });
   }
 
   Future<void> _goHomeScreen() async {
     try {
-      Get.until((route) => route.isFirst,
-          id: AlistRouter.fileListRouterStackId);
-    } catch (e) {
-      // ignored
-    }
+      Get.until((route) => route.isFirst, id: AlistRouter.fileListRouterStackId);
+    } catch (e) {}
     await Get.offAllNamed(NamedRouter.home);
   }
 
-  // Used to request network access when entering the app for the first time
-  // just for IOS
   void _testNetwork() async {
     await Future.delayed(const Duration(seconds: 1));
     DioUtils.instance.requestNetwork(Method.get, "/").catchError((e) {});
   }
 
-  _showAgreementDialog() {
+  void _showAgreementDialog() {
     SmartDialog.show(
       clickMaskDismiss: false,
       backDismiss: false,
       builder: (context) {
         return AlertDialog(
           title: Text(Intl.privacyDialog_title.tr),
-          content: RichText(
-              text: TextSpan(children: [
-                TextSpan(
-                    text: Intl.privacyDialog_content_part1.tr,
-                    style: Theme
-                        .of(context)
-                        .textTheme
-                        .bodyMedium),
-                TextSpan(
-                    text: Intl.privacyDialog_link.tr,
-                    style: Theme
-                        .of(context)
-                        .textTheme
-                        .bodyMedium
-                        ?.copyWith(color: Theme
-                        .of(context)
-                        .colorScheme
-                        .primary),
-                    recognizer: TapGestureRecognizer()
-                      ..onTap = () async {
-                        SmartDialog.dismiss();
-                        await _goPrivacyPolicyPage();
-                        _showAgreementDialog();
-                      }),
-                TextSpan(
-                    text: Intl.privacyDialog_content_part2.tr,
-                    style: Theme
-                        .of(context)
-                        .textTheme
-                        .bodyMedium),
-              ])),
+          content: RichText(text: TextSpan(children: [
+            TextSpan(text: Intl.privacyDialog_content_part1.tr, style: Theme.of(context).textTheme.bodyMedium),
+            TextSpan(
+              text: Intl.privacyDialog_link.tr,
+              style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Theme.of(context).colorScheme.primary),
+              recognizer: TapGestureRecognizer()..onTap = () async {
+                SmartDialog.dismiss();
+                await _goPrivacyPolicyPage();
+                _showAgreementDialog();
+              },
+            ),
+            TextSpan(text: Intl.privacyDialog_content_part2.tr, style: Theme.of(context).textTheme.bodyMedium),
+          ])),
           actions: [
             TextButton(
-                onPressed: () {
-                  SmartDialog.dismiss();
-                  exit(0);
-                },
-                child: Text(Intl.privacyDialog_btn_cancel.tr)),
+              onPressed: () {
+                SmartDialog.dismiss();
+                exit(0);
+              },
+              child: Text(Intl.privacyDialog_btn_cancel.tr),
+            ),
             TextButton(
               onPressed: () {
                 SmartDialog.dismiss();
@@ -900,7 +742,7 @@ class LoginScreenController extends GetxController with WidgetsBindingObserver {
                 SpUtil.putBool(AlistConstant.isAgreePrivacyPolicy, true);
               },
               child: Text(Intl.privacyDialog_btn_ok.tr),
-            )
+            ),
           ],
         );
       },
@@ -912,59 +754,47 @@ class LoginScreenController extends GetxController with WidgetsBindingObserver {
     if (Get.locale?.toString().startsWith("zh_") == true) {
       local = "zh";
     }
-
-    final url =
-        "https://${Global.configServerHost}/alist_h5/privacyPolicy?lang=$local";
-    await Get.toNamed(
-      NamedRouter.web,
-      arguments: {"url": url},
-    );
+    final url = "https://${Global.configServerHost}/alist_h5/privacyPolicy?lang=$local";
+    await Get.toNamed(NamedRouter.web, arguments: {"url": url});
   }
 
   void _showType2FACodeDialog(BuildContext context) {
     FocusNode focusNode = FocusNode().autoFocus();
     SmartDialog.show(
-        clickMaskDismiss: false,
-        builder: (_) {
-          return AlertDialog(
-            title: Text(Intl.twofaCodeDialog_title.tr),
-            content: TextField(
-              controller: twofaController,
-              focusNode: focusNode,
-              autofocus: true,
-              decoration: const InputDecoration(
-                border: OutlineInputBorder(),
-                isCollapsed: true,
-                isDense: true,
-                contentPadding:
-                EdgeInsets.symmetric(horizontal: 11, vertical: 12),
-              ),
+      clickMaskDismiss: false,
+      builder: (_) {
+        return AlertDialog(
+          title: Text(Intl.twofaCodeDialog_title.tr),
+          content: TextField(
+            controller: twofaController,
+            focusNode: focusNode,
+            autofocus: true,
+            decoration: const InputDecoration(
+              border: OutlineInputBorder(),
+              isCollapsed: true,
+              isDense: true,
+              contentPadding: EdgeInsets.symmetric(horizontal: 11, vertical: 12),
             ),
-            actions: [
-              TextButton(
-                  onPressed: () {
-                    twofaController.text = "";
-                    SmartDialog.dismiss();
-                  },
-                  child: Text(
-                    Intl.twofaCodeDialog_btn_cancel.tr,
-                    style: TextStyle(
-                        color: Theme
-                            .of(context)
-                            .colorScheme
-                            .secondary),
-                  )),
-              TextButton(
-                  onPressed: () {
-                    SmartDialog.dismiss();
-                    _onConfirm(context);
-                  },
-                  child: Text(
-                    Intl.twofaCodeDialog_btn_ok.tr,
-                  ))
-            ],
-          );
-        });
+          ),
+          actions: [
+            TextButton(
+              onPressed: () {
+                twofaController.text = "";
+                SmartDialog.dismiss();
+              },
+              child: Text(Intl.twofaCodeDialog_btn_cancel.tr, style: TextStyle(color: Theme.of(context).colorScheme.secondary)),
+            ),
+            TextButton(
+              onPressed: () {
+                SmartDialog.dismiss();
+                _onConfirm(context);
+              },
+              child: Text(Intl.twofaCodeDialog_btn_ok.tr),
+            ),
+          ],
+        );
+      },
+    );
   }
 
   void _onConfirm(BuildContext context) {
@@ -973,40 +803,28 @@ class LoginScreenController extends GetxController with WidgetsBindingObserver {
       SmartDialog.showToast(Intl.twofaCodeDialog_tips_codeEmpty.tr);
       return;
     }
-
     KeyboardUtil.hideKeyboard(context);
     _onLoginButtonClick(context);
   }
 
-  appendServerUrlText(String text) {
+  void appendServerUrlText(String text) {
     var offset = addressController.selection.baseOffset;
     var originalText = addressController.text;
-    addressController.text =
-    "${originalText.substring(0, offset)}$text${originalText.substring(
-        offset)}";
-    addressController.selection =
-        TextSelection.fromPosition(TextPosition(offset: offset + text.length));
+    addressController.text = "${originalText.substring(0, offset)}$text${originalText.substring(offset)}";
+    addressController.selection = TextSelection.fromPosition(TextPosition(offset: offset + text.length));
   }
 
-  /// 非编辑模式时，从数据库恢复 remark（别名），防止 token 失效重新登录时丢失
   Future<void> _restoreRemarkFromDatabase() async {
-    // 编辑模式下不应从数据库恢复 remark，因为 initForEdit 已正确设置了被编辑服务器的别名
     if (isEditingServer) return;
     final currentUser = userController.user.value;
     if (currentUser.serverUrl.isEmpty) return;
     try {
-      var server = await _databaseController.serverDao.findServer(
-        currentUser.serverUrl,
-        currentUser.username,
-      );
-      // await 返回后再次检查：async 调用期间可能已进入编辑模式
+      var server = await _databaseController.serverDao.findServer(currentUser.serverUrl, currentUser.username);
       if (isEditingServer) return;
       if (server?.remark != null && server!.remark!.isNotEmpty) {
         remarkController.text = server.remark!;
       }
-    } catch (_) {
-      // 忽略错误，remark 为空也是可接受的
-    }
+    } catch (_) {}
   }
 
   void _showDavTipsDialog({bool isLogin = false}) {
@@ -1016,12 +834,8 @@ class LoginScreenController extends GetxController with WidgetsBindingObserver {
         content: Text(Intl.davTipsDialog_content.tr),
         actions: [
           TextButton(
-            onPressed: () {
-              SmartDialog.dismiss();
-            },
-            child: Text(
-              Intl.davTipsDialog_btn_cancel.tr,
-            ),
+            onPressed: () => SmartDialog.dismiss(),
+            child: Text(Intl.davTipsDialog_btn_cancel.tr),
           ),
           TextButton(
             onPressed: () {
@@ -1033,9 +847,7 @@ class LoginScreenController extends GetxController with WidgetsBindingObserver {
                 _enterVisitorMode(address, ignoreDavCheck: true);
               }
             },
-            child: Text(
-              Intl.davTipsDialog_btn_ok.tr,
-            ),
+            child: Text(Intl.davTipsDialog_btn_ok.tr),
           ),
         ],
       );
@@ -1069,10 +881,7 @@ class LoginTextField extends StatelessWidget {
       padding: padding,
       child: Row(
         children: [
-          Padding(
-            padding: const EdgeInsets.only(right: 8),
-            child: icon,
-          ),
+          Padding(padding: const EdgeInsets.only(right: 8), child: icon),
           Expanded(
             child: TextField(
               decoration: decoration,

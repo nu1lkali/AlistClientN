@@ -102,7 +102,6 @@ class _SettingsContainerState extends State<_SettingsContainer>
         m.menuId == MenuId.securityLock ||
         m.menuId == MenuId.dislikedVideos).toList();
     final aboutMenus = menus.where((m) =>
-        m.menuId == MenuId.donate ||
         m.menuId == MenuId.privacyPolicy ||
         m.menuId == MenuId.about).toList();
 
@@ -248,7 +247,6 @@ class _SettingsContainerState extends State<_SettingsContainer>
         Get.offNamed(NamedRouter.login);
         break;
       case MenuId.downloads:
-      case MenuId.donate:
       case MenuId.account:
       case MenuId.cacheManager:
       case MenuId.playerSettings:
@@ -351,10 +349,9 @@ class _SettingsContainerState extends State<_SettingsContainer>
       SettingsMenu(menuId: MenuId.randomPlayCount, name: '随机播放数量', icon: Images.settingsScreenPlayer, iconData: Icons.playlist_play_rounded),
       SettingsMenu(menuId: MenuId.securityLock, name: '安全锁', icon: Images.settingsScreenPlayer, iconData: Icons.lock_outline_rounded, route: NamedRouter.securityLockSettings),
       SettingsMenu(menuId: MenuId.dislikedVideos, name: '不喜欢视频列表', icon: Images.settingsScreenPlayer, iconData: Icons.thumb_down_alt_outlined, route: NamedRouter.dislikedVideos),
-      SettingsMenu(menuId: MenuId.privacyPolicy, name: Intl.settingsScreen_item_privacyPolicy.tr, icon: Images.settingsScreenPrivacyPolicy, route: NamedRouter.donate),
+      SettingsMenu(menuId: MenuId.privacyPolicy, name: Intl.settingsScreen_item_privacyPolicy.tr, icon: Images.settingsScreenPrivacyPolicy),
       SettingsMenu(menuId: MenuId.about, name: Intl.settingsScreen_item_about.tr, icon: Images.settingsScreenAbout),
     ];
-    if (!Platform.isIOS) settingsMenus.insert(0, SettingsMenu(menuId: MenuId.donate, name: Intl.settingsScreen_item_donate.tr, icon: Images.settingsScreenDonate, route: NamedRouter.donate));
     if (_userCnt.value == 0 && SpUtil.getBool(AlistConstant.useDemoServer) == true) {
       settingsMenus.insert(0, SettingsMenu(menuId: MenuId.signIn, name: Intl.settingsScreen_item_login.tr, icon: Images.settingsScreenAccount));
     } else {
@@ -377,7 +374,7 @@ class SettingsMenu {
 }
 
 enum MenuId {
-  signIn, account, downloads, donate, privacyPolicy, about,
+  signIn, account, downloads, privacyPolicy, about,
   cacheManager, aggressiveCache, wifiOnlyPreload, audioPlayerUi, groupedRandomSort,
   enableMediaKitPlayer, extensionFilter, playerSettings,
   themeColor, iptvUrl, slideshowInterval, autoPip,
