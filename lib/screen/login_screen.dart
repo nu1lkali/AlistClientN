@@ -118,9 +118,9 @@ class LoginScreenContainer extends StatelessWidget {
     return LayoutBuilder(
       builder: (context, constraints) {
         final h = constraints.maxHeight;
-        final gap = (h * 0.015).clamp(4.0, 16.0);
-        final logoSize = (h * 0.07).clamp(40.0, 64.0);
-        final btnHeight = (h * 0.065).clamp(44.0, 52.0);
+        final gap = (h * 0.025).clamp(10.0, 24.0);
+        final logoSize = (h * 0.065).clamp(36.0, 56.0);
+        final btnHeight = (h * 0.065).clamp(48.0, 56.0);
 
         InputDecoration fieldDecoration(String label, String hint, IconData icon) => InputDecoration(
           labelText: label,
@@ -232,53 +232,72 @@ class LoginScreenContainer extends StatelessWidget {
                       mainAxisSize: MainAxisSize.min,
                       children: [
                         SizedBox(height: gap),
-                        SizedBox(
-                          width: double.infinity,
-                          height: btnHeight,
-                          child: FilledButton(
-                            onPressed: () {
-                              KeyboardUtil.hideKeyboard(context);
-                              if (isEditMode) {
-                                controller.saveServer();
-                              } else {
-                                controller.twofaController.text = "";
-                                controller._onLoginButtonClick(context, address: controller._buildAddress());
-                              }
-                            },
-                            style: FilledButton.styleFrom(
-                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                            ),
-                            child: Text(
-                              isEditMode ? Intl.save.tr : Intl.loginScreen_button_login.tr,
-                              style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
-                            ),
-                          ),
-                        ),
-                        if (!isEditMode) ...[
-                          SizedBox(height: gap),
+                        if (isEditMode)
                           SizedBox(
                             width: double.infinity,
                             height: btnHeight,
-                            child: OutlinedButton(
+                            child: FilledButton(
                               onPressed: () {
-                                var address = controller._buildAddress();
-                                if (address.isEmpty || address == 'http://' || address == 'https://') {
-                                  controller._tryEntryDefaultServer(context);
-                                } else {
-                                  controller._enterVisitorMode(address);
-                                }
+                                KeyboardUtil.hideKeyboard(context);
+                                controller.saveServer();
                               },
-                              style: OutlinedButton.styleFrom(
+                              style: FilledButton.styleFrom(
                                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                                side: BorderSide(color: scheme.primary, width: 1.5),
                               ),
                               child: Text(
-                                Intl.loginScreen_button_guestMode.tr,
-                                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: scheme.primary),
+                                Intl.save.tr,
+                                style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
                               ),
                             ),
+                          )
+                        else
+                          Row(
+                            children: [
+                              Expanded(
+                                child: SizedBox(
+                                  height: btnHeight,
+                                  child: FilledButton(
+                                    onPressed: () {
+                                      KeyboardUtil.hideKeyboard(context);
+                                      controller.twofaController.text = "";
+                                      controller._onLoginButtonClick(context, address: controller._buildAddress());
+                                    },
+                                    style: FilledButton.styleFrom(
+                                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                                    ),
+                                    child: Text(
+                                      Intl.loginScreen_button_login.tr,
+                                      style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                              SizedBox(width: gap),
+                              Expanded(
+                                child: SizedBox(
+                                  height: btnHeight,
+                                  child: OutlinedButton(
+                                    onPressed: () {
+                                      var address = controller._buildAddress();
+                                      if (address.isEmpty || address == 'http://' || address == 'https://') {
+                                        controller._tryEntryDefaultServer(context);
+                                      } else {
+                                        controller._enterVisitorMode(address);
+                                      }
+                                    },
+                                    style: OutlinedButton.styleFrom(
+                                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                                      side: BorderSide(color: scheme.primary, width: 1.5),
+                                    ),
+                                    child: Text(
+                                      Intl.loginScreen_button_guestMode.tr,
+                                      style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: scheme.primary),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ],
                           ),
-                        ],
                         SizedBox(height: gap + 16),
                       ],
                     ),
