@@ -19,7 +19,7 @@ class _SecurityLockSettingsScreenState
   final SecurityLockController _lockController = Get.find();
 
   // 设置流程状态
-  _SetupPhase _phase = _SetupPhase.idleu
+  _SetupPhase _phase = _SetupPhase.idle;
   List<int>? _firstPattern;
   String? _firstPassword;
   String _errorMessage = '';

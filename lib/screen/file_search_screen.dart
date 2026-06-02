@@ -25,6 +25,7 @@ import 'package:alist/util/named_router.dart';
 import 'package:alist/util/nature_sort.dart';
 import 'package:alist/util/search_history_manager.dart';
 import 'package:alist/util/string_utils.dart';
+import 'package:alist/util/search_filter_helper.dart';
 import 'package:alist/util/user_controller.dart';
 import 'package:alist/util/video_player_util.dart';
 import 'package:alist/util/widget_utils.dart';
@@ -481,14 +482,48 @@ class FileSearchController extends GetxController {
       if (textEditingController.text.trim() == text) {
         UserController userController = Get.find<UserController>();
         var user = userController.user.value;
-        if (user.basePath != null &&
-            user.basePath != '' &&
-            user.basePath != '/') {
-          data?.content?.forEach((element) {
-            element.parent = element.parent?.substring(user.basePath!.length);
-          });
+        var allResults = data?.content ?? [];
+        final basePath = (user.basePath != null && user.basePath != '' && user.basePath != '/') ? user.basePath! : '';
+        // 搜索路径过滤：直接检查 parent 路径是否包含过滤规则
+        final filterRules = SearchFilterHelper.getAllRules();
+        if (filterRules.isNotEmpty) {
+          allResults = allResults.where((item) {
+            final parent = item.parent ?? '';
+            final name = item.name ?? '';
+            // 构造完整路径（未剥离basePath的原始路径）
+            var fullPath = '$parent/$name';
+            if (fullPath.startsWith('//')) fullPath = fullPath.substring(1);
+            // 逐条规则检查：如果路径以规则路径开头，则过滤掉
+            for (final rule in filterRules) {
+              if (!rule.filterInSearch) continue;
+              var rulePath = rule.path.trim();
+              if (!rulePath.startsWith('/')) rulePath = '/$rulePath';
+              while (rulePath.endsWith('/') && rulePath.length > 1) {
+                rulePath = rulePath.substring(0, rulePath.length - 1);
+              }
+              // 完全匹配 或 以规则路径开头（子目录级别）
+              if (fullPath == rulePath || fullPath.startsWith('$rulePath/')) {
+                return false;
+              }
+            }
+            return true;
+          }).toList();
         }
-        list.value = data?.content ?? [];
+        // 过滤完成后再剥离 basePath
+        if (basePath.isNotEmpty) {
+          for (var element in allResults) {
+            element.parent = element.parent?.substring(basePath.length);
+          }
+        }
+        // 去重：同一个 name + size + is_dir 的结果只保留第一条
+        final seen = <String>{};
+        allResults = allResults.where((item) {
+          final key = '${item.name ?? ""}_${item.size ?? 0}_${item.isDir ?? false}';
+          if (seen.contains(key)) return false;
+          seen.add(key);
+          return true;
+        }).toList();
+        list.value = allResults;
       }
     }, onError: (code, msg) {
       if (textEditingController.text.trim() == text) {

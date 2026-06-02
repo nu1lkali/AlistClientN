@@ -20,6 +20,7 @@ import 'package:alist/screen/pdf_reader_screen.dart';
 import 'package:alist/screen/player_settings_screen.dart';
 import 'package:alist/screen/settings_screen.dart';
 import 'package:alist/screen/disliked_videos_screen.dart';
+import 'package:alist/screen/search_filter_settings_screen.dart';
 import 'package:alist/screen/security_lock_screen.dart';
 import 'package:alist/screen/security_lock_settings_screen.dart';
 import 'package:alist/screen/splash_screen.dart';
@@ -83,6 +84,11 @@ class AlistRouter {
     GetPage(
       name: NamedRouter.dislikedVideos,
       page: () => const DislikedVideosScreen(),
+    ),
+    // 搜索过滤设置
+    GetPage(
+      name: NamedRouter.searchFilterSettings,
+      page: () => const SearchFilterSettingsScreen(),
     ),
     // 安全锁设置
     GetPage(

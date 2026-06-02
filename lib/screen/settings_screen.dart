@@ -100,7 +100,8 @@ class _SettingsContainerState extends State<_SettingsContainer>
         m.menuId == MenuId.autoPip ||
         m.menuId == MenuId.randomPlayCount ||
         m.menuId == MenuId.securityLock ||
-        m.menuId == MenuId.dislikedVideos).toList();
+        m.menuId == MenuId.dislikedVideos ||
+        m.menuId == MenuId.searchFilter).toList();
     final aboutMenus = menus.where((m) =>
         m.menuId == MenuId.privacyPolicy ||
         m.menuId == MenuId.about).toList();
@@ -251,6 +252,7 @@ class _SettingsContainerState extends State<_SettingsContainer>
       case MenuId.cacheManager:
       case MenuId.playerSettings:
       case MenuId.dislikedVideos:
+      case MenuId.searchFilter:
       case MenuId.securityLock:
         Get.toNamed(settingsMenu.route!);
         break;
@@ -348,6 +350,7 @@ class _SettingsContainerState extends State<_SettingsContainer>
       SettingsMenu(menuId: MenuId.autoPip, name: '自动画中画', icon: Images.settingsScreenPlayer, iconData: Icons.picture_in_picture_alt_rounded),
       SettingsMenu(menuId: MenuId.randomPlayCount, name: '随机播放数量', icon: Images.settingsScreenPlayer, iconData: Icons.playlist_play_rounded),
       SettingsMenu(menuId: MenuId.securityLock, name: '安全锁', icon: Images.settingsScreenPlayer, iconData: Icons.lock_outline_rounded, route: NamedRouter.securityLockSettings),
+      SettingsMenu(menuId: MenuId.searchFilter, name: '搜索过滤', icon: Images.settingsScreenPlayer, iconData: Icons.filter_list_rounded, route: NamedRouter.searchFilterSettings),
       SettingsMenu(menuId: MenuId.dislikedVideos, name: '不喜欢视频列表', icon: Images.settingsScreenPlayer, iconData: Icons.thumb_down_alt_outlined, route: NamedRouter.dislikedVideos),
       SettingsMenu(menuId: MenuId.privacyPolicy, name: Intl.settingsScreen_item_privacyPolicy.tr, icon: Images.settingsScreenPrivacyPolicy),
       SettingsMenu(menuId: MenuId.about, name: Intl.settingsScreen_item_about.tr, icon: Images.settingsScreenAbout),
@@ -378,5 +381,5 @@ enum MenuId {
   cacheManager, aggressiveCache, wifiOnlyPreload, audioPlayerUi, groupedRandomSort,
   enableMediaKitPlayer, extensionFilter, playerSettings,
   themeColor, iptvUrl, slideshowInterval, autoPip,
-  randomPlayCount, dislikedVideos, securityLock,
+  randomPlayCount, dislikedVideos, searchFilter, securityLock,
 }

@@ -1,85 +1,31 @@
- class NamedRouter {
-  // root
+class NamedRouter {
   static const root = "/index";
-
-  // login
   static const login = "/login";
-
-  // home index
   static const home = "/home";
-
-  // file list
   static const fileList = "/fileList";
-
-  // file list
   static const settings = "/settings";
-
-  // video player
   static const videoPlayer = "/videoPlayer";
-
-  // about
   static const about = "/about";
-
-  // gallery
   static const gallery = "/gallery";
-
-  // audio player
   static const audioPlayer = "/audioPlayer";
-
-  // file reader
   static const fileReader = "/fileReader";
-
-  // web
   static const web = "/web";
-
-  // pdfReader
   static const pdfReader = "/pdfReader";
-
-  // uploadingFiles
   static const uploadingFiles = "/uploadingFiles";
-
-  // account
   static const account = "/account";
-
-  // download manager
   static const downloadManager = "/downloadManager";
-
-  // file list search
   static const fileSearch = "/fileSearch";
-
-  // cache manager
   static const cacheManager = "/cacheManager";
-
-  // player settings
   static const playerSettings = "/playerSettings";
-
-  // txt reader
   static const txtReader = "/txtReader";
-
-  // office reader
   static const officeReader = "/officeReader";
-
-  // markdown reader
   static const markdownReader = "/markdownReader";
-
-  // iptv player
   static const iptvPlayer = "/iptvPlayer";
-
-  // iptv playlist
   static const iptv = "/iptv";
-
-  // media_kit player (WMV support)
   static const mediaKitPlayer = "/mediaKitPlayer";
-
-  // edit server
   static const editServer = "/editServer";
-
-  // disliked videos
   static const dislikedVideos = "/dislikedVideos";
-
-  // security lock settings
+  static const searchFilterSettings = "/searchFilterSettings";
   static const securityLockSettings = "/securityLockSettings";
-
-  // security lock screen (verification)
   static const securityLock = "/securityLock";
 }

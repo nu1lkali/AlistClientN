@@ -37,6 +37,7 @@ import 'package:alist/util/download/download_manager.dart';
 import 'package:alist/util/file_password_helper.dart';
 import 'package:alist/util/file_type.dart';
 import 'package:alist/util/file_utils.dart';
+import 'package:alist/util/search_filter_helper.dart';
 import 'package:alist/util/focus_node_utils.dart';
 import 'package:alist/util/log_utils.dart';
 import 'package:alist/util/lru_path_cache.dart';
@@ -1478,6 +1479,11 @@ class _FileListScreenState extends State<FileListScreen>
         result = _files;
         break;
     }
+    // 搜索路径过滤：过滤掉匹配规则的路径
+    result = result.where((f) {
+      return !SearchFilterHelper.shouldFilter(f.path, inFileList: true);
+    }).toList();
+
     // 扩展名过滤：过滤掉配置的扩展名文件（默认 nfo）
     final filterStr = SpUtil.getString(AlistConstant.extensionFilter);
     final effectiveFilter = (filterStr != null && filterStr.isNotEmpty) ? filterStr : 'nfo';

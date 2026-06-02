@@ -214,10 +214,10 @@ class _SecurityLockScreenState extends State<SecurityLockScreen> {
     _lockController.recordActivity();
     if (widget.onVerified != null) {
       widget.onVerified!();
-    } else {
-      // 作为锁屏使用时，解锁后需要关闭锁屏页面
-      // 让 _SecurityLockWrapper 的 Obx 能正确响应状态变化并显示子页面
-      Navigator.of(context).pop();
     }
+    // 不需要 Navigator.pop()：当 SecurityLockScreen 作为锁屏使用时，
+    // 它是通过 _SecurityLockWrapper 的 Obx 直接放在 widget 树中的（不是通过 Navigator.push），
+    // unlock() 设置 isLocked.value = false 后 Obx 会自动切换回子页面。
+    // 如果是通过路由导航过来的（isVerifyOnly=true），onVerified 回调会处理 pop。
   }
 }
