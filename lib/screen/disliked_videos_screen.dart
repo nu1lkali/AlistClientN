@@ -144,7 +144,7 @@ class _DislikedVideosScreenState extends State<DislikedVideosScreen> {
                     overflow: TextOverflow.ellipsis,
                   ),
                   subtitle: Text(item.remotePath),
-                  onTap: () => _preview(item),
+                  onTap: () => _preview(items, i),
                 ),
               );
             },
@@ -212,8 +212,27 @@ class _DislikedVideosScreenState extends State<DislikedVideosScreen> {
     );
   }
 
-  void _preview(DislikedVideo item) {
-    final video = VideoItem(
+  void _preview(List<DislikedVideo> allItems, int selectedIndex) {
+    const int maxPlaylistSize = 200;
+
+    List<DislikedVideo> playlistItems;
+    int playIndex;
+
+    if (allItems.length <= maxPlaylistSize) {
+      // 全部加入播放列表，顺序不变，index为选中项的index
+      playlistItems = allItems;
+      playIndex = selectedIndex;
+    } else {
+      // 以选中视频为起点往后加载，不足200个时往前补充
+      int end = (selectedIndex + maxPlaylistSize) > allItems.length
+          ? allItems.length
+          : selectedIndex + maxPlaylistSize;
+      int start = (end - maxPlaylistSize) < 0 ? 0 : end - maxPlaylistSize;
+      playlistItems = allItems.sublist(start, end);
+      playIndex = selectedIndex - start;
+    }
+
+    final videos = playlistItems.map((item) => VideoItem(
       name: item.name,
       remotePath: item.remotePath,
       sign: item.sign,
@@ -221,8 +240,9 @@ class _DislikedVideosScreenState extends State<DislikedVideosScreen> {
       thumb: item.thumb,
       size: item.size,
       modifiedMilliseconds: item.modified,
-    );
-    VideoPlayerUtil.go([video], 0, null);
+    )).toList();
+
+    VideoPlayerUtil.go(videos, playIndex, null);
   }
 
   Future<void> _unmark(DislikedVideo item) async {
