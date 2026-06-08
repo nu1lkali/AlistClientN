@@ -53,10 +53,34 @@ class VideoPlayerUtil {
       if (enableMediaKit) {
         playerType = "media_kit";
       } else if (playerType == null || playerType.isEmpty) {
+        // 需要使用 libmpv (MediaKit) 解码的格式
+        // 包含老视频格式和 ExoPlayer 不兼容的格式
         const mediaKitFormats = {
-          "rmvb", "rm", "vob", "dat", "divx", "xvid",
-          "avi", "m2ts", "mts", "tp", "trp", "dv",
-          "mxf", "wtv", "dvr-ms", "wmv", "asf", "asx", "wmx", "wvx",
+          // RealMedia
+          "rmvb", "rm", "ra",
+          // VCD / DVD
+          "vob", "dat",
+          // AVI 系列（DivX / Xvid 等老编解码器）
+          "avi", "divx", "xvid", "nsv",
+          // Flash 视频（2005-2015 年非常常见）
+          "flv", "f4v", "swf",
+          // 老手机视频格式
+          "3gp", "3g2", "3gpp",
+          // MPEG-1/2 老格式
+          "mpg", "mpeg", "mpe", "m1v", "m2v", "mp2", "vcd",
+          // 传输流
+          "ts", "m2ts", "mts", "tp", "trp",
+          // DV / MXF 专业格式
+          "dv", "dif", "mxf",
+          // Windows 老格式
+          "wmv", "wm", "asf", "asx", "wmx", "wvx",
+          "wtv", "dvr-ms",
+          // Ogg 系列
+          "ogv", "ogm",
+          // Matroska（可能包含老编解码器）
+          "mka",
+          // 其他老格式
+          "nut", "roq", "film",
         };
         if (mediaKitFormats.contains(ext)) {
           playerType = "media_kit";

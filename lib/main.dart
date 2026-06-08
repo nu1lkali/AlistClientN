@@ -182,7 +182,10 @@ class _SecurityLockWrapperState extends State<_SecurityLockWrapper>
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     super.didChangeAppLifecycleState(state);
-    if (state == AppLifecycleState.resumed) {
+    if (state == AppLifecycleState.paused) {
+      // 应用进入后台（非 App 内部 Activity 切换）
+      _lockController.onAppPaused();
+    } else if (state == AppLifecycleState.resumed) {
       // 从后台恢复时检查是否需要锁定
       _lockController.checkAndLock();
     }
@@ -191,10 +194,19 @@ class _SecurityLockWrapperState extends State<_SecurityLockWrapper>
   @override
   Widget build(BuildContext context) {
     return Obx(() {
-      if (_lockController.isLocked.value) {
-        return const SecurityLockScreen();
-      }
-      return widget.child;
+      final locked = _lockController.isLocked.value;
+      return Stack(
+        children: [
+          // 使用 Offstage 保持 child（含导航器）始终在 widget 树中，
+          // 避免锁定时导航器被移除导致状态丢失和路由栈重置。
+          Offstage(
+            offstage: locked,
+            child: widget.child,
+          ),
+          // 锁定时显示锁屏覆盖在上层
+          if (locked) const SecurityLockScreen(),
+        ],
+      );
     });
   }
 }

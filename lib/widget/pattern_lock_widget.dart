@@ -59,8 +59,11 @@ class PatternLockWidgetState extends State<PatternLockWidget>
     });
   }
 
-  void showErrorThenReset() {
-    _animController.forward(from: 0).then((_) => _reset());
+  void showErrorThenReset({VoidCallback? onComplete}) {
+    _animController.forward(from: 0).then((_) {
+      _reset();
+      onComplete?.call();
+    });
   }
 
   Offset _getDotCenter(int index) {

@@ -63,6 +63,7 @@ class _SettingsContainerState extends State<_SettingsContainer>
     _groupedRandomSort = (SpUtil.getBool(AlistConstant.groupedRandomSort, defValue: false) ?? false).obs;
     _enableMediaKitPlayer = (SpUtil.getBool(AlistConstant.enableMediaKitPlayer, defValue: false) ?? false).obs;
     _autoPipEnabled = (SpUtil.getBool(AlistConstant.autoPipEnabled, defValue: true) ?? true).obs;
+    AlistConstant.showFabButtonRx.value = SpUtil.getBool(AlistConstant.showFabButton, defValue: true) ?? true;
 
     _serverStreamSubscription =
         _databaseController.serverDao.serverList().listen((event) {
@@ -101,7 +102,8 @@ class _SettingsContainerState extends State<_SettingsContainer>
         m.menuId == MenuId.randomPlayCount ||
         m.menuId == MenuId.securityLock ||
         m.menuId == MenuId.dislikedVideos ||
-        m.menuId == MenuId.searchFilter).toList();
+        m.menuId == MenuId.searchFilter ||
+        m.menuId == MenuId.showFabButton).toList();
     final aboutMenus = menus.where((m) =>
         m.menuId == MenuId.privacyPolicy ||
         m.menuId == MenuId.about).toList();
@@ -218,6 +220,16 @@ class _SettingsContainerState extends State<_SettingsContainer>
       );
     }
 
+    if (settingsMenu.menuId == MenuId.showFabButton) {
+      return ListTile(
+        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+        leading: Container(width: 44, height: 44, decoration: BoxDecoration(gradient: LinearGradient(colors: [scheme.primaryContainer.withOpacity(0.8), scheme.primaryContainer.withOpacity(0.5)], begin: Alignment.topLeft, end: Alignment.bottomRight), borderRadius: BorderRadius.circular(12)), child: Icon(Icons.smart_button_rounded, size: 22, color: isDark ? Colors.white.withOpacity(0.9) : scheme.primary)),
+        title: const Text('显示浮动按钮', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w500, letterSpacing: -0.2)),
+        subtitle: Text('文件列表右下角的浮动菜单按钮', style: TextStyle(fontSize: 11, color: scheme.onSurfaceVariant)),
+        trailing: Obx(() => Switch(value: AlistConstant.showFabButtonRx.value, onChanged: (value) { SpUtil.putBool(AlistConstant.showFabButton, value); AlistConstant.showFabButtonRx.value = value; })),
+      );
+    }
+
     if (settingsMenu.menuId == MenuId.autoPip) {
       return ListTile(
         contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
@@ -273,6 +285,8 @@ class _SettingsContainerState extends State<_SettingsContainer>
       case MenuId.privacyPolicy:
         String local = Get.locale?.toString().startsWith("zh_") == true ? "zh" : "en_US";
         Get.toNamed(NamedRouter.web, arguments: {"url": "https://${Global.configServerHost}/alist_h5/privacyPolicy?version=${packageInfo?.version ?? ""}&lang=$local", "title": Intl.settingsScreen_item_privacyPolicy.tr});
+        break;
+      case MenuId.showFabButton:
         break;
       case MenuId.extensionFilter:
         _showExtensionFilterDialog(context);
@@ -342,6 +356,7 @@ class _SettingsContainerState extends State<_SettingsContainer>
       SettingsMenu(menuId: MenuId.audioPlayerUi, name: "音频播放器风格", icon: Images.settingsScreenPlayer, iconData: Icons.music_note_rounded),
       SettingsMenu(menuId: MenuId.groupedRandomSort, name: "随机排序按类型分组", icon: Images.settingsScreenPlayer, iconData: Icons.shuffle_rounded),
       SettingsMenu(menuId: MenuId.enableMediaKitPlayer, name: "启用 MPV 播放器", icon: Images.settingsScreenPlayer, iconData: Icons.play_circle_filled),
+      SettingsMenu(menuId: MenuId.showFabButton, name: "显示浮动按钮", icon: Images.settingsScreenPlayer, iconData: Icons.smart_button_rounded),
       SettingsMenu(menuId: MenuId.extensionFilter, name: Intl.settingsScreen_item_extensionFilter.tr, icon: Images.settingsScreenPlayer, iconData: Icons.filter_list_off_rounded),
       SettingsMenu(menuId: MenuId.themeColor, name: "主题颜色", icon: Images.settingsScreenPlayer, iconData: Icons.palette_rounded),
       SettingsMenu(menuId: MenuId.playerSettings, name: Intl.settingsScreen_item_videoPlayer.tr, icon: Images.settingsScreenPlayer, route: NamedRouter.playerSettings),
@@ -381,5 +396,5 @@ enum MenuId {
   cacheManager, aggressiveCache, wifiOnlyPreload, audioPlayerUi, groupedRandomSort,
   enableMediaKitPlayer, extensionFilter, playerSettings,
   themeColor, iptvUrl, slideshowInterval, autoPip,
-  randomPlayCount, dislikedVideos, searchFilter, securityLock,
+  randomPlayCount, dislikedVideos, searchFilter, securityLock, showFabButton,
 }

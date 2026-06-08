@@ -36,6 +36,8 @@ class SecurityLockController extends GetxController {
 
   Timer? _autoLockTimer;
   DateTime? _lastActiveTime;
+  bool _wasPaused = false; // 标记是否真正进入了后台
+  bool _isInternalActivity = false; // 标记是否正在切换到 App 内部 Activity
 
   @override
   void onInit() {
@@ -158,8 +160,24 @@ class SecurityLockController extends GetxController {
     }
   }
 
+  /// 标记正在切换到 App 内部 Activity（如播放器、HEIC 浏览器等）
+  /// 调用此方法后，下一次 paused/resumed 循环不会触发锁定
+  void markInternalActivity() {
+    _isInternalActivity = true;
+  }
+
+  /// 应用进入 paused 状态
+  void onAppPaused() {
+    if (!_isInternalActivity) {
+      _wasPaused = true;
+    }
+  }
+
   /// 检查并锁定（用于从后台恢复时调用）
   void checkAndLock() {
+    _isInternalActivity = false; // 重置标记
+    if (!_wasPaused) return; // 非真正的后台恢复，跳过
+    _wasPaused = false;
     if (shouldLock()) {
       isLocked.value = true;
     }

@@ -113,6 +113,9 @@ class PlayerActivity : AppCompatActivity(), GSYVideoProgressListener {
     // 记录上次播放方向，用于播放失败时决定跳过方向
     private enum class PlayDirection { NEXT, PREVIOUS }
     private var lastPlayDirection = PlayDirection.NEXT
+    
+    // ExoPlayer 播放失败时是否已尝试回退到 MediaKit
+    private var hasTriedMediaKitFallback = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -409,6 +412,58 @@ class PlayerActivity : AppCompatActivity(), GSYVideoProgressListener {
                 override fun onPlayError(url: String?, vararg objects: Any?) {
                     super.onPlayError(url, *objects)
                     Debuger.printfError("***** onPlayError ****")
+                    
+                    // 检查错误类型，对音频解码错误进行容错处理
+                    // ExoPlayer 会将错误信息放在 objects 中
+                    var isAudioError = false
+                    var isVideoError = false
+                    try {
+                        for (obj in objects) {
+                            if (obj is Exception) {
+                                val errorMsg = obj.message ?: ""
+                                Debuger.printfError("***** Error message: $errorMsg ****")
+                                // 常见的音频解码错误关键词
+                                if (errorMsg.contains("audio", ignoreCase = true) || 
+                                    errorMsg.contains("AudioTrack", ignoreCase = true) ||
+                                    errorMsg.contains("AudioRenderer", ignoreCase = true) ||
+                                    errorMsg.contains("AudioSink", ignoreCase = true) ||
+                                    errorMsg.contains("decoding", ignoreCase = true) && errorMsg.contains("audio", ignoreCase = true)) {
+                                    isAudioError = true
+                                    Debuger.printfError("***** 检测到音频解码错误，尝试容错处理 ****")
+                                }
+                                // 视频解码错误
+                                if (errorMsg.contains("video", ignoreCase = true) || 
+                                    errorMsg.contains("VideoRenderer", ignoreCase = true) ||
+                                    errorMsg.contains("MediaCodec", ignoreCase = true)) {
+                                    isVideoError = true
+                                    Debuger.printfError("***** 检测到视频解码错误 ****")
+                                }
+                            }
+                        }
+                    } catch (e: Exception) {
+                        Debuger.printfError("***** 解析错误信息异常: ${e.message} ****")
+                    }
+                    
+                    // 如果是纯音频错误且未尝试过回退，优先尝试回退到 MediaKit
+                    // MediaKit (libmpv) 对音频解码有更好的容错能力
+                    if (!hasTriedMediaKitFallback) {
+                        hasTriedMediaKitFallback = true
+                        Debuger.printfError("***** ExoPlayer 播放失败，尝试回退到 MediaKit (仅当前视频) ****")
+                        SmartToast.show(this@PlayerActivity, if (isAudioError) "音频解码错误，正在切换到 MPV 播放器..." else "ExoPlayer 播放失败，正在切换到 MPV 播放器...")
+                        try {
+                            // 只发送当前失败的单个视频给 MediaKit
+                            val singleVideo = listOf(videos[index])
+                            val videosJson = GsonUtils.toJsonString(singleVideo)
+                            val headersStr = GsonUtils.toJsonString(headers)
+                            FlutterMethods.fallbackToMediaKit(videosJson, 0, headersStr)
+                            // 关闭当前 ExoPlayer Activity
+                            finish()
+                            return
+                        } catch (e: Exception) {
+                            Debuger.printfError("***** 回退到 MediaKit 失败: ${e.message} ****")
+                        }
+                    }
+                    
                     SmartToast.show(this@PlayerActivity, "ExoPlayer 播放失败，跳过此视频")
                     // 根据上次播放方向决定跳过方向
                     if (lastPlayDirection == PlayDirection.NEXT) {

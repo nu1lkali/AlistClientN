@@ -138,7 +138,7 @@ class DownloadManagerScreen extends StatelessWidget {
         ],
       ),
       title: OverflowText(text: downloadItem.name),
-      subtitle: OverflowText(text: downloadItem.status.value),
+      subtitle: _buildSubtitle(downloadItem),
       trailing: _buildTrailing(controller, downloadItem),
       onTap: () => controller.onTap(downloadItem),
       onLongPress: onLongPress,
@@ -167,6 +167,53 @@ class DownloadManagerScreen extends StatelessWidget {
         ],
       ),
       child: content,
+    );
+  }
+
+  Widget _buildSubtitle(DownloadItem downloadItem) {
+    final status = downloadItem.downloadStatus.value;
+    final isDownloading = status == DownloadTaskStatus.downloading ||
+        status == DownloadTaskStatus.waiting;
+    final isPaused = status == DownloadTaskStatus.paused;
+    final isCanceled = status == DownloadTaskStatus.canceled;
+    final isFailed = status == DownloadTaskStatus.failed;
+
+    final hasProgress = (isDownloading || isPaused || isCanceled || isFailed) &&
+        downloadItem.downloaded > 0 &&
+        downloadItem.contentLength != null &&
+        downloadItem.contentLength! > 0;
+
+    if (!hasProgress) {
+      return OverflowText(text: downloadItem.status.value);
+    }
+
+    final progress = downloadItem.downloaded / downloadItem.contentLength!;
+    final colorScheme = Get.theme.colorScheme;
+    final progressColor = isDownloading
+        ? colorScheme.primary
+        : isPaused
+            ? colorScheme.outline
+            : isFailed
+                ? colorScheme.error
+                : colorScheme.outline;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        const SizedBox(height: 4),
+        ClipRRect(
+          borderRadius: BorderRadius.circular(4),
+          child: LinearProgressIndicator(
+            value: progress.clamp(0.0, 1.0),
+            minHeight: 4,
+            backgroundColor: colorScheme.surfaceVariant,
+            valueColor: AlwaysStoppedAnimation<Color>(progressColor),
+          ),
+        ),
+        const SizedBox(height: 4),
+        OverflowText(text: downloadItem.status.value),
+      ],
     );
   }
 

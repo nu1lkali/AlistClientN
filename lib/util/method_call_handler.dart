@@ -273,6 +273,37 @@ class MethodCallHandler {
         
         return existing != null ? "true" : "false";
 
+      case "fallbackToMediaKit":
+        // ExoPlayer 播放失败时，原生层通知 Flutter 使用 MediaKit 重试
+        String? videosJson = call.arguments["videos"];
+        int index = call.arguments["index"] ?? 0;
+        String? headersStr = call.arguments["headers"];
+        
+        if (videosJson != null && videosJson.isNotEmpty) {
+          try {
+            final videosList = jsonDecode(videosJson) as List;
+            final videos = videosList.map((v) => Map<String, String?>.from(v as Map)).toList();
+            final headers = headersStr != null && headersStr.isNotEmpty 
+                ? Map<String, String>.from(jsonDecode(headersStr)) 
+                : <String, String>{};
+            
+            // 使用 Future.delayed 确保当前 Activity 已关闭
+            Future.delayed(const Duration(milliseconds: 300), () {
+              Get.toNamed(
+                '/mediaKitPlayer', // NamedRouter.mediaKitPlayer
+                arguments: {
+                  "videos": videos,
+                  "index": index,
+                  "headers": headers,
+                },
+              );
+            });
+          } catch (e) {
+            // 解析失败静默处理
+          }
+        }
+        return "";
+
       default:
         throw PlatformException(
             code: 'Method not implemented',

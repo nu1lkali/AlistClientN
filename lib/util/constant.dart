@@ -1,6 +1,9 @@
 import 'package:flutter/foundation.dart';
+import 'package:get/get.dart';
 
 class AlistConstant {
+  /// 文件列表浮动按钮显示状态（响应式）
+  static final showFabButtonRx = true.obs;
   /// App运行在Release环境时，inProduction为true；当App运行在Debug和Profile环境时，inProduction为false
   static const bool inProduction = kReleaseMode;
 
@@ -46,6 +49,7 @@ class AlistConstant {
   static const String autoPipEnabled = 'autoPipEnabled'; // 自动进入画中画
   static const String extensionFilter = 'extensionFilter'; // 扩展名过滤
   static const String randomPlayCount = 'randomPlayCount'; // 随机播放数量
+  static const String showFabButton = 'showFabButton'; // 文件列表FAB按钮显示
   static const String menuSortExpanded = 'menuSortExpanded'; // 排序方式展开
   static const String menuPlayExpanded = 'menuPlayExpanded'; // 播放选项展开
   static const String menuToolsExpanded = 'menuToolsExpanded'; // 整理工具展开

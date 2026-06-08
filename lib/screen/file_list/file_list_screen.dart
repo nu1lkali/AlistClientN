@@ -176,6 +176,8 @@ class _FileListScreenState extends State<FileListScreen>
     // restore view mode
     final savedViewMode = SpUtil.getBool(AlistConstant.fileViewMode) ?? false;
     _menuAnchorController.isGridView.value = savedViewMode;
+    // sync FAB button visibility from SpUtil
+    AlistConstant.showFabButtonRx.value = SpUtil.getBool(AlistConstant.showFabButton, defValue: true) ?? true;
     
     _updatePageName();
     
@@ -1401,31 +1403,37 @@ class _FileListScreenState extends State<FileListScreen>
       ),
       floatingActionButton: _isMultiSelectMode
           ? null
-          : Padding(
-              padding: const EdgeInsets.only(bottom: 24),
-              child: AnimatedSlide(
-                duration: const Duration(milliseconds: 250),
-                curve: Curves.easeInOut,
-                // 收起时向右偏移，露出约 28px（FAB 宽 56，偏移 0.5 ≈ 28px 隐藏）
-                offset: _fabExpanded ? Offset.zero : const Offset(0.5, 0),
-                child: GestureDetector(
-                  onTap: () {
-                    if (!_fabExpanded) {
-                      setState(() => _fabExpanded = true);
-                    } else {
-                      _showMenuBottomSheet();
-                      setState(() => _fabExpanded = false);
-                    }
-                  },
-                  child: FloatingActionButton(
-                    onPressed: null,
-                    child: const Icon(Icons.menu_rounded),
-                  ),
-                ),
-              ),
-            ),
-      floatingActionButtonLocation: FloatingActionButtonLocation.endFloat,
+          : _buildFabIfEnabled(),
     );
+  }
+
+  Widget? _buildFabIfEnabled() {
+    return Obx(() {
+      final showFab = AlistConstant.showFabButtonRx.value;
+      if (!showFab) return const SizedBox.shrink();
+      return Padding(
+      padding: const EdgeInsets.only(bottom: 24),
+      child: AnimatedSlide(
+        duration: const Duration(milliseconds: 250),
+        curve: Curves.easeInOut,
+        offset: _fabExpanded ? Offset.zero : const Offset(0.5, 0),
+        child: GestureDetector(
+          onTap: () {
+            if (!_fabExpanded) {
+              setState(() => _fabExpanded = true);
+            } else {
+              _showMenuBottomSheet();
+              setState(() => _fabExpanded = false);
+            }
+          },
+          child: FloatingActionButton(
+            onPressed: null,
+            child: const Icon(Icons.menu_rounded),
+          ),
+        ),
+      ),
+    );
+    });
   }
 
   void _cycleFilter() {
@@ -1507,6 +1515,83 @@ class _FileListScreenState extends State<FileListScreen>
       onPressed: () => _showMenuBottomSheet(),
       icon: const Icon(Icons.more_horiz_rounded),
     );
+  }
+
+  Widget _buildFavoriteDirGridItem(ColorScheme scheme) {
+    return FutureBuilder<Favorite?>(
+      future: () async {
+        final user = _userController.user.value;
+        return _databaseController.favoriteDao.findByPath(
+            user.serverUrl, user.username, path);
+      }(),
+      builder: (context, snapshot) {
+        final isFav = snapshot.data != null;
+        return Expanded(
+          child: _gridItemForFavorite(
+            isFav ? Icons.favorite_rounded : Icons.favorite_border_rounded,
+            isFav ? '取消收藏' : '收藏目录',
+            () {
+              Navigator.pop(context);
+              _favoriteDirectory(isFav);
+            },
+            iconColor: isFav ? Colors.red : scheme.primary,
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _gridItemForFavorite(IconData icon, String label, VoidCallback onTap, {Color? iconColor}) {
+    final scheme = Theme.of(context).colorScheme;
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(12),
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 4),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 44, height: 44,
+              decoration: BoxDecoration(
+                color: (iconColor ?? scheme.primary).withOpacity(0.1),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Icon(icon, size: 22, color: iconColor ?? scheme.primary),
+            ),
+            const SizedBox(height: 6),
+            Text(label, style: TextStyle(fontSize: 12, color: scheme.onSurface), textAlign: TextAlign.center, maxLines: 1, overflow: TextOverflow.ellipsis),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _favoriteDirectory(bool isFav) async {
+    final user = _userController.user.value;
+    final favoriteDao = _databaseController.favoriteDao;
+    if (isFav) {
+      await favoriteDao.deleteByPath(user.serverUrl, user.username, path);
+      SmartDialog.showToast('已取消收藏');
+    } else {
+      // 获取当前目录名称
+      String dirName = _pageName ?? path;
+      await favoriteDao.insertRecord(Favorite(
+        isDir: true,
+        serverUrl: user.serverUrl,
+        userId: user.username,
+        remotePath: path,
+        name: dirName,
+        path: path,
+        size: 0,
+        sign: '',
+        thumb: '',
+        modified: DateTime.now().millisecondsSinceEpoch,
+        provider: '',
+        createTime: DateTime.now().millisecondsSinceEpoch,
+      ));
+      SmartDialog.showToast('已收藏当前目录');
+    }
   }
 
   void _showMenuBottomSheet() {
@@ -1620,6 +1705,7 @@ class _FileListScreenState extends State<FileListScreen>
                     Expanded(child: _gridItem(Icons.download_rounded, '下载全部', () { Navigator.pop(context); _downloadAll(); })),
                     Expanded(child: _gridItem(Icons.upload_rounded, '上传', () { Navigator.pop(context); Platform.isAndroid ? _uploadPhotos() : _uploadFiles(); })),
                     Expanded(child: _gridItem(Icons.line_weight_rounded, '行数', () { Navigator.pop(context); SmartDialog.show(builder: (_) => const ConfigFileNameMaxLinesDialog()); })),
+                    _buildFavoriteDirGridItem(scheme),
                     Obx(() {
                       final lockController = Get.find<SecurityLockController>();
                       if (!lockController.isEnabled.value) return const SizedBox.shrink();

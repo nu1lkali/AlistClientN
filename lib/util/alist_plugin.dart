@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:alist/entity/player_resolve_info_entity.dart';
 import 'package:alist/generated/json/base/json_convert_content.dart';
 import 'package:alist/util/method_call_handler.dart';
+import 'package:alist/util/security_lock_controller.dart';
 import 'package:flutter/services.dart';
 
 class AlistPlugin {
@@ -70,11 +71,13 @@ class AlistPlugin {
 
   static Future<bool> playVideoWithExternalPlayer(
       String packageName, String activity, String url) async {
+    SecurityLockController.instance.markInternalActivity();
     var result = await _methodChannel.invokeMethod(
         "playVideoWithExternalPlayer",
         {"packageName": packageName, "activity": activity, "url": url});
     return result == true;
   }
+
 
   static Future<bool> playVideoWithInternalPlayer(
       List<Map<String, String?>> videos,
@@ -82,6 +85,7 @@ class AlistPlugin {
       Map<String, String>? headers,
       String? playerType,
       {bool autoPipEnabled = true}) async {
+    SecurityLockController.instance.markInternalActivity();
     String? headersStr = headers != null ? jsonEncode(headers) : null;
 
     var result =
@@ -98,6 +102,7 @@ class AlistPlugin {
   // Open document with AndroidDocViewer (Android only)
   static Future<bool> openDocument(String filePath, String title) async {
     try {
+      SecurityLockController.instance.markInternalActivity();
       var result = await _methodChannel.invokeMethod("openDocument", {
         "filePath": filePath,
         "title": title,
@@ -149,6 +154,7 @@ class AlistPlugin {
     List<String>? signs,
     List<String>? sizes,
   }) async {
+    SecurityLockController.instance.markInternalActivity();
     await _methodChannel.invokeMethod('openHeicViewer', {
       'names': names,
       'urls': urls,
@@ -188,6 +194,7 @@ class AlistPlugin {
     }).toList());
     
     try {
+      SecurityLockController.instance.markInternalActivity();
       final result = await _methodChannel.invokeMethod<bool>(
         'playVideoWithMpvPlayer',
         {

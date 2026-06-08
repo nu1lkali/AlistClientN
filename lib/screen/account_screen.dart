@@ -27,10 +27,18 @@ class AccountScreen extends StatelessWidget {
       appbarTitle: Text(Intl.settingsScreen_item_account.tr),
       appbarActions: [
         Padding(
-          padding: const EdgeInsets.only(right: 12),
-          child: InkWell(
-            onTap: () => controller.tryAddAccount(),
-            child: Text(Intl.accountScreen_create.tr),
+          padding: const EdgeInsets.only(right: 8),
+          child: FilledButton.tonalIcon(
+            onPressed: () => controller.tryAddAccount(),
+            icon: const Icon(Icons.add, size: 18),
+            label: Text(Intl.accountScreen_create.tr),
+            style: FilledButton.styleFrom(
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              textStyle: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500),
+            ),
           ),
         ),
       ],

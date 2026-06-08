@@ -35,6 +35,7 @@ class _MediaKitPlayerScreenState extends State<MediaKitPlayerScreen>
   late int _index;
   late final Player _player;
   late final VideoController _controller;
+  late final Map<String, String> _headers;
   final AlistDatabaseController _database = Get.find();
 
   bool _showControls = true;
@@ -89,8 +90,16 @@ class _MediaKitPlayerScreenState extends State<MediaKitPlayerScreen>
     final args = Get.arguments as Map<String, dynamic>;
     _videos = List<Map<String, String?>>.from(args['videos'] as List);
     _index = args['index'] as int? ?? 0;
-    _player = Player(configuration: const PlayerConfiguration(bufferSize: 64 * 1024 * 1024));
+    _headers = Map<String, String>.from(args['headers'] ?? {});
+    _player = Player(configuration: const PlayerConfiguration(
+      bufferSize: 64 * 1024 * 1024,
+      // 加大分析时长，提升对老格式/未知格式容器的识别能力
+      // libmpv 默认 5 秒，老视频容器可能需要更长
+      protocolWhitelist: ['http', 'https', 'tcp', 'tls', 'rtmp', 'rtsp', 'data', 'file'],
+    ));
     _controller = VideoController(_player);
+    // 配置 libmpv 老格式兼容性选项
+    _configureForOldFormats();
     _initBrightnessAndVolume();
     _checkFavoriteStatus();
     _checkDislikedStatus();
@@ -149,6 +158,37 @@ class _MediaKitPlayerScreenState extends State<MediaKitPlayerScreen>
         .animate(CurvedAnimation(parent: _playlistAnimationController, curve: Curves.easeOutCubic));
   }
 
+  void _configureForOldFormats() {
+    try {
+      final native = _player.platform as dynamic;
+      // 提升对老容器格式的探测能力
+      native.setProperty('demuxer-lavf-analyzeduration', '10'); // 秒
+      native.setProperty('demuxer-lavf-probesize', '50000000'); // 50MB
+      // 启用软件解码兜底（老格式硬件解码器往往不支持）
+      native.setProperty('vd-lavc-dr', 'no');
+      // 降低线程数避免老视频解码出错
+      native.setProperty('vd-lavc-threads', '4');
+      // FFmpeg 解码器白名单中启用老编解码器
+      native.setProperty('vd-lavc-codec-whitelist', '');
+      // 对于损坏的帧，尽量容错而不是报错
+      native.setProperty('demuxer-lavf-o', 'seekable=1');
+
+      // ========== 音频解码容错配置 ==========
+      // 启用音频软件解码兜底，解决部分格式硬件音频解码器不支持的问题
+      native.setProperty('ad-lavc-dr', 'no');
+      // 允许所有音频解码器
+      native.setProperty('ad-lavc-codec-whitelist', '');
+      // 对损坏的音频帧采用容错而非报错策略
+      native.setProperty('ad-lavc-err_detect', '0');
+      // 忽略音频解码错误，避免因个别损坏音频帧导致整个播放失败
+      native.setProperty('audio-file-auto', 'fuzzy');
+      // 音频输出容错
+      native.setProperty('audio-pitch-correction', 'yes');
+    } catch (_) {
+      // 非 NativePlayer 平台静默忽略
+    }
+  }
+
   Future<void> _initBrightnessAndVolume() async {
     try { _systemBrightnessValue = await ScreenBrightness().current; } catch (_) { _systemBrightnessValue = 0.5; }
     try { _systemVolumeValue = await VolumeController().getVolume(); } catch (_) { _systemVolumeValue = 0.5; }
@@ -182,7 +222,10 @@ class _MediaKitPlayerScreenState extends State<MediaKitPlayerScreen>
       if (!mounted) return;
       final url = _videos[index]["url"] ?? "";
       if (url.isEmpty) { _showToast("视频地址为空"); setState(() { _isSwitching = false; _buffering = false; }); return; }
-      try { _player.open(Media(url), play: true); } catch (e) {
+      try {
+        final httpHeaders = _headers.isNotEmpty ? _headers : null;
+        _player.open(Media(url, httpHeaders: httpHeaders), play: true);
+      } catch (e) {
         if (mounted) { setState(() { _playbackError = true; _isSwitching = false; _buffering = false; }); _showToast("播放失败: $e"); }
         return;
       }

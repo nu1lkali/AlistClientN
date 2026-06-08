@@ -25,6 +25,7 @@ class _SecurityLockScreenState extends State<SecurityLockScreen> {
   final _passwordEC = TextEditingController();
   String _errorMessage = '';
   bool _isVerifying = false;
+  bool _isErrorAnimating = false; // 标记错误动画是否正在进行
 
   @override
   void dispose() {
@@ -160,7 +161,7 @@ class _SecurityLockScreenState extends State<SecurityLockScreen> {
   }
 
   void _verifyPattern(List<int> pattern) async {
-    if (_isVerifying) return;
+    if (_isVerifying || _isErrorAnimating) return;
     setState(() {
       _isVerifying = true;
       _errorMessage = '';
@@ -178,9 +179,24 @@ class _SecurityLockScreenState extends State<SecurityLockScreen> {
         setState(() {
           _errorMessage = '手势不正确，请重试';
           _isVerifying = false;
+          _isErrorAnimating = true;
         });
       }
-      _patternKey.currentState?.showErrorThenReset();
+      _patternKey.currentState?.showErrorThenReset(onComplete: () {
+        if (mounted) {
+          setState(() {
+            _isErrorAnimating = false;
+          });
+        }
+      });
+      // 安全超时：即使动画回调未触发，也确保状态能恢复
+      Future.delayed(const Duration(seconds: 2), () {
+        if (mounted && _isErrorAnimating) {
+          setState(() {
+            _isErrorAnimating = false;
+          });
+        }
+      });
     }
   }
 
