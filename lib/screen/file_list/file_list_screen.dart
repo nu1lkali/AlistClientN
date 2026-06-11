@@ -875,32 +875,14 @@ class _FileListScreenState extends State<FileListScreen>
     final n = SpUtil.getInt(AlistConstant.randomPlayCount, defValue: 10) ?? 10;
     if (n <= 0 || !mounted) return;
 
-    SmartDialog.showLoading(msg: '正在收集 $n 个视频…', backDismiss: false, clickMaskDismiss: false);
+    SmartDialog.showLoading(msg: '正在收集视频… (0/$n)', backDismiss: false, clickMaskDismiss: false);
     try {
-      final collected = <FileItemVO>[];
-      final maxAttempts = n * 3;
-
-      for (int i = 0; i < maxAttempts && collected.length < n && mounted; i++) {
-        final result = await _randomWalkToFindVideos(folderPath, maxDepth: 10);
-        if (result == null || result.videoFiles.isEmpty) continue;
-        for (final v in result.videoFiles) {
-          if (collected.length >= n) break;
-          if (!collected.any((c) => c.path == v.path)) {
-            collected.add(v);
-            break;
-          }
-        }
-        _recentPathsCache.add(result.dirPath);
-      }
-
-      SmartDialog.dismiss();
+      final collected = await _collectRandomVideos(folderPath, n);
 
       if (collected.isEmpty) {
         SmartDialog.showToast('未找到视频文件');
         return;
       }
-
-      collected.shuffle();
 
       List<TikTokVideoItem> tiktokVideos = collected.map((e) =>
           TikTokVideoItem.fromFileItem(
@@ -921,6 +903,106 @@ class _FileListScreenState extends State<FileListScreen>
       SmartDialog.showToast('操作失败：$e');
       LogUtil.e('视界流收集视频错误: $e');
     }
+  }
+
+  Future<List<FileItemVO>> _collectRandomVideos(String startPath, int n) async {
+    final reservoir = <FileItemVO>[];
+    final seenDirs = <String>{};
+    final seenVideos = <String>{};
+    final dirVideoCount = <String, int>{};
+    final dirMaxVideos = <String, int>{};
+    final random = Random();
+    final maxApiCalls = n * 5;
+    final poolSize = n + n * (1 + random.nextInt(6)) ~/ 5;
+    final minDirs = (n / 5).ceil().clamp(5, 20);
+    int totalSeen = 0;
+    int lastProgress = -1;
+    int lastDialogUpdate = 0;
+
+    var currentLevel = <String>[startPath];
+
+    try {
+      while (currentLevel.isNotEmpty && seenDirs.length < maxApiCalls && mounted) {
+        currentLevel.shuffle(random);
+        final nextLevel = <String>[];
+
+        for (final dirPath in currentLevel) {
+          if (seenDirs.length >= maxApiCalls) break;
+          if (reservoir.length >= poolSize && seenDirs.length >= minDirs) break;
+          if (seenDirs.contains(dirPath)) continue;
+          seenDirs.add(dirPath);
+
+          dirMaxVideos.putIfAbsent(dirPath, () => 2 + random.nextInt(4));
+
+          final body = {"path": dirPath, "password": _password ?? "", "page": 1, "per_page": 500, "refresh": false};
+          final completer = Completer<FileListRespEntity?>();
+
+          await DioUtils.instance.requestNetwork<FileListRespEntity>(
+            Method.post, "fs/list", params: body,
+            onSuccess: (data) => completer.complete(data),
+            onError: (_, __) => completer.complete(null),
+          );
+
+          final data = await completer.future;
+          if (data == null) continue;
+
+          for (final file in data.content ?? <FileListRespContent>[]) {
+            if (file.isDir) {
+              final subPath = dirPath == '/' ? '/${file.name}' : '$dirPath/${file.name}';
+              if (!seenDirs.contains(subPath)) nextLevel.add(subPath);
+            } else if (FileUtils.getFileType(false, file.name) == FileType.video) {
+              final filePath = dirPath == '/' ? '/${file.name}' : '$dirPath/${file.name}';
+              if (seenVideos.contains(filePath)) continue;
+              seenVideos.add(filePath);
+
+              final count = dirVideoCount[dirPath] ?? 0;
+              final limit = dirMaxVideos[dirPath]!;
+              if (count >= limit) continue;
+              dirVideoCount[dirPath] = count + 1;
+
+              DateTime? modifyTime = file.parseModifiedTime();
+              final video = FileItemVO(
+                name: file.name, path: filePath, size: file.size,
+                sizeDesc: file.formatBytes(), isDir: false,
+                modified: file.getReformatModified(modifyTime),
+                typeInt: file.type, type: FileType.video,
+                thumb: file.thumb, sign: file.sign,
+                icon: file.getFileIcon(),
+                modifiedMilliseconds: modifyTime?.millisecondsSinceEpoch ?? -1,
+                provider: data.provider ?? "",
+              );
+
+              totalSeen++;
+              if (reservoir.length < poolSize) {
+                reservoir.add(video);
+              } else {
+                final j = random.nextInt(totalSeen);
+                if (j < poolSize) {
+                  reservoir[j] = video;
+                }
+              }
+            }
+          }
+
+          final now = DateTime.now().millisecondsSinceEpoch;
+          if (totalSeen != lastProgress && now - lastDialogUpdate > 300) {
+            lastProgress = totalSeen;
+            lastDialogUpdate = now;
+            SmartDialog.showLoading(
+              msg: '探索中… 目录 ${seenDirs.length} | 候选 $totalSeen',
+              backDismiss: false, clickMaskDismiss: false,
+            );
+          }
+        }
+
+        currentLevel = nextLevel;
+      }
+    } finally {
+      SmartDialog.dismiss();
+    }
+
+    reservoir.shuffle(random);
+    return reservoir.length > n ? reservoir.sublist(0, n) : reservoir;
   }
 
   void _randomPlayVideo() {
@@ -1052,40 +1134,16 @@ class _FileListScreenState extends State<FileListScreen>
 
     final targetPath = fromPath ?? path;
 
-    SmartDialog.showLoading(msg: '正在收集 $n 个视频…', backDismiss: false, clickMaskDismiss: false);
+    SmartDialog.showLoading(msg: '正在收集视频… (0/$n)', backDismiss: false, clickMaskDismiss: false);
     try {
-      final collected = <FileItemVO>[];
-      final maxAttempts = n * 3;
-
-      for (int i = 0; i < maxAttempts && collected.length < n && mounted; i++) {
-        final result = await _randomWalkToFindVideos(targetPath, maxDepth: 10);
-        if (result == null || result.videoFiles.isEmpty) continue;
-        // 取一个尚未收集的视频
-        for (final v in result.videoFiles) {
-          if (collected.length >= n) break;
-          if (!collected.any((c) => c.path == v.path)) {
-            collected.add(v);
-            break;
-          }
-        }
-        // 避免重复漫步到同一目录
-        _recentPathsCache.add(result.dirPath);
-      }
-
-      SmartDialog.dismiss();
+      final collected = await _collectRandomVideos(targetPath, n);
 
       if (collected.isEmpty) {
         SmartDialog.showToast('未找到视频文件');
         return;
       }
 
-      // 随机打乱收集结果并让第一个作为起始视频
-      collected.shuffle();
-      final firstVideo = collected.first;
-      collected.removeAt(0);
-      collected.insert(0, firstVideo);
-
-      _goVideoPlayerScreen(context, firstVideo, collected, false);
+      _goVideoPlayerScreen(context, collected.first, collected, false);
     } catch (e) {
       SmartDialog.dismiss();
       SmartDialog.showToast('操作失败：$e');
