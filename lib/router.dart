@@ -113,7 +113,7 @@ class AlistRouter {
       name: NamedRouter.subtitleSettings,
       page: () => const SubtitleSettingsScreen(),
     ),
-    // TikTok 短视频播放器
+    // 视界流短视频播放器
     GetPage(
       name: NamedRouter.tiktokPlayer,
       page: () => const TikTokPlayerPage(),

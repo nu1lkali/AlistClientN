@@ -871,6 +871,58 @@ class _FileListScreenState extends State<FileListScreen>
     _goTiktokPlayerFromFolder(path);
   }
 
+  void _tiktokPlayNFromFolder(String folderPath) async {
+    final n = SpUtil.getInt(AlistConstant.randomPlayCount, defValue: 10) ?? 10;
+    if (n <= 0 || !mounted) return;
+
+    SmartDialog.showLoading(msg: '正在收集 $n 个视频…', backDismiss: false, clickMaskDismiss: false);
+    try {
+      final collected = <FileItemVO>[];
+      final maxAttempts = n * 3;
+
+      for (int i = 0; i < maxAttempts && collected.length < n && mounted; i++) {
+        final result = await _randomWalkToFindVideos(folderPath, maxDepth: 10);
+        if (result == null || result.videoFiles.isEmpty) continue;
+        for (final v in result.videoFiles) {
+          if (collected.length >= n) break;
+          if (!collected.any((c) => c.path == v.path)) {
+            collected.add(v);
+            break;
+          }
+        }
+        _recentPathsCache.add(result.dirPath);
+      }
+
+      SmartDialog.dismiss();
+
+      if (collected.isEmpty) {
+        SmartDialog.showToast('未找到视频文件');
+        return;
+      }
+
+      collected.shuffle();
+
+      List<TikTokVideoItem> tiktokVideos = collected.map((e) =>
+          TikTokVideoItem.fromFileItem(
+            name: e.name,
+            path: e.path,
+            size: e.size,
+            sizeDesc: e.sizeDesc,
+            sign: e.sign,
+            provider: e.provider,
+            thumb: e.thumb,
+            modifiedMilliseconds: e.modifiedMilliseconds,
+          )).toList();
+
+      final playList = TikTokPlayListModel(videos: tiktokVideos, initialIndex: 0);
+      Get.toNamed(NamedRouter.tiktokPlayer, arguments: playList);
+    } catch (e) {
+      SmartDialog.dismiss();
+      SmartDialog.showToast('操作失败：$e');
+      LogUtil.e('视界流收集视频错误: $e');
+    }
+  }
+
   void _randomPlayVideo() {
     final videos = _files.where((f) => f.type == FileType.video).toList();
     if (videos.isEmpty) {
@@ -1746,7 +1798,7 @@ class _FileListScreenState extends State<FileListScreen>
                       mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                       children: [
                         if (canWrite) Expanded(child: _gridItem(Icons.folder_special_rounded, '按类型归类', () { Navigator.pop(context); _organizeByType(); }, iconColor: Colors.orange)),
-                        if (canWrite) Expanded(child: _gridItem(Icons.auto_awesome_rounded, '提取整理', () { Navigator.pop(context); _extractAndOrganize(); }, iconColor: Colors.teal)),
+                        if (canWrite) Expanded(child: _gridItem(Icons.auto_awesome_rounded, '提取并整理', () { Navigator.pop(context); _extractAndOrganize(); }, iconColor: Colors.teal)),
                         if (canWrite) Expanded(child: _gridItem(Icons.cleaning_services_rounded, '清理空目录', () { Navigator.pop(context); _deleteEmptyFolders(); }, iconColor: Colors.redAccent)),
                         if (!canWrite) const Spacer(),
                         if (!canWrite) const Spacer(),
@@ -2507,16 +2559,16 @@ class _FileListScreenState extends State<FileListScreen>
                   if (file.isDir)
                     ListTile(
                       leading: const Icon(Icons.swipe_vertical_rounded),
-                      title: const Text("TikTok模式播放此文件夹视频"),
+                      title: const Text("视界流：收集N个视频"),
                       onTap: () {
                         Navigator.pop(context);
-                        _goTiktokPlayerFromFolder(file.path);
+                        _tiktokPlayNFromFolder(file.path);
                       },
                     ),
                   if (!file.isDir && file.type == FileType.video)
                     ListTile(
                       leading: const Icon(Icons.swipe_vertical_rounded),
-                      title: const Text("TikTok模式播放"),
+                      title: const Text("视界流播放"),
                       onTap: () {
                         Navigator.pop(context);
                         _goTiktokPlayerScreen(file);

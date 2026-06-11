@@ -232,7 +232,7 @@ class _SettingsContainerState extends State<_SettingsContainer>
                   icon: Icons.favorite_border,
                   title: '不喜欢视频列表',
                   onTap: () => Get.toNamed(NamedRouter.dislikedVideos)),
-              // TikTok 控件透明度
+              // 视界流控件透明度
               _navTile(context, isDark, scheme,
                   icon: Icons.opacity,
                   title: '视界流控件透明度',
@@ -596,7 +596,7 @@ class _SettingsContainerState extends State<_SettingsContainer>
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('TikTok控件透明度'),
+        title: const Text('视界流控件透明度'),
         content: StatefulBuilder(
           builder: (ctx, setDialogState) {
             return Column(
