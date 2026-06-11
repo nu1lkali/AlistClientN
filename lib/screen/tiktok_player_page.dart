@@ -17,10 +17,9 @@ import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_smart_dialog/flutter_smart_dialog.dart';
 import 'package:get/get.dart';
-import 'package:path_provider/path_provider.dart';
+import 'package:image_gallery_saver/image_gallery_saver.dart';
 import 'package:video_player/video_player.dart';
 import 'package:wakelock/wakelock.dart';
-import 'dart:io';
 
 class TikTokPlayerPage extends StatefulWidget {
   const TikTokPlayerPage({super.key});
@@ -328,19 +327,12 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
       final ui.Image image = await boundary.toImage(pixelRatio: 2.0);
       final ByteData? byteData = await image.toByteData(format: ui.ImageByteFormat.png);
       if (byteData == null) { SmartDialog.dismiss(); SmartDialog.showToast('截图失败'); return; }
-      String savePath;
-      if (Platform.isAndroid) {
-        final dir = Directory('/storage/emulated/0/Pictures/AlistClient');
-        if (!await dir.exists()) await dir.create(recursive: true);
-        savePath = '${dir.path}/screenshot_${DateTime.now().millisecondsSinceEpoch}.png';
-      } else {
-        final dir = await getApplicationDocumentsDirectory();
-        savePath = '${dir.path}/screenshot_${DateTime.now().millisecondsSinceEpoch}.png';
-      }
-      final file = File(savePath);
-      await file.writeAsBytes(byteData.buffer.asUint8List());
+      final result = await ImageGallerySaver.saveImage(
+        byteData.buffer.asUint8List(), quality: 100,
+        name: "alist_${DateTime.now().millisecondsSinceEpoch}",
+      );
       SmartDialog.dismiss();
-      SmartDialog.showToast('截图已保存到相册');
+      SmartDialog.showToast(result['isSuccess'] == true ? '截图已保存到相册' : '保存失败');
     } catch (e) { SmartDialog.dismiss(); SmartDialog.showToast('截图失败: $e'); }
   }
 
@@ -394,7 +386,7 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
         if (!_hideUI) _buildProgress(),
         if (!_hideUI && !_isLandscape) _buildBottomInfo(),
         ..._buildHearts(),
-        _buildIndicator(),
+        if (!_hideUI) _buildIndicator(),
       ]),
     );
   }
