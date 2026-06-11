@@ -31,6 +31,7 @@
         android:name="com.github.alist.App"
         android:icon="@mipmap/ic_launcher"
         android:label="ALClientN"
+        android:largeHeap="true"
         android:usesCleartextTraffic="true"
         tools:replace="android:label">
         <activity

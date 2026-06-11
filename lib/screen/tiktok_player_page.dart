@@ -95,6 +95,9 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
     _pageController = PageController(initialPage: _currentIndex);
     _uiOpacity = SpUtil.getDouble(AlistConstant.tiktokUiOpacity, defValue: 1.0) ?? 1.0;
 
+    PaintingBinding.instance.imageCache.maximumSize = 50;
+    PaintingBinding.instance.imageCache.maximumSizeBytes = 80 * 1024 * 1024;
+
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
     SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
     Wakelock.enable();
@@ -115,6 +118,7 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
       try { c.dispose(); } catch (_) {}
     }
     _controllers.clear();
+    _clearImageCache();
     try { _pageController.dispose(); } catch (_) {}
     SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
@@ -126,6 +130,16 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.paused) _safePause();
     else if (state == AppLifecycleState.resumed) _safePlay();
+  }
+
+  @override
+  void didHaveMemoryPressure() {
+    _clearImageCache();
+    final rm = _controllers.keys.where((k) => k != _currentIndex).toList();
+    for (final k in rm) {
+      try { _controllers[k]?.dispose(); } catch (_) {}
+      _controllers.remove(k);
+    }
   }
 
   // ═══════════════ DB Batch Flush ═══════════════
@@ -225,6 +239,7 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
     if (idx < 0 || idx >= _playList.videos.length) return;
     if (_controllers.containsKey(idx) || _initializingIndexes.contains(idx)) return;
     _initializingIndexes.add(idx);
+    VideoPlayerController? ctrl;
     try {
       final v = _playList.videos[idx];
       if (v.videoUrl == null || v.videoUrl!.isEmpty) {
@@ -233,19 +248,29 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
         v.videoUrl = url;
       }
       if (!mounted) { _initializingIndexes.remove(idx); return; }
-      final ctrl = VideoPlayerController.networkUrl(
+      ctrl = VideoPlayerController.networkUrl(
         Uri.parse(v.videoUrl!),
         httpHeaders: v.provider == 'BaiduNetdisk' ? {'User-Agent': 'pan.baidu.com'} : {},
       );
       await ctrl.initialize();
+      if (!mounted || !_initializingIndexes.contains(idx)) {
+        try { ctrl.dispose(); } catch (_) {}
+        _initializingIndexes.remove(idx);
+        return;
+      }
+      if ((idx - _currentIndex).abs() > _cacheRange) {
+        try { ctrl.dispose(); } catch (_) {}
+        _initializingIndexes.remove(idx);
+        return;
+      }
       ctrl.setLooping(_loopSingle);
-      if (!mounted) { try { ctrl.dispose(); } catch (_) {} _initializingIndexes.remove(idx); return; }
       _controllers[idx] = ctrl;
       _initializingIndexes.remove(idx);
       if (idx == _currentIndex) { ctrl.play(); _isPlaying = true; }
       if (mounted) setState(() {});
     } catch (e) {
       log.Log.e('initCtrl[$idx]: $e');
+      try { ctrl?.dispose(); } catch (_) {}
       _initializingIndexes.remove(idx);
     }
   }
@@ -259,6 +284,7 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
   void _disposeOutOfRange(int idx) {
     final rm = _controllers.keys.where((k) => (k - idx).abs() > _cacheRange).toList();
     for (final k in rm) { try { _controllers[k]?.dispose(); } catch (_) {} _controllers.remove(k); }
+    _initializingIndexes.removeWhere((k) => (k - idx).abs() > _cacheRange);
     if (rm.isNotEmpty) _clearImageCache();
   }
 
@@ -494,6 +520,7 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
 
       final ui.Image image = await boundary.toImage(pixelRatio: pixelRatio);
       final ByteData? byteData = await image.toByteData(format: ui.ImageByteFormat.png);
+      image.dispose();
       if (byteData == null) { SmartDialog.dismiss(); SmartDialog.showToast('截图失败'); return; }
       final bytes = byteData.buffer.asUint8List();
       if (bytes.length < 100) { SmartDialog.dismiss(); SmartDialog.showToast('截图失败'); return; }

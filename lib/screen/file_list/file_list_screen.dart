@@ -932,7 +932,7 @@ class _FileListScreenState extends State<FileListScreen>
           if (seenDirs.contains(dirPath)) continue;
           seenDirs.add(dirPath);
 
-          dirMaxVideos.putIfAbsent(dirPath, () => 2 + random.nextInt(4));
+          dirMaxVideos.putIfAbsent(dirPath, () => (n * 0.25).ceil().clamp(3, 15) + random.nextInt(5));
 
           final body = {"path": dirPath, "password": _password ?? "", "page": 1, "per_page": 500, "refresh": false};
           final completer = Completer<FileListRespEntity?>();
