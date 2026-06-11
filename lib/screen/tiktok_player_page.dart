@@ -61,6 +61,14 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
   /// 控件透明度
   double _uiOpacity = 1.0;
 
+  /// 滑动调整进度状态（使用Listener原始指针事件，避免与PageView手势冲突）
+  bool _isSwiping = false;
+  double _swipeProgress = 0.0; // 拖动中的预览进度 0.0~1.0
+  double _swipeBaseProgress = 0.0; // 拖动开始时的进度
+  double _swipeStartX = 0.0;
+  double _swipeStartY = 0.0;
+  bool _swipeDecided = false; // 是否已确定是水平滑动
+
   @override
   void initState() {
     super.initState();
@@ -156,7 +164,13 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
       try {
         final c = _controllers[_currentIndex];
         if (c != null && c.value.isInitialized) {
-          setState(() { _pos = c.value.position; _dur = c.value.duration; });
+          // 滑动调整进度期间，不从播放器读取位置，避免覆盖预览进度导致闪烁
+          if (!_isSwiping) {
+            setState(() { _pos = c.value.position; _dur = c.value.duration; });
+          } else {
+            // 滑动期间只更新总时长
+            _dur = c.value.duration;
+          }
           if (c.value.duration > Duration.zero &&
               c.value.position >= c.value.duration - const Duration(milliseconds: 500) &&
               !_completing) {
@@ -308,16 +322,82 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
   // ═══════════════ Seek ═══════════════
   void _onSeekStart() { _progressTimer?.cancel(); }
   void _onSeekChanged(double val) {
+    // 水平滑动seek期间，屏蔽Slider自身的回调，避免与PointerMove冲突导致闪烁
+    if (_isSwiping) return;
     if (_dur.inMilliseconds <= 0) return;
     setState(() => _pos = Duration(milliseconds: (val * _dur.inMilliseconds).round()));
   }
   void _onSeekEnd(double val) {
+    // 水平滑动seek期间，屏蔽Slider自身的回调
+    if (_isSwiping) return;
     try {
       if (_dur.inMilliseconds > 0) {
         _controllers[_currentIndex]?.seekTo(Duration(milliseconds: (val * _dur.inMilliseconds).round()));
       }
     } catch (_) {}
     _startTimer();
+  }
+
+  // ═══════════════ Swipe Seek (Listener方式，避免与PageView手势冲突) ═══════════════
+  void _onPointerDown(PointerDownEvent event) {
+    _progressTimer?.cancel();
+    _swipeStartX = event.position.dx;
+    _swipeStartY = event.position.dy;
+    _swipeDecided = false;
+    final totalMs = _dur.inMilliseconds.toDouble();
+    if (totalMs <= 0) return;
+    _swipeBaseProgress = (_pos.inMilliseconds.toDouble() / totalMs).clamp(0.0, 1.0);
+    _swipeProgress = _swipeBaseProgress;
+  }
+
+  void _onPointerMove(PointerMoveEvent event) {
+    final totalMs = _dur.inMilliseconds.toDouble();
+    if (totalMs <= 0) return;
+
+    final dx = event.position.dx - _swipeStartX;
+    final dy = event.position.dy - _swipeStartY;
+
+    if (!_swipeDecided) {
+      // 判断是否为水平滑动：水平偏移大于垂直偏移且超过10px阈值
+      if (dx.abs() > 10 && dx.abs() > dy.abs()) {
+        _swipeDecided = true;
+        _isSwiping = true;
+        if (mounted) setState(() {});
+      } else if (dy.abs() > 10) {
+        // 垂直滑动，不处理，让PageView接管
+        _swipeDecided = true;
+        _isSwiping = false;
+        return;
+      } else {
+        return; // 还没达到阈值
+      }
+    }
+
+    if (!_isSwiping) return;
+
+    // 使用屏幕宽度计算滑动区域
+    final trackWidth = MediaQuery.of(context).size.width - 80; // 减去左右时间文字宽度
+    if (trackWidth <= 0) return;
+
+    final progressDelta = event.delta.dx / trackWidth;
+    _swipeProgress = (_swipeProgress + progressDelta).clamp(0.0, 1.0);
+    if (mounted) setState(() {
+      _pos = Duration(milliseconds: (_swipeProgress * _dur.inMilliseconds).round());
+    });
+  }
+
+  void _onPointerUp(PointerUpEvent event) {
+    if (!_isSwiping) return;
+    _isSwiping = false;
+    _swipeDecided = false;
+    try {
+      if (_dur.inMilliseconds > 0) {
+        final targetMs = (_swipeProgress * _dur.inMilliseconds).round();
+        _controllers[_currentIndex]?.seekTo(Duration(milliseconds: targetMs));
+      }
+    } catch (_) {}
+    _startTimer();
+    if (mounted) setState(() {});
   }
 
   // ═══════════════ Screenshot ═══════════════
@@ -525,23 +605,52 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
     final totalMs = _dur.inMilliseconds.toDouble();
     final curMs = _pos.inMilliseconds.toDouble();
     final val = totalMs > 0 ? (curMs / totalMs).clamp(0.0, 1.0) : 0.0;
-    return Positioned(left: 0, right: 0, bottom: _isLandscape ? 30 : 80,
-      child: Opacity(opacity: _uiOpacity, child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 12),
-        child: Row(children: [
-          Text(_fmtDur(_pos), style: const TextStyle(color: Colors.white70, fontSize: 11)),
-          Expanded(child: SliderTheme(
-            data: SliderTheme.of(context).copyWith(trackHeight: 2,
-              thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 5),
-              overlayShape: const RoundSliderOverlayShape(overlayRadius: 12),
-              activeTrackColor: Colors.white, inactiveTrackColor: Colors.white24,
-              thumbColor: Colors.white, overlayColor: Colors.white24),
-            child: Slider(value: val, onChangeStart: (_) => _onSeekStart(),
-              onChanged: _onSeekChanged, onChangeEnd: _onSeekEnd),
-          )),
-          Text(_fmtDur(_dur), style: const TextStyle(color: Colors.white70, fontSize: 11)),
-        ]),
-      )),
+    final bottomOffset = _isLandscape ? 30.0 : 80.0;
+    return Positioned(left: 0, right: 0, bottom: bottomOffset,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // 拖动预览时间提示
+          if (_isSwiping)
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+              decoration: BoxDecoration(
+                color: Colors.black87,
+                borderRadius: BorderRadius.circular(4),
+              ),
+              child: Text(
+                '${_fmtDur(_pos)} / ${_fmtDur(_dur)}',
+                style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w600),
+              ),
+            ),
+          // 使用Listener监听原始指针事件，避免与PageView垂直滚动手势冲突
+          Listener(
+            behavior: HitTestBehavior.translucent,
+            onPointerDown: _onPointerDown,
+            onPointerMove: _onPointerMove,
+            onPointerUp: _onPointerUp,
+            child: Opacity(opacity: _uiOpacity, child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              child: Row(children: [
+                Text(_fmtDur(_pos), style: const TextStyle(color: Colors.white70, fontSize: 11)),
+                Expanded(child: IgnorePointer(
+                  ignoring: _isSwiping,
+                  child: SliderTheme(
+                    data: SliderTheme.of(context).copyWith(trackHeight: 2,
+                      thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 5),
+                      overlayShape: const RoundSliderOverlayShape(overlayRadius: 12),
+                      activeTrackColor: Colors.white, inactiveTrackColor: Colors.white24,
+                      thumbColor: Colors.white, overlayColor: Colors.white24),
+                    child: Slider(value: val, onChangeStart: (_) => _onSeekStart(),
+                      onChanged: _onSeekChanged, onChangeEnd: _onSeekEnd),
+                  ),
+                )),
+                Text(_fmtDur(_dur), style: const TextStyle(color: Colors.white70, fontSize: 11)),
+              ]),
+            )),
+          ),
+        ],
+      ),
     );
   }
 
