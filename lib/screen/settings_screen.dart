@@ -235,7 +235,7 @@ class _SettingsContainerState extends State<_SettingsContainer>
               // TikTok 控件透明度
               _navTile(context, isDark, scheme,
                   icon: Icons.opacity,
-                  title: 'TikTok控件透明度',
+                  title: '视界流控件透明度',
                   trailingText: '${(_tiktokUiOpacity * 100).round()}%',
                   onTap: () => _showTiktokOpacityDialog(context)),
             ],

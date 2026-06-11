@@ -59,6 +59,12 @@ final menuGroupOperations = MenuGroupEntity(
       name: "递归随机播放",
       iconData: Icons.shuffle_rounded,
     ),
+    MenuItemEntity(
+      menuGroupId: MenuGroupId.operations,
+      menuId: MenuId.tiktokPlay,
+      name: "视界流",
+      iconData: Icons.swipe_up_rounded,
+    ),
   ],
 );
 
@@ -80,7 +86,7 @@ final menuGroupFileOperations = MenuGroupEntity(
     MenuItemEntity(
       menuGroupId: MenuGroupId.fileOperations,
       menuId: MenuId.deleteEmptyFolders,
-      name: "清理空文件夹",
+      name: "清理空目录",
       iconData: Icons.cleaning_services_rounded,
     ),
   ],
@@ -363,6 +369,7 @@ enum MenuId {
   extractAndOrganize,
   randomPlayVideo,
   randomPlayVideoRecursive,
+  tiktokPlay,
   fileOperations,
   deleteEmptyFolders,
 }

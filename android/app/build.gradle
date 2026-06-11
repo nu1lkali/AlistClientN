@@ -57,6 +57,11 @@ android {
         main.java.srcDirs += 'src/main/kotlin'
     }
 
+    lintOptions {
+        // 如打包出现Failed to transform libs.jar to match attributes
+        checkReleaseBuilds false
+    }
+
     defaultConfig {
         // TODO: Specify your own unique Application ID (https://developer.android.com/studio/build/application-id.html).
         applicationId "com.github.alist.client"

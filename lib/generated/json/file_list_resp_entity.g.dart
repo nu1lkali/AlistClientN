@@ -27,6 +27,14 @@ FileListRespEntity $FileListRespEntityFromJson(Map<String, dynamic> json) {
   if (provider != null) {
     fileListRespEntity.provider = provider;
   }
+  final bool? hasMore = jsonConvert.convert<bool>(json['has_more']);
+  if (hasMore != null) {
+    fileListRespEntity.hasMore = hasMore;
+  }
+  final int? pagesTotal = jsonConvert.convert<int>(json['pages_total']);
+  if (pagesTotal != null) {
+    fileListRespEntity.pagesTotal = pagesTotal;
+  }
   return fileListRespEntity;
 }
 
@@ -37,6 +45,8 @@ Map<String, dynamic> $FileListRespEntityToJson(FileListRespEntity entity) {
   data['readme'] = entity.readme;
   data['write'] = entity.write;
   data['provider'] = entity.provider;
+  data['has_more'] = entity.hasMore;
+  data['pages_total'] = entity.pagesTotal;
   return data;
 }
 
@@ -47,13 +57,17 @@ extension FileListRespEntityExtension on FileListRespEntity {
     String? readme,
     bool? write,
     String? provider,
+    bool? hasMore,
+    int? pagesTotal,
   }) {
     return FileListRespEntity()
       ..content = content ?? this.content
       ..total = total ?? this.total
       ..readme = readme ?? this.readme
       ..write = write ?? this.write
-      ..provider = provider ?? this.provider;
+      ..provider = provider ?? this.provider
+      ..hasMore = hasMore ?? this.hasMore
+      ..pagesTotal = pagesTotal ?? this.pagesTotal;
   }
 }
 

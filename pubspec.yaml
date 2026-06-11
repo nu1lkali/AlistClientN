@@ -55,6 +55,8 @@ dependencies:
   #  auto_orientation: ^2.2.1
   # Dialog
   flutter_smart_dialog: ^4.9.0+6
+  # Bugly 崩溃上报 & 运营统计
+  flutter_bugly: ^1.1.1
   # package info in android、ios...
   package_info_plus: ^4.0.2
   # image loader

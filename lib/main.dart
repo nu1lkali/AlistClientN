@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:alist/l10n/alist_translations.dart';
@@ -17,6 +18,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_smart_dialog/flutter_smart_dialog.dart';
+import 'package:flutter_bugly/flutter_bugly.dart';
 import 'package:get/get.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:pull_to_refresh/pull_to_refresh.dart';
@@ -31,7 +33,28 @@ Future<void> main() async {
   // 只对局域网地址绕过代理，公网地址仍走系统代理
   // 解决开启 VPN 时局域网图片/缩略图无法加载的问题
   HttpOverrides.global = AlistHttpOverrides();
-  runApp(const MyApp());
+
+  // Bugly 初始化（仅 Release 模式生效）
+  if (kReleaseMode) {
+    FlutterBugly.init(
+      androidAppId: "7ae28b70eb",
+      iOSAppId: "", // TODO: 在 Bugly iOS 控制台创建应用后填入 App ID
+    );
+  }
+
+  // 使用 runZonedGuarded 捕获所有未处理异常并上报到 Bugly
+  runZonedGuarded(() {
+    runApp(const MyApp());
+  }, (error, stackTrace) {
+    if (kReleaseMode) {
+      FlutterBugly.uploadException(
+        type: error.runtimeType.toString(),
+        message: error.toString(),
+        detail: stackTrace.toString(),
+      );
+    }
+    debugPrint('Unhandled exception: $error\n$stackTrace');
+  });
 }
 
 // Global reactive theme color — screens can call ThemeController.instance.setColor()

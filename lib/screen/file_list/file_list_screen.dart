@@ -536,6 +536,8 @@ class _FileListScreenState extends State<FileListScreen>
               _randomPlayVideo();
             } else if (menu.menuId == MenuId.randomPlayVideoRecursive) {
               _randomPlayVideoRecursive();
+            } else if (menu.menuId == MenuId.tiktokPlay) {
+              _tiktokPlayCurrentFolder();
             }
             break;
           case MenuGroupId.fileOperations:
@@ -863,6 +865,10 @@ class _FileListScreenState extends State<FileListScreen>
         ],
       ),
     );
+  }
+
+  void _tiktokPlayCurrentFolder() {
+    _goTiktokPlayerFromFolder(path);
   }
 
   void _randomPlayVideo() {
@@ -1685,12 +1691,14 @@ class _FileListScreenState extends State<FileListScreen>
 
     showModalBottomSheet(
       context: context,
+      isScrollControlled: true,
       shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
       builder: (ctx) {
         return SafeArea(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
               // 拖拽指示条
               Padding(
                 padding: const EdgeInsets.only(top: 12, bottom: 8),
@@ -1720,18 +1728,31 @@ class _FileListScreenState extends State<FileListScreen>
                   ],
                 ),
               ),
-              // 播放/高级 - 网格
+              // 播放/高级 - 网格（两行，每行3个）
               _sectionLabel('播放与工具'),
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                child: Column(
                   children: [
-                    Expanded(child: _gridItem(Icons.play_circle_outline_rounded, '随机播放', () { Navigator.pop(context); _randomPlayVideo(); })),
-                    Expanded(child: _gridItem(Icons.shuffle_rounded, '递归随机', () { Navigator.pop(context); _randomPlayVideoRecursive(); })),
-                    if (canWrite) Expanded(child: _gridItem(Icons.folder_special_rounded, '按类型归类', () { Navigator.pop(context); _organizeByType(); }, iconColor: Colors.orange)),
-                    if (canWrite) Expanded(child: _gridItem(Icons.auto_awesome_rounded, '提取整理', () { Navigator.pop(context); _extractAndOrganize(); }, iconColor: Colors.teal)),
-                    if (canWrite) Expanded(child: _gridItem(Icons.cleaning_services_rounded, '清理空目录', () { Navigator.pop(context); _deleteEmptyFolders(); }, iconColor: Colors.redAccent)),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                      children: [
+                        Expanded(child: _gridItem(Icons.play_circle_outline_rounded, '随机播放', () { Navigator.pop(context); _randomPlayVideo(); })),
+                        Expanded(child: _gridItem(Icons.shuffle_rounded, '递归随机', () { Navigator.pop(context); _randomPlayVideoRecursive(); })),
+                        Expanded(child: _gridItem(Icons.swipe_up_rounded, '视界流', () { Navigator.pop(context); _tiktokPlayCurrentFolder(); })),
+                      ],
+                    ),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                      children: [
+                        if (canWrite) Expanded(child: _gridItem(Icons.folder_special_rounded, '按类型归类', () { Navigator.pop(context); _organizeByType(); }, iconColor: Colors.orange)),
+                        if (canWrite) Expanded(child: _gridItem(Icons.auto_awesome_rounded, '提取整理', () { Navigator.pop(context); _extractAndOrganize(); }, iconColor: Colors.teal)),
+                        if (canWrite) Expanded(child: _gridItem(Icons.cleaning_services_rounded, '清理空目录', () { Navigator.pop(context); _deleteEmptyFolders(); }, iconColor: Colors.redAccent)),
+                        if (!canWrite) const Spacer(),
+                        if (!canWrite) const Spacer(),
+                        if (!canWrite) const Spacer(),
+                      ],
+                    ),
                   ],
                 ),
               ),
@@ -1739,7 +1760,8 @@ class _FileListScreenState extends State<FileListScreen>
               _sectionLabel('排序方式'),
               _sortChips(),
               const SizedBox(height: 16),
-            ],
+              ],
+            ),
           ),
         );
       },
