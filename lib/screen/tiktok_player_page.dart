@@ -41,8 +41,10 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
   bool _loopSingle = false;
   final List<Offset> _doubleTapIcons = [];
 
-  static const int _preloadRange = 2;
-  static const int _cacheRange = 3;
+  // 预加载1个前后视频，但切换时立即释放所有旧控制器
+  static const int _preloadRange = 1;
+  static const int _cacheRange = 1;
+  bool _hideUI = false;
 
   final AlistDatabaseController _database = Get.find();
   final UserController _userController = Get.find();
@@ -224,7 +226,22 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
   void _disposeOutOfRange(int idx) {
     final rm = _controllers.keys.where((k) => (k - idx).abs() > _cacheRange).toList();
     for (final k in rm) { try { _controllers[k]?.dispose(); } catch (_) {} _controllers.remove(k); }
-    if (rm.isNotEmpty) { try { imageCache.clearLiveImages(); } catch (_) {} }
+    if (rm.isNotEmpty) _clearImageCache();
+  }
+
+  /// 释放所有控制器（切视频时调用，彻底释放内存防OOM）
+  void _disposeAll() {
+    for (final c in _controllers.values) {
+      try { c.dispose(); } catch (_) {}
+    }
+    _controllers.clear();
+    _initializingIndexes.clear();
+    _clearImageCache();
+  }
+
+  void _clearImageCache() {
+    try { PaintingBinding.instance.imageCache.clear(); } catch (_) {}
+    try { PaintingBinding.instance.imageCache.clearLiveImages(); } catch (_) {}
   }
 
   void _safePlay() {
@@ -373,9 +390,9 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
       body: Stack(children: [
         RepaintBoundary(key: _repaintKey, child: Stack(children: [_buildPageView(), _buildPauseIcon()])),
         _buildTopBar(),
-        _buildToolBar(),
-        _buildProgress(),
-        if (!_isLandscape) _buildBottomInfo(),
+        if (!_hideUI) _buildToolBar(),
+        if (!_hideUI) _buildProgress(),
+        if (!_hideUI && !_isLandscape) _buildBottomInfo(),
         ..._buildHearts(),
         _buildIndicator(),
       ]),
@@ -404,16 +421,26 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
         itemCount: _playList.videos.length,
         onPageChanged: (idx) {
           _flushPending();
+          // 暂停旧视频
           try { _controllers[_currentIndex]?.pause(); } catch (_) {}
           _currentIndex = idx;
           _isPlaying = false;
           _pos = Duration.zero;
           _dur = Duration.zero;
-          _safePlay();
-          _preloadNearby(idx);
+          // 释放超出缓存范围的控制器（保留预加载的）
           _disposeOutOfRange(idx);
-          _loadStates(idx);
           if (mounted) setState(() {});
+          // 当前视频已预加载则直接播放，否则初始化
+          final c = _controllers[idx];
+          if (c != null && c.value.isInitialized) {
+            c.play();
+            _isPlaying = true;
+            if (mounted) setState(() {});
+          } else {
+            _safeInitCtrl(idx);
+          }
+          _preloadNearby(idx);
+          _loadStates(idx);
         },
         itemBuilder: (context, idx) {
           final c = _controllers[idx];
@@ -437,7 +464,11 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
           Text('${_currentIndex + 1}/${_playList.videos.length}',
             style: const TextStyle(color: Colors.white70, fontSize: 14)),
           const Spacer(),
-          const SizedBox(width: 48),
+          IconButton(
+            icon: Icon(_hideUI ? Icons.visibility : Icons.visibility_off,
+                color: Colors.white, size: 22),
+            onPressed: () { setState(() => _hideUI = !_hideUI); },
+          ),
         ]),
       )),
     ));
