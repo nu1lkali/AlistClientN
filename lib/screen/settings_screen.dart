@@ -9,6 +9,7 @@ import 'package:alist/screen/iptv/model/iptv_channel.dart';
 import 'package:alist/util/constant.dart';
 import 'package:alist/util/global.dart';
 import 'package:alist/util/security_lock_controller.dart';
+import 'package:alist/util/subtitle/subtitle_settings.dart';
 import 'package:alist/util/log_utils.dart';
 import 'package:alist/util/named_router.dart';
 import 'package:alist/util/user_controller.dart';
@@ -45,25 +46,36 @@ class _SettingsContainerState extends State<_SettingsContainer>
   final UserController _userController = Get.find();
   StreamSubscription? _serverStreamSubscription;
   final _userCnt = 0.obs;
+
+  // 所有开关状态统一使用 RxBool，确保 GetX 响应式一致性
   late final RxBool _aggressiveCacheEnabled;
   late final RxBool _wifiOnlyPreloadEnabled;
-  late final RxInt _audioPlayerUiStyle;
-  late final RxBool _groupedRandomSort;
   late final RxBool _enableMediaKitPlayer;
+  late final RxBool _subtitleEnabled;
+  late final RxBool _showFabButton;
+  late final RxBool _groupedRandomSort;
   late final RxBool _autoPipEnabled;
+  late double _tiktokUiOpacity;
 
   @override
   void initState() {
     super.initState();
     _initPackageInfo();
-    
-    _aggressiveCacheEnabled = (SpUtil.getBool(AlistConstant.enableAggressiveCache, defValue: true) ?? true).obs;
-    _wifiOnlyPreloadEnabled = (SpUtil.getBool(AlistConstant.wifiOnlyPreload, defValue: true) ?? true).obs;
-    _audioPlayerUiStyle = (SpUtil.getInt(AlistConstant.audioPlayerUiStyle, defValue: 0) ?? 0).obs;
-    _groupedRandomSort = (SpUtil.getBool(AlistConstant.groupedRandomSort, defValue: false) ?? false).obs;
-    _enableMediaKitPlayer = (SpUtil.getBool(AlistConstant.enableMediaKitPlayer, defValue: false) ?? false).obs;
-    _autoPipEnabled = (SpUtil.getBool(AlistConstant.autoPipEnabled, defValue: true) ?? true).obs;
-    AlistConstant.showFabButtonRx.value = SpUtil.getBool(AlistConstant.showFabButton, defValue: true) ?? true;
+
+    _aggressiveCacheEnabled =
+        (SpUtil.getBool(AlistConstant.enableAggressiveCache, defValue: true) ?? true).obs;
+    _wifiOnlyPreloadEnabled =
+        (SpUtil.getBool(AlistConstant.wifiOnlyPreload, defValue: true) ?? true).obs;
+    _enableMediaKitPlayer =
+        (SpUtil.getBool(AlistConstant.enableMediaKitPlayer, defValue: false) ?? false).obs;
+    _subtitleEnabled = SubtitleSettings.instance.isSubtitleEnabled;
+    _showFabButton =
+        (SpUtil.getBool(AlistConstant.showFabButton, defValue: true) ?? true).obs;
+    _groupedRandomSort =
+        (SpUtil.getBool(AlistConstant.groupedRandomSort, defValue: false) ?? false).obs;
+    _autoPipEnabled =
+        (SpUtil.getBool(AlistConstant.autoPipEnabled, defValue: true) ?? true).obs;
+    _tiktokUiOpacity = SpUtil.getDouble(AlistConstant.tiktokUiOpacity, defValue: 1.0) ?? 1.0;
 
     _serverStreamSubscription =
         _databaseController.serverDao.serverList().listen((event) {
@@ -79,242 +91,399 @@ class _SettingsContainerState extends State<_SettingsContainer>
 
   @override
   Widget build(BuildContext context) {
+    super.build(context);
     final scheme = Theme.of(context).colorScheme;
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    List<SettingsMenu> menus = _buildSettingsMenuItems(context);
-
-    final accountMenus = menus.where((m) =>
-        m.menuId == MenuId.account || m.menuId == MenuId.signIn).toList();
-    final toolMenus = menus.where((m) =>
-        m.menuId == MenuId.downloads ||
-        m.menuId == MenuId.cacheManager ||
-        m.menuId == MenuId.aggressiveCache ||
-        m.menuId == MenuId.wifiOnlyPreload ||
-        m.menuId == MenuId.audioPlayerUi ||
-        m.menuId == MenuId.groupedRandomSort ||
-        m.menuId == MenuId.enableMediaKitPlayer ||
-        m.menuId == MenuId.extensionFilter ||
-        m.menuId == MenuId.playerSettings ||
-        m.menuId == MenuId.iptvUrl ||
-        m.menuId == MenuId.slideshowInterval ||
-        m.menuId == MenuId.themeColor ||
-        m.menuId == MenuId.autoPip ||
-        m.menuId == MenuId.randomPlayCount ||
-        m.menuId == MenuId.securityLock ||
-        m.menuId == MenuId.dislikedVideos ||
-        m.menuId == MenuId.searchFilter ||
-        m.menuId == MenuId.showFabButton).toList();
-    final aboutMenus = menus.where((m) =>
-        m.menuId == MenuId.privacyPolicy ||
-        m.menuId == MenuId.about).toList();
-
-    Widget card(List<SettingsMenu> items) {
-      if (items.isEmpty) return const SizedBox();
-      return Card(
-        margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-        elevation: isDark ? 0 : 2,
-        shadowColor: scheme.shadow.withOpacity(0.1),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        color: isDark ? scheme.surfaceVariant.withOpacity(0.3) : scheme.surface,
-        child: Column(
-          children: [
-            for (int i = 0; i < items.length; i++) ...[
-              _buildCardItem(items[i], context, isDark),
-              if (i < items.length - 1)
-                Divider(height: 1, indent: 68, endIndent: 16,
-                    color: scheme.outlineVariant.withOpacity(0.3)),
-            ]
-          ],
-        ),
-      );
-    }
 
     return ListView(
       padding: const EdgeInsets.symmetric(vertical: 12),
       children: [
-        card(accountMenus),
-        card(toolMenus),
-        card(aboutMenus),
+        // ===== 账户与存储 =====
+        _SectionHeader(title: '账户与存储', icon: Icons.account_circle_outlined),
+        _SettingsCard(
+          children: [
+            _navTile(context, isDark, scheme,
+                icon: Icons.person_outline,
+                title: Intl.settingsScreen_item_account.tr,
+                onTap: () => Get.toNamed(NamedRouter.account)),
+            _navTile(context, isDark, scheme,
+                icon: Icons.download_outlined,
+                title: Intl.settingsScreen_item_downloads.tr,
+                onTap: () => Get.toNamed(NamedRouter.downloadManager)),
+            _navTile(context, isDark, scheme,
+                icon: Icons.storage_outlined,
+                title: Intl.settingsScreen_item_cacheManagement.tr,
+                onTap: () => Get.toNamed(NamedRouter.cacheManager)),
+          ],
+        ),
+
+        // ===== 网络与预加载 =====
+        _SectionHeader(title: '网络与预加载', icon: Icons.wifi_outlined),
+        Obx(() {
+          return _SettingsCard(
+            children: [
+              _switchTile(context, isDark, scheme,
+                  icon: Icons.speed_rounded,
+                  title: '智能预加载',
+                  subtitle: '适合局域网环境，提前加载子文件夹',
+                  value: _aggressiveCacheEnabled.value,
+                  onChanged: (v) {
+                    SpUtil.putBool(AlistConstant.enableAggressiveCache, v);
+                    _aggressiveCacheEnabled.value = v;
+                    // 关闭智能预加载时同步关闭WiFi限制
+                    if (!v && _wifiOnlyPreloadEnabled.value) {
+                      SpUtil.putBool(AlistConstant.wifiOnlyPreload, false);
+                      _wifiOnlyPreloadEnabled.value = false;
+                    }
+                  }),
+              _switchTile(context, isDark, scheme,
+                  icon: Icons.wifi,
+                  title: '仅 WiFi 预加载',
+                  subtitle: _aggressiveCacheEnabled.value
+                      ? '仅在 WiFi 环境下预加载'
+                      : '开启智能预加载后生效',
+                  value: _wifiOnlyPreloadEnabled.value,
+                  enabled: _aggressiveCacheEnabled.value,
+                  onChanged: _aggressiveCacheEnabled.value
+                      ? (v) {
+                          SpUtil.putBool(AlistConstant.wifiOnlyPreload, v);
+                          _wifiOnlyPreloadEnabled.value = v;
+                        }
+                      : null),
+            ],
+          );
+        }),
+
+        // ===== 播放器配置 =====
+        _SectionHeader(title: '播放器配置', icon: Icons.play_circle_outline),
+        // 必须用 Obx 包裹，因为读取了 _enableMediaKitPlayer.value 和 _subtitleEnabled.value
+        Obx(() {
+          return _SettingsCard(
+            children: [
+              _switchTile(context, isDark, scheme,
+                  icon: Icons.play_circle_filled,
+                  title: '启用 MPV 播放器',
+                  subtitle: '使用 libmpv 解码器播放视频',
+                  value: _enableMediaKitPlayer.value,
+                  onChanged: (v) {
+                    SpUtil.putBool(AlistConstant.enableMediaKitPlayer, v);
+                    _enableMediaKitPlayer.value = v;
+                  }),
+              // _navTile(context, isDark, scheme,
+              //     icon: Icons.subtitles_rounded,
+              //     title: '外挂字幕',
+              //     trailingText: _subtitleEnabled.value ? '已开启' : '已关闭',
+              //     onTap: () => Get.toNamed(NamedRouter.subtitleSettings)),
+              _navTile(context, isDark, scheme,
+                  icon: Icons.tune_rounded,
+                  title: Intl.settingsScreen_item_videoPlayer.tr,
+                  onTap: () => Get.toNamed(NamedRouter.playerSettings)),
+              _navTile(context, isDark, scheme,
+                  icon: Icons.live_tv_rounded,
+                  title: '流媒体地址播放',
+                  onTap: () => _showUrlInputDialog(context)),
+              _navTile(context, isDark, scheme,
+                  icon: Icons.music_note_rounded,
+                  title: '音频播放器风格',
+                  trailingText:
+                      (SpUtil.getInt(AlistConstant.audioPlayerUiStyle, defValue: 0) ?? 0) == 0
+                          ? '经典黑胶'
+                          : '新风格',
+                  onTap: () => _showAudioStyleDialog(context)),
+            ],
+          );
+        }),
+
+        // ===== 界面与个性化 =====
+        _SectionHeader(title: '界面与个性化', icon: Icons.palette_outlined),
+        Obx(() {
+          return _SettingsCard(
+            children: [
+              _switchTile(context, isDark, scheme,
+                  icon: Icons.smart_button_rounded,
+                  title: '显示浮动按钮',
+                  subtitle: '文件列表右下角的浮动菜单按钮',
+                  value: _showFabButton.value,
+                  onChanged: (v) {
+                    SpUtil.putBool(AlistConstant.showFabButton, v);
+                    AlistConstant.showFabButtonRx.value = v;
+                    _showFabButton.value = v;
+                  }),
+              _switchTile(context, isDark, scheme,
+                  icon: Icons.shuffle_rounded,
+                  title: '随机排序按类型分组',
+                  subtitle: '随机排序时同类文件聚合在一起',
+                  value: _groupedRandomSort.value,
+                  onChanged: (v) {
+                    SpUtil.putBool(AlistConstant.groupedRandomSort, v);
+                    _groupedRandomSort.value = v;
+                  }),
+              _navTile(context, isDark, scheme,
+                  icon: Icons.palette_rounded,
+                  title: '主题颜色',
+                  onTap: () => _showThemeColorPicker(context)),
+              _navTile(context, isDark, scheme,
+                  icon: Icons.slideshow_rounded,
+                  title: '幻灯片间隔时间',
+                  trailingText:
+                      '${SpUtil.getInt(AlistConstant.slideshowIntervalSeconds, defValue: 3) ?? 3} 秒',
+                  onTap: () => _showSlideshowIntervalDialog(context)),
+              _navTile(context, isDark, scheme,
+                  icon: Icons.favorite_border,
+                  title: '不喜欢视频列表',
+                  onTap: () => Get.toNamed(NamedRouter.dislikedVideos)),
+              // TikTok 控件透明度
+              _navTile(context, isDark, scheme,
+                  icon: Icons.opacity,
+                  title: 'TikTok控件透明度',
+                  trailingText: '${(_tiktokUiOpacity * 100).round()}%',
+                  onTap: () => _showTiktokOpacityDialog(context)),
+            ],
+          );
+        }),
+
+        // ===== 过滤器与高级 =====
+        _SectionHeader(title: '过滤器与高级', icon: Icons.tune_outlined),
+        Obx(() {
+          return _SettingsCard(
+            children: [
+              _navTile(context, isDark, scheme,
+                  icon: Icons.filter_list_off_rounded,
+                  title: Intl.settingsScreen_item_extensionFilter.tr,
+                  onTap: () => _showExtensionFilterDialog(context)),
+              _navTile(context, isDark, scheme,
+                  icon: Icons.filter_list_rounded,
+                  title: '搜索过滤',
+                  onTap: () => Get.toNamed(NamedRouter.searchFilterSettings)),
+              _navTile(context, isDark, scheme,
+                  icon: Icons.lock_outline_rounded,
+                  title: '安全锁',
+                  onTap: () => Get.toNamed(NamedRouter.securityLockSettings)),
+              _navTile(context, isDark, scheme,
+                  icon: Icons.playlist_play_rounded,
+                  title: '随机播放数量',
+                  trailingText:
+                      '${SpUtil.getInt(AlistConstant.randomPlayCount, defValue: 10) ?? 10}',
+                  onTap: () => _showRandomPlayCountDialog(context)),
+              _switchTile(context, isDark, scheme,
+                  icon: Icons.picture_in_picture_alt_rounded,
+                  title: '自动画中画',
+                  subtitle: '按 Home 键时自动进入画中画',
+                  value: _autoPipEnabled.value,
+                  onChanged: (v) {
+                    SpUtil.putBool(AlistConstant.autoPipEnabled, v);
+                    _autoPipEnabled.value = v;
+                  }), 
+            ],
+          );
+        }),
+
+        // ===== 关于 =====
+        _SectionHeader(title: '关于', icon: Icons.info_outline),
+        _SettingsCard(
+          children: [
+            _navTile(context, isDark, scheme,
+                icon: Icons.privacy_tip_outlined,
+                title: Intl.settingsScreen_item_privacyPolicy.tr,
+                onTap: () {
+              String local =
+                  Get.locale?.toString().startsWith("zh_") == true ? "zh" : "en_US";
+              Get.toNamed(NamedRouter.web, arguments: {
+                "url":
+                    "https://${Global.configServerHost}/alist_h5/privacyPolicy?version=${packageInfo?.version ?? ""}&lang=$local",
+                "title": Intl.settingsScreen_item_privacyPolicy.tr
+              });
+            }),
+            _navTile(context, isDark, scheme,
+                icon: Icons.info_outline_rounded,
+                title: Intl.settingsScreen_item_about.tr,
+                onTap: () {
+              String local =
+                  Get.locale?.toString().startsWith("zh_") == true ? "zh" : "en_US";
+              Get.toNamed(NamedRouter.web, arguments: {
+                "url":
+                    "https://${Global.configServerHost}/alist_h5/declaration?version=${packageInfo?.version ?? ""}&lang=$local",
+                "title": Intl.screenName_about.tr
+              });
+            }),
+          ],
+        ),
+
+        // ===== 版本号 =====
         const SizedBox(height: 16),
         if (packageInfo != null)
           Center(
             child: Text(
               'v${packageInfo!.version}',
-              style: TextStyle(fontSize: 12, color: scheme.outlineVariant),
+              style: TextStyle(
+                  fontSize: 12,
+                  color: Theme.of(context).colorScheme.outlineVariant),
             ),
           ),
-        const SizedBox(height: 8),
+        const SizedBox(height: 24),
       ],
     );
   }
 
-  Widget _buildCardItem(SettingsMenu settingsMenu, BuildContext context, bool isDark) {
-    final scheme = Theme.of(context).colorScheme;
-    
-    if (settingsMenu.menuId == MenuId.aggressiveCache) {
-      return ListTile(
-        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-        leading: Container(
-          width: 44, height: 44,
-          decoration: BoxDecoration(
-            gradient: LinearGradient(colors: [scheme.primaryContainer.withOpacity(0.8), scheme.primaryContainer.withOpacity(0.5)], begin: Alignment.topLeft, end: Alignment.bottomRight),
-            borderRadius: BorderRadius.circular(12),
-            boxShadow: [BoxShadow(color: scheme.primary.withOpacity(0.1), blurRadius: 8, offset: const Offset(0, 2))],
-          ),
-          child: settingsMenu.iconData != null
-              ? Icon(settingsMenu.iconData, size: 22, color: isDark ? Colors.white.withOpacity(0.9) : scheme.primary)
-              : Padding(padding: const EdgeInsets.all(8), child: Image.asset(settingsMenu.icon, color: isDark ? Colors.white.withOpacity(0.9) : scheme.primary)),
-        ),
-        title: Text(settingsMenu.name, style: TextStyle(fontSize: 15, fontWeight: FontWeight.w500, letterSpacing: -0.2)),
-        subtitle: Text('适合局域网环境，提前加载子文件夹', style: TextStyle(fontSize: 11, color: scheme.onSurfaceVariant)),
-        trailing: Obx(() => Switch(value: _aggressiveCacheEnabled.value, onChanged: (value) { SpUtil.putBool(AlistConstant.enableAggressiveCache, value); _aggressiveCacheEnabled.value = value; })),
-      );
-    }
+  // ==================== 通用构建方法 ====================
 
-    if (settingsMenu.menuId == MenuId.wifiOnlyPreload) {
-      return Obx(() {
-        final aggressiveEnabled = _aggressiveCacheEnabled.value;
-        // 智能预加载未开启时，强制关闭WiFi预加载
-        if (!aggressiveEnabled && _wifiOnlyPreloadEnabled.value) {
-          _wifiOnlyPreloadEnabled.value = false;
-          SpUtil.putBool(AlistConstant.wifiOnlyPreload, false);
-        }
-        return ListTile(
-          contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-          leading: Container(width: 44, height: 44, decoration: BoxDecoration(gradient: LinearGradient(colors: [scheme.primaryContainer.withOpacity(0.8), scheme.primaryContainer.withOpacity(0.5)], begin: Alignment.topLeft, end: Alignment.bottomRight), borderRadius: BorderRadius.circular(12)), child: Icon(Icons.wifi, size: 22, color: isDark ? Colors.white.withOpacity(0.9) : scheme.primary)),
-          title: Text(settingsMenu.name, style: TextStyle(fontSize: 15, fontWeight: FontWeight.w500, letterSpacing: -0.2, color: aggressiveEnabled ? null : scheme.outline)),
-          subtitle: Text(aggressiveEnabled ? '仅在 WiFi 环境下预加载' : '开启智能预加载后生效', style: TextStyle(fontSize: 11, color: scheme.onSurfaceVariant)),
-          trailing: Switch(value: _wifiOnlyPreloadEnabled.value, onChanged: aggressiveEnabled ? (value) { SpUtil.putBool(AlistConstant.wifiOnlyPreload, value); _wifiOnlyPreloadEnabled.value = value; } : null),
-          enabled: aggressiveEnabled,
-        );
-      });
-    }
-
-    if (settingsMenu.menuId == MenuId.audioPlayerUi) {
-      return ListTile(
-        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-        leading: Container(width: 44, height: 44, decoration: BoxDecoration(gradient: LinearGradient(colors: [scheme.primaryContainer.withOpacity(0.8), scheme.primaryContainer.withOpacity(0.5)], begin: Alignment.topLeft, end: Alignment.bottomRight), borderRadius: BorderRadius.circular(12)), child: Icon(Icons.music_note_rounded, size: 22, color: isDark ? Colors.white.withOpacity(0.9) : scheme.primary)),
-        title: const Text('音频播放器风格', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w500, letterSpacing: -0.2)),
-        subtitle: Obx(() => Text(_audioPlayerUiStyle.value == 0 ? '经典黑胶风格' : '新风格', style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant))),
-        trailing: Obx(() => Switch(value: _audioPlayerUiStyle.value == 1, onChanged: (value) { final style = value ? 1 : 0; SpUtil.putInt(AlistConstant.audioPlayerUiStyle, style); _audioPlayerUiStyle.value = style; })),
-      );
-    }
-
-    if (settingsMenu.menuId == MenuId.groupedRandomSort) {
-      return ListTile(
-        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-        leading: Container(width: 44, height: 44, decoration: BoxDecoration(gradient: LinearGradient(colors: [scheme.primaryContainer.withOpacity(0.8), scheme.primaryContainer.withOpacity(0.5)], begin: Alignment.topLeft, end: Alignment.bottomRight), borderRadius: BorderRadius.circular(12)), child: Icon(Icons.shuffle_rounded, size: 22, color: isDark ? Colors.white.withOpacity(0.9) : scheme.primary)),
-        title: const Text('随机排序按类型分组', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w500, letterSpacing: -0.2)),
-        subtitle: Text('随机排序时同类文件聚合在一起', style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant)),
-        trailing: Obx(() => Switch(value: _groupedRandomSort.value, onChanged: (value) { SpUtil.putBool(AlistConstant.groupedRandomSort, value); _groupedRandomSort.value = value; })),
-      );
-    }
-
-    if (settingsMenu.menuId == MenuId.enableMediaKitPlayer) {
-      return ListTile(
-        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-        leading: Container(width: 44, height: 44, decoration: BoxDecoration(gradient: LinearGradient(colors: [scheme.primaryContainer.withOpacity(0.8), scheme.primaryContainer.withOpacity(0.5)], begin: Alignment.topLeft, end: Alignment.bottomRight), borderRadius: BorderRadius.circular(12)), child: Icon(Icons.play_circle_filled, size: 22, color: isDark ? Colors.white.withOpacity(0.9) : scheme.primary)),
-        title: const Text('启用 MPV 播放器', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w500, letterSpacing: -0.2)),
-        subtitle: Text('使用 libmpv 解码器播放视频', style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant)),
-        trailing: Obx(() => Switch(value: _enableMediaKitPlayer.value, onChanged: (value) { SpUtil.putBool(AlistConstant.enableMediaKitPlayer, value); _enableMediaKitPlayer.value = value; })),
-      );
-    }
-
-    if (settingsMenu.menuId == MenuId.showFabButton) {
-      return ListTile(
-        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-        leading: Container(width: 44, height: 44, decoration: BoxDecoration(gradient: LinearGradient(colors: [scheme.primaryContainer.withOpacity(0.8), scheme.primaryContainer.withOpacity(0.5)], begin: Alignment.topLeft, end: Alignment.bottomRight), borderRadius: BorderRadius.circular(12)), child: Icon(Icons.smart_button_rounded, size: 22, color: isDark ? Colors.white.withOpacity(0.9) : scheme.primary)),
-        title: const Text('显示浮动按钮', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w500, letterSpacing: -0.2)),
-        subtitle: Text('文件列表右下角的浮动菜单按钮', style: TextStyle(fontSize: 11, color: scheme.onSurfaceVariant)),
-        trailing: Obx(() => Switch(value: AlistConstant.showFabButtonRx.value, onChanged: (value) { SpUtil.putBool(AlistConstant.showFabButton, value); AlistConstant.showFabButtonRx.value = value; })),
-      );
-    }
-
-    if (settingsMenu.menuId == MenuId.autoPip) {
-      return ListTile(
-        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-        leading: Container(width: 44, height: 44, decoration: BoxDecoration(gradient: LinearGradient(colors: [scheme.primaryContainer.withOpacity(0.8), scheme.primaryContainer.withOpacity(0.5)], begin: Alignment.topLeft, end: Alignment.bottomRight), borderRadius: BorderRadius.circular(12)), child: Icon(Icons.picture_in_picture_alt_rounded, size: 22, color: isDark ? Colors.white.withOpacity(0.9) : scheme.primary)),
-        title: const Text('自动画中画', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w500, letterSpacing: -0.2)),
-        subtitle: Text('按 Home 键时自动进入画中画', style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant)),
-        trailing: Obx(() => Switch(value: _autoPipEnabled.value, onChanged: (value) { SpUtil.putBool(AlistConstant.autoPipEnabled, value); _autoPipEnabled.value = value; })),
-      );
-    }
-    
+  /// 导航型列表项（右箭头 >）
+  Widget _navTile(BuildContext context, bool isDark, ColorScheme scheme,
+      {required IconData icon,
+      required String title,
+      String? subtitle,
+      String? trailingText,
+      required VoidCallback onTap}) {
     return ListTile(
-      onTap: () => _handleMenuTap(settingsMenu, context),
-      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-      leading: Container(
-        width: 44, height: 44,
-        decoration: BoxDecoration(gradient: LinearGradient(colors: [scheme.primaryContainer.withOpacity(0.8), scheme.primaryContainer.withOpacity(0.5)], begin: Alignment.topLeft, end: Alignment.bottomRight), borderRadius: BorderRadius.circular(12), boxShadow: [BoxShadow(color: scheme.primary.withOpacity(0.1), blurRadius: 8, offset: const Offset(0, 2))]),
-        child: settingsMenu.iconData != null ? Icon(settingsMenu.iconData, size: 22, color: isDark ? Colors.white.withOpacity(0.9) : scheme.primary) : Padding(padding: const EdgeInsets.all(8), child: Image.asset(settingsMenu.icon, color: isDark ? Colors.white.withOpacity(0.9) : scheme.primary)),
+      onTap: onTap,
+      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+      leading: _leadingIcon(scheme, isDark, icon),
+      title: Text(title,
+          style: const TextStyle(
+              fontSize: 15, fontWeight: FontWeight.w500, letterSpacing: -0.2)),
+      subtitle: subtitle != null
+          ? Text(subtitle,
+              style: TextStyle(fontSize: 11, color: scheme.onSurfaceVariant))
+          : null,
+      trailing: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (trailingText != null)
+            Text(trailingText,
+                style: TextStyle(fontSize: 13, color: scheme.onSurfaceVariant)),
+          if (trailingText != null) const SizedBox(width: 4),
+          Icon(Icons.chevron_right_rounded,
+              color: scheme.outlineVariant, size: 22),
+        ],
       ),
-      title: Text(settingsMenu.name, style: TextStyle(fontSize: 15, fontWeight: FontWeight.w500, letterSpacing: -0.2)),
-      trailing: Icon(Icons.chevron_right_rounded, color: scheme.outlineVariant, size: 22),
     );
   }
 
-  void _handleMenuTap(SettingsMenu settingsMenu, BuildContext context) {
-    switch (settingsMenu.menuId) {
-      case MenuId.signIn:
-        _userController.logout();
-        Get.offNamed(NamedRouter.login);
-        break;
-      case MenuId.downloads:
-      case MenuId.account:
-      case MenuId.cacheManager:
-      case MenuId.playerSettings:
-      case MenuId.dislikedVideos:
-      case MenuId.searchFilter:
-      case MenuId.securityLock:
-        Get.toNamed(settingsMenu.route!);
-        break;
-      case MenuId.aggressiveCache:
-      case MenuId.audioPlayerUi:
-      case MenuId.groupedRandomSort:
-      case MenuId.enableMediaKitPlayer:
-      case MenuId.autoPip:
-        break;
-      case MenuId.wifiOnlyPreload:
-        break;
-      case MenuId.themeColor:
-        _showThemeColorPicker(context);
-        break;
-      case MenuId.randomPlayCount:
-        _showRandomPlayCountDialog(context);
-        break;
-      case MenuId.privacyPolicy:
-        String local = Get.locale?.toString().startsWith("zh_") == true ? "zh" : "en_US";
-        Get.toNamed(NamedRouter.web, arguments: {"url": "https://${Global.configServerHost}/alist_h5/privacyPolicy?version=${packageInfo?.version ?? ""}&lang=$local", "title": Intl.settingsScreen_item_privacyPolicy.tr});
-        break;
-      case MenuId.showFabButton:
-        break;
-      case MenuId.extensionFilter:
-        _showExtensionFilterDialog(context);
-        break;
-      case MenuId.iptvUrl:
-        _showUrlInputDialog(context);
-        break;
-      case MenuId.slideshowInterval:
-        _showSlideshowIntervalDialog(context);
-        break;
-      case MenuId.about:
-        String local = Get.locale?.toString().startsWith("zh_") == true ? "zh" : "en_US";
-        Get.toNamed(NamedRouter.web, arguments: {"url": "https://${Global.configServerHost}/alist_h5/declaration?version=${packageInfo?.version ?? ""}&lang=$local", "title": Intl.screenName_about.tr});
-        break;
-    }
+  /// 开关型列表项（Switch）
+  Widget _switchTile(BuildContext context, bool isDark, ColorScheme scheme,
+      {required IconData icon,
+      required String title,
+      String? subtitle,
+      required bool value,
+      bool enabled = true,
+      required ValueChanged<bool>? onChanged}) {
+    return ListTile(
+      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+      leading: _leadingIcon(scheme, isDark, icon),
+      title: Text(title,
+          style: TextStyle(
+              fontSize: 15,
+              fontWeight: FontWeight.w500,
+              letterSpacing: -0.2,
+              color: enabled ? null : scheme.outline)),
+      subtitle: subtitle != null
+          ? Text(subtitle,
+              style: TextStyle(fontSize: 11, color: scheme.onSurfaceVariant))
+          : null,
+      trailing: Switch(value: value, onChanged: onChanged),
+      enabled: enabled,
+    );
+  }
+
+  /// 统一的左侧图标容器
+  Widget _leadingIcon(ColorScheme scheme, bool isDark, IconData icon) {
+    return Container(
+      width: 40,
+      height: 40,
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+            colors: [
+              scheme.primaryContainer.withOpacity(0.8),
+              scheme.primaryContainer.withOpacity(0.5)
+            ],
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight),
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Icon(icon,
+          size: 20,
+          color: isDark ? Colors.white.withOpacity(0.9) : scheme.primary),
+    );
+  }
+
+  _initPackageInfo() async {
+    packageInfo = await PackageInfo.fromPlatform();
+  }
+
+  // ==================== 弹窗方法 ====================
+
+  void _showAudioStyleDialog(BuildContext context) {
+    final current =
+        SpUtil.getInt(AlistConstant.audioPlayerUiStyle, defValue: 0) ?? 0;
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Text('音频播放器风格'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            RadioListTile<int>(
+                title: const Text('经典黑胶风格'),
+                value: 0,
+                groupValue: current,
+                onChanged: (v) {
+                  if (v != null) {
+                    SpUtil.putInt(AlistConstant.audioPlayerUiStyle, v);
+                    Navigator.pop(ctx);
+                    setState(() {});
+                  }
+                }),
+            RadioListTile<int>(
+                title: const Text('新风格'),
+                value: 1,
+                groupValue: current,
+                onChanged: (v) {
+                  if (v != null) {
+                    SpUtil.putInt(AlistConstant.audioPlayerUiStyle, v);
+                    Navigator.pop(ctx);
+                    setState(() {});
+                  }
+                }),
+          ],
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('取消'))
+        ],
+      ),
+    );
   }
 
   void _showRandomPlayCountDialog(BuildContext context) {
-    final current = SpUtil.getInt(AlistConstant.randomPlayCount, defValue: 10) ?? 10;
+    final current =
+        SpUtil.getInt(AlistConstant.randomPlayCount, defValue: 10) ?? 10;
     final controller = TextEditingController(text: '$current');
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('随机播放数量'),
-        content: TextField(controller: controller, keyboardType: TextInputType.number, autofocus: true, decoration: const InputDecoration(hintText: '默认 10', border: OutlineInputBorder())),
+        content: TextField(
+            controller: controller,
+            keyboardType: TextInputType.number,
+            autofocus: true,
+            decoration: const InputDecoration(
+                hintText: '默认 10', border: OutlineInputBorder())),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('取消')),
-          FilledButton(onPressed: () { final v = int.tryParse(controller.text.trim()); if (v != null && v > 0) { SpUtil.putInt(AlistConstant.randomPlayCount, v); } Navigator.pop(ctx); }, child: const Text('确定')),
+          TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('取消')),
+          FilledButton(
+              onPressed: () {
+                final v = int.tryParse(controller.text.trim());
+                if (v != null && v > 0) {
+                  SpUtil.putInt(AlistConstant.randomPlayCount, v);
+                }
+                Navigator.pop(ctx);
+                setState(() {});
+              },
+              child: const Text('确定')),
         ],
       ),
     );
@@ -322,79 +491,290 @@ class _SettingsContainerState extends State<_SettingsContainer>
 
   void _showSlideshowIntervalDialog(BuildContext context) {
     final options = [1, 2, 3, 5, 8, 10, 15, 20, 30];
-    final current = SpUtil.getInt(AlistConstant.slideshowIntervalSeconds, defValue: 3) ?? 3;
-    showDialog(context: context, builder: (ctx) => AlertDialog(title: const Text('幻灯片间隔时间'), content: SingleChildScrollView(child: Column(mainAxisSize: MainAxisSize.min, children: [...options.map((s) => RadioListTile<int>(dense: true, title: Text('$s 秒'), value: s, groupValue: current, onChanged: (v) { if (v != null) { SpUtil.putInt(AlistConstant.slideshowIntervalSeconds, v); Navigator.pop(ctx); } }))])), actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('取消'))]));
+    final current =
+        SpUtil.getInt(AlistConstant.slideshowIntervalSeconds, defValue: 3) ?? 3;
+    showDialog(
+        context: context,
+        builder: (ctx) => AlertDialog(
+              title: const Text('幻灯片间隔时间'),
+              content: SingleChildScrollView(
+                  child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                    ...options.map((s) => RadioListTile<int>(
+                        dense: true,
+                        title: Text('$s 秒'),
+                        value: s,
+                        groupValue: current,
+                        onChanged: (v) {
+                          if (v != null) {
+                            SpUtil.putInt(
+                                AlistConstant.slideshowIntervalSeconds, v);
+                            Navigator.pop(ctx);
+                            setState(() {});
+                          }
+                        }))
+                  ])),
+              actions: [
+                TextButton(
+                    onPressed: () => Navigator.pop(ctx),
+                    child: const Text('取消'))
+              ],
+            ));
   }
 
   void _showUrlInputDialog(BuildContext context) {
     final controller = TextEditingController();
-    showDialog(context: context, builder: (ctx) => AlertDialog(title: const Text('输入流媒体地址'), content: TextField(controller: controller, autofocus: true, decoration: const InputDecoration(hintText: 'http(s):// 或 rtmp:// 地址'), keyboardType: TextInputType.url), actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('取消')), FilledButton(onPressed: () { final url = controller.text.trim(); Navigator.pop(ctx); if (url.isEmpty) return; Get.toNamed(NamedRouter.iptvPlayer, arguments: {'channel': IptvChannel(name: url, url: url), 'playlist': [IptvChannel(name: url, url: url)], 'index': 0}); }, child: const Text('播放'))]));
+    showDialog(
+        context: context,
+        builder: (ctx) => AlertDialog(
+              title: const Text('输入流媒体地址'),
+              content: TextField(
+                  controller: controller,
+                  autofocus: true,
+                  decoration:
+                      const InputDecoration(hintText: 'http(s):// 或 rtmp:// 地址'),
+                  keyboardType: TextInputType.url),
+              actions: [
+                TextButton(
+                    onPressed: () => Navigator.pop(ctx),
+                    child: const Text('取消')),
+                FilledButton(
+                    onPressed: () {
+                      final url = controller.text.trim();
+                      Navigator.pop(ctx);
+                      if (url.isEmpty) return;
+                      Get.toNamed(NamedRouter.iptvPlayer, arguments: {
+                        'channel': IptvChannel(name: url, url: url),
+                        'playlist': [IptvChannel(name: url, url: url)],
+                        'index': 0
+                      });
+                    },
+                    child: const Text('播放'))
+              ],
+            ));
   }
 
   void _showExtensionFilterDialog(BuildContext context) {
     final currentFilter = SpUtil.getString(AlistConstant.extensionFilter);
-    final defaultValue = currentFilter?.isNotEmpty == true ? currentFilter : 'nfo';
+    final defaultValue =
+        currentFilter?.isNotEmpty == true ? currentFilter : 'nfo';
     final controller = TextEditingController(text: defaultValue);
-    showDialog(context: context, builder: (ctx) => AlertDialog(title: Text(Intl.extensionFilterDialog_title.tr), content: TextField(controller: controller, autofocus: true, decoration: const InputDecoration(hintText: 'nfo, html, txt', border: OutlineInputBorder(), isDense: true, contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 12))), actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: Text(Intl.cancel.tr)), FilledButton(onPressed: () { final text = controller.text.trim(); SpUtil.putString(AlistConstant.extensionFilter, text); Navigator.pop(ctx); if (text.isNotEmpty) SmartDialog.showToast('已设置: $text'); else SmartDialog.showToast('已清除扩展名过滤'); }, child: Text(Intl.save.tr))]));
+    showDialog(
+        context: context,
+        builder: (ctx) => AlertDialog(
+              title: Text(Intl.extensionFilterDialog_title.tr),
+              content: TextField(
+                  controller: controller,
+                  autofocus: true,
+                  decoration: const InputDecoration(
+                      hintText: 'nfo, html, txt',
+                      border: OutlineInputBorder(),
+                      isDense: true,
+                      contentPadding:
+                          EdgeInsets.symmetric(horizontal: 12, vertical: 12))),
+              actions: [
+                TextButton(
+                    onPressed: () => Navigator.pop(ctx),
+                    child: Text(Intl.cancel.tr)),
+                FilledButton(
+                    onPressed: () {
+                      final text = controller.text.trim();
+                      SpUtil.putString(AlistConstant.extensionFilter, text);
+                      Navigator.pop(ctx);
+                      if (text.isNotEmpty)
+                        SmartDialog.showToast('已设置: $text');
+                      else
+                        SmartDialog.showToast('已清除扩展名过滤');
+                    },
+                    child: Text(Intl.save.tr))
+              ],
+            ));
+  }
+
+  void _showTiktokOpacityDialog(BuildContext context) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('TikTok控件透明度'),
+        content: StatefulBuilder(
+          builder: (ctx, setDialogState) {
+            return Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text('${(_tiktokUiOpacity * 100).round()}%',
+                    style: const TextStyle(fontSize: 32, fontWeight: FontWeight.bold)),
+                const SizedBox(height: 8),
+                Slider(
+                  value: _tiktokUiOpacity,
+                  min: 0.0,
+                  max: 1.0,
+                  divisions: 10,
+                  label: '${(_tiktokUiOpacity * 100).round()}%',
+                  onChanged: (v) {
+                    setDialogState(() => _tiktokUiOpacity = v);
+                    setState(() {});
+                  },
+                ),
+                const Text('100% = 完全不透明，0% = 完全透明',
+                    style: TextStyle(fontSize: 11, color: Colors.grey)),
+              ],
+            );
+          },
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () {
+              SpUtil.putDouble(AlistConstant.tiktokUiOpacity, _tiktokUiOpacity);
+              Navigator.pop(ctx);
+              setState(() {});
+            },
+            child: const Text('确定'),
+          ),
+        ],
+      ),
+    );
   }
 
   void _showThemeColorPicker(BuildContext context) {
-    const colors = [Color(0xFF0060A9), Color(0xFF006E1C), Color(0xFF9A4521), Color(0xFF7B1FA2), Color(0xFFC62828), Color(0xFF00695C), Color(0xFF1565C0), Color(0xFF4A148C), Color(0xFF880E4F), Color(0xFF37474F), Color(0xFF4E342E), Color(0xFF546E7A)];
-    showDialog(context: context, builder: (ctx) => AlertDialog(shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)), title: const Text("选择主题颜色", style: TextStyle(fontWeight: FontWeight.w600)), content: Obx(() { final currentColor = ThemeController.instance.seedColor.value.value; return Wrap(spacing: 16, runSpacing: 16, children: colors.map((color) { final isSelected = currentColor == color.value; return GestureDetector(onTap: () { ThemeController.instance.setColor(color); Navigator.pop(ctx); }, child: AnimatedContainer(duration: const Duration(milliseconds: 200), width: 52, height: 52, decoration: BoxDecoration(color: color, shape: BoxShape.circle, border: isSelected ? Border.all(color: Theme.of(context).brightness == Brightness.dark ? Colors.white : Colors.black, width: 3) : null, boxShadow: [BoxShadow(color: color.withOpacity(isSelected ? 0.5 : 0.3), blurRadius: isSelected ? 12 : 8, offset: const Offset(0, 4))]), child: isSelected ? Icon(Icons.check_rounded, color: Theme.of(context).brightness == Brightness.dark ? Colors.white : Colors.black, size: 24) : null)); }).toList()); }), actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("取消"))]));
-  }
-
-  _initPackageInfo() async {
-    packageInfo = await PackageInfo.fromPlatform();
-  }
-
-  List<SettingsMenu> _buildSettingsMenuItems(BuildContext context) {
-    final settingsMenus = [
-      SettingsMenu(menuId: MenuId.downloads, name: Intl.settingsScreen_item_downloads.tr, icon: Images.settingsScreenDownload, route: NamedRouter.downloadManager),
-      SettingsMenu(menuId: MenuId.cacheManager, name: Intl.settingsScreen_item_cacheManagement.tr, icon: Images.settingsScreenCacheManager, route: NamedRouter.cacheManager),
-      SettingsMenu(menuId: MenuId.aggressiveCache, name: "智能预加载", icon: Images.settingsScreenCacheManager, iconData: Icons.speed_rounded),
-      SettingsMenu(menuId: MenuId.wifiOnlyPreload, name: "仅WiFi预加载", icon: Images.settingsScreenCacheManager, iconData: Icons.wifi),
-      SettingsMenu(menuId: MenuId.audioPlayerUi, name: "音频播放器风格", icon: Images.settingsScreenPlayer, iconData: Icons.music_note_rounded),
-      SettingsMenu(menuId: MenuId.groupedRandomSort, name: "随机排序按类型分组", icon: Images.settingsScreenPlayer, iconData: Icons.shuffle_rounded),
-      SettingsMenu(menuId: MenuId.enableMediaKitPlayer, name: "启用 MPV 播放器", icon: Images.settingsScreenPlayer, iconData: Icons.play_circle_filled),
-      SettingsMenu(menuId: MenuId.showFabButton, name: "显示浮动按钮", icon: Images.settingsScreenPlayer, iconData: Icons.smart_button_rounded),
-      SettingsMenu(menuId: MenuId.extensionFilter, name: Intl.settingsScreen_item_extensionFilter.tr, icon: Images.settingsScreenPlayer, iconData: Icons.filter_list_off_rounded),
-      SettingsMenu(menuId: MenuId.themeColor, name: "主题颜色", icon: Images.settingsScreenPlayer, iconData: Icons.palette_rounded),
-      SettingsMenu(menuId: MenuId.playerSettings, name: Intl.settingsScreen_item_videoPlayer.tr, icon: Images.settingsScreenPlayer, route: NamedRouter.playerSettings),
-      SettingsMenu(menuId: MenuId.iptvUrl, name: '流媒体地址播放', icon: Images.settingsScreenPlayer, iconData: Icons.live_tv_rounded),
-      SettingsMenu(menuId: MenuId.slideshowInterval, name: '幻灯片间隔时间', icon: Images.settingsScreenPlayer, iconData: Icons.slideshow_rounded),
-      SettingsMenu(menuId: MenuId.autoPip, name: '自动画中画', icon: Images.settingsScreenPlayer, iconData: Icons.picture_in_picture_alt_rounded),
-      SettingsMenu(menuId: MenuId.randomPlayCount, name: '随机播放数量', icon: Images.settingsScreenPlayer, iconData: Icons.playlist_play_rounded),
-      SettingsMenu(menuId: MenuId.securityLock, name: '安全锁', icon: Images.settingsScreenPlayer, iconData: Icons.lock_outline_rounded, route: NamedRouter.securityLockSettings),
-      SettingsMenu(menuId: MenuId.searchFilter, name: '搜索过滤', icon: Images.settingsScreenPlayer, iconData: Icons.filter_list_rounded, route: NamedRouter.searchFilterSettings),
-      SettingsMenu(menuId: MenuId.dislikedVideos, name: '不喜欢视频列表', icon: Images.settingsScreenPlayer, iconData: Icons.thumb_down_alt_outlined, route: NamedRouter.dislikedVideos),
-      SettingsMenu(menuId: MenuId.privacyPolicy, name: Intl.settingsScreen_item_privacyPolicy.tr, icon: Images.settingsScreenPrivacyPolicy),
-      SettingsMenu(menuId: MenuId.about, name: Intl.settingsScreen_item_about.tr, icon: Images.settingsScreenAbout),
+    const colors = [
+      Color(0xFF0060A9), Color(0xFF006E1C), Color(0xFF9A4521),
+      Color(0xFF7B1FA2), Color(0xFFC62828), Color(0xFF00695C),
+      Color(0xFF1565C0), Color(0xFF4A148C), Color(0xFF880E4F),
+      Color(0xFF37474F), Color(0xFF4E342E), Color(0xFF546E7A)
     ];
-    if (_userCnt.value == 0 && SpUtil.getBool(AlistConstant.useDemoServer) == true) {
-      settingsMenus.insert(0, SettingsMenu(menuId: MenuId.signIn, name: Intl.settingsScreen_item_login.tr, icon: Images.settingsScreenAccount));
-    } else {
-      settingsMenus.insert(0, SettingsMenu(menuId: MenuId.account, name: Intl.settingsScreen_item_account.tr, icon: Images.settingsScreenAccount, route: NamedRouter.account));
-    }
-    return settingsMenus;
+    showDialog(
+        context: context,
+        builder: (ctx) => AlertDialog(
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(20)),
+              title: const Text("选择主题颜色",
+                  style: TextStyle(fontWeight: FontWeight.w600)),
+              content: Obx(() {
+                final currentColor =
+                    ThemeController.instance.seedColor.value.value;
+                return Wrap(
+                    spacing: 16,
+                    runSpacing: 16,
+                    children: colors.map((color) {
+                      final isSelected = currentColor == color.value;
+                      return GestureDetector(
+                          onTap: () {
+                            ThemeController.instance.setColor(color);
+                            Navigator.pop(ctx);
+                          },
+                          child: AnimatedContainer(
+                              duration: const Duration(milliseconds: 200),
+                              width: 52,
+                              height: 52,
+                              decoration: BoxDecoration(
+                                  color: color,
+                                  shape: BoxShape.circle,
+                                  border: isSelected
+                                      ? Border.all(
+                                          color:
+                                              Theme.of(context).brightness ==
+                                                      Brightness.dark
+                                                  ? Colors.white
+                                                  : Colors.black,
+                                          width: 3)
+                                      : null,
+                                  boxShadow: [
+                                    BoxShadow(
+                                        color: color.withOpacity(
+                                            isSelected ? 0.5 : 0.3),
+                                        blurRadius: isSelected ? 12 : 8,
+                                        offset: const Offset(0, 4))
+                                  ]),
+                              child: isSelected
+                                  ? Icon(Icons.check_rounded,
+                                      color: Theme.of(context).brightness ==
+                                              Brightness.dark
+                                          ? Colors.white
+                                          : Colors.black,
+                                      size: 24)
+                                  : null));
+                    }).toList());
+              }),
+              actions: [
+                TextButton(
+                    onPressed: () => Navigator.pop(ctx),
+                    child: const Text("取消"))
+              ],
+            ));
   }
 
   @override
   bool get wantKeepAlive => true;
 }
 
-class SettingsMenu {
-  final String name;
-  final String icon;
-  final IconData? iconData;
-  final String? route;
-  final MenuId menuId;
-  SettingsMenu({required this.name, required this.icon, this.iconData, this.route, required this.menuId});
+// ==================== 辅助组件 ====================
+
+/// 分组标题
+class _SectionHeader extends StatelessWidget {
+  final String title;
+  final IconData icon;
+
+  const _SectionHeader({required this.title, required this.icon});
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 16, 20, 6),
+      child: Row(
+        children: [
+          Icon(icon, size: 16, color: scheme.primary),
+          const SizedBox(width: 6),
+          Text(title,
+              style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                  color: scheme.primary,
+                  letterSpacing: 0.5)),
+        ],
+      ),
+    );
+  }
 }
 
-enum MenuId {
-  signIn, account, downloads, privacyPolicy, about,
-  cacheManager, aggressiveCache, wifiOnlyPreload, audioPlayerUi, groupedRandomSort,
-  enableMediaKitPlayer, extensionFilter, playerSettings,
-  themeColor, iptvUrl, slideshowInterval, autoPip,
-  randomPlayCount, dislikedVideos, searchFilter, securityLock, showFabButton,
+/// 统一卡片容器
+class _SettingsCard extends StatelessWidget {
+  final List<Widget> children;
+
+  const _SettingsCard({required this.children});
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    return Card(
+      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+      elevation: isDark ? 0 : 1,
+      shadowColor: scheme.shadow.withOpacity(0.08),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+      color: isDark
+          ? scheme.surfaceVariant.withOpacity(0.3)
+          : scheme.surface,
+      clipBehavior: Clip.antiAlias,
+      child: Column(
+        children: [
+          for (int i = 0; i < children.length; i++) ...[
+            children[i],
+            if (i < children.length - 1)
+              Divider(
+                  height: 1,
+                  indent: 68,
+                  endIndent: 16,
+                  color: scheme.outlineVariant.withOpacity(0.25)),
+          ]
+        ],
+      ),
+    );
+  }
 }

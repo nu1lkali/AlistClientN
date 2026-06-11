@@ -24,6 +24,9 @@ import 'favorite_screen.dart';
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
 
+  /// 用于从子路由（如 FileListWrapper）请求切换到指定 tab
+  static final pendingTabIndex = (-1).obs;
+
   @override
   State<HomeScreen> createState() => _HomeScreenState();
 }
@@ -39,6 +42,16 @@ class _HomeScreenState extends State<HomeScreen> {
       setState(() {
         _currentPage = _pageController.page?.round() ?? 0;
       });
+    });
+    // 监听来自子路由的 tab 切换请求
+    HomeScreen.pendingTabIndex.listen((index) {
+      if (index >= 0 && mounted) {
+        _pageController.jumpToPage(index);
+        setState(() {
+          _currentPage = index;
+        });
+        HomeScreen.pendingTabIndex.value = -1;
+      }
     });
   }
 

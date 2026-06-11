@@ -28,4 +28,6 @@ class NamedRouter {
   static const searchFilterSettings = "/searchFilterSettings";
   static const securityLockSettings = "/securityLockSettings";
   static const securityLock = "/securityLock";
+  static const subtitleSettings = "/subtitleSettings";
+  static const tiktokPlayer = "/tiktokPlayer";
 }

@@ -44,6 +44,7 @@ import com.shuyu.gsyvideoplayer.listener.GSYVideoProgressListener
 import com.shuyu.gsyvideoplayer.player.PlayerFactory
 import com.shuyu.gsyvideoplayer.utils.Debuger
 import com.shuyu.gsyvideoplayer.utils.OrientationUtils
+import com.shuyu.gsyvideoplayer.utils.GSYVideoType
 import com.shuyu.gsyvideoplayer.video.NormalGSYVideoPlayer
 import com.shuyu.gsyvideoplayer.video.base.GSYVideoView
 import tv.danmaku.ijk.media.exo2.Exo2PlayerManager
@@ -304,6 +305,9 @@ class PlayerActivity : AppCompatActivity(), GSYVideoProgressListener {
     }
 
     private fun initViews() {
+        // 默认使用标准自适应模式，实际模式会在 AlistClientVideoPlayer.onPrepared() 中根据视频分辨率动态调整
+        GSYVideoType.setShowType(GSYVideoType.SCREEN_TYPE_DEFAULT)
+        
         gsyVideoPlayer = findViewById(R.id.video_player)
         playerWrapper = PlayerWrapper(gsyVideoPlayer)
         playerWrapper.initViews()

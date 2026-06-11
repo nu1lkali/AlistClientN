@@ -21,6 +21,7 @@ import 'package:alist/util/file_type.dart';
 import 'package:alist/util/file_utils.dart';
 import 'package:alist/util/alist_plugin.dart';
 import 'package:alist/util/markdown_utils.dart';
+import 'package:alist/router.dart';
 import 'package:alist/util/named_router.dart';
 import 'package:alist/util/nature_sort.dart';
 import 'package:alist/util/string_utils.dart';

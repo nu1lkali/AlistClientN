@@ -21,6 +21,7 @@ import 'package:alist/util/file_type.dart';
 import 'package:alist/util/file_utils.dart';
 import 'package:alist/util/alist_plugin.dart';
 import 'package:alist/util/markdown_utils.dart';
+import 'package:alist/router.dart';
 import 'package:alist/util/named_router.dart';
 import 'package:alist/util/nature_sort.dart';
 import 'package:alist/util/search_history_manager.dart';
@@ -494,7 +495,7 @@ class FileSearchController extends GetxController {
             var fullPath = '$parent/$name';
             if (fullPath.startsWith('//')) fullPath = fullPath.substring(1);
             // 逐条规则检查：如果路径以规则路径开头，则过滤掉
-            for (final rule in filterRules) {
+            for (final rule in filterRules) { 
               if (!rule.filterInSearch) continue;
               var rulePath = rule.path.trim();
               if (!rulePath.startsWith('/')) rulePath = '/$rulePath';

@@ -9,6 +9,7 @@ import 'package:alist/database/table/file_password.dart';
 import 'package:alist/database/table/file_viewing_record.dart';
 import 'package:alist/entity/copy_move_req.dart';
 import 'package:alist/entity/file_list_resp_entity.dart';
+import 'package:alist/entity/tiktok_play_list_model.dart';
 import 'package:alist/entity/file_remove_req.dart';
 import 'package:alist/entity/file_rename_req.dart';
 import 'package:alist/entity/mkdir_req.dart';
@@ -24,6 +25,7 @@ import 'package:alist/screen/file_list/file_rename_dialog.dart';
 import 'package:alist/screen/file_list/mkdir_dialog.dart';
 import 'package:alist/screen/file_reader_screen.dart';
 import 'package:alist/screen/gallery_screen.dart';
+import 'package:alist/screen/home_screen.dart';
 import 'package:alist/screen/iptv/model/iptv_channel.dart';
 import 'package:alist/screen/markdown_reader_screen.dart';
 import 'package:alist/screen/office_reader_screen.dart';
@@ -52,6 +54,7 @@ import 'package:alist/util/video_player_util.dart';
 import 'package:alist/util/video_thumbnail_manager.dart';
 import 'package:alist/util/file_organize_task.dart';
 import 'package:alist/widget/alist_scaffold.dart';
+import 'package:alist/widget/bottom_navigation_bar.dart';
 import 'package:alist/widget/config_file_name_max_lines_dialog.dart';
 import 'package:alist/widget/file_details_dialog.dart';
 import 'package:alist/widget/file_list_item_view.dart';
@@ -2479,6 +2482,24 @@ class _FileListScreenState extends State<FileListScreen>
                         _randomPlayN(file.path);
                       },
                     ),
+                  if (file.isDir)
+                    ListTile(
+                      leading: const Icon(Icons.swipe_vertical_rounded),
+                      title: const Text("TikTok模式播放此文件夹视频"),
+                      onTap: () {
+                        Navigator.pop(context);
+                        _goTiktokPlayerFromFolder(file.path);
+                      },
+                    ),
+                  if (!file.isDir && file.type == FileType.video)
+                    ListTile(
+                      leading: const Icon(Icons.swipe_vertical_rounded),
+                      title: const Text("TikTok模式播放"),
+                      onTap: () {
+                        Navigator.pop(context);
+                        _goTiktokPlayerScreen(file);
+                      },
+                    ),
                   if (_hasWritePermission)
                     ListTile(
                       leading: const Icon(Icons.file_copy),
@@ -2898,6 +2919,96 @@ class _FileListScreenState extends State<FileListScreen>
     } else {
       VideoPlayerUtil.go(videos, index, _password);
     }
+  }
+
+  /// 入口一：目录级 TikTok 播放 —— 异步获取文件夹下所有视频，构建播放列表并跳转
+  void _goTiktokPlayerFromFolder(String folderPath) async {
+    SmartDialog.showLoading(msg: '加载视频列表…');
+    final body = {
+      "path": folderPath,
+      "password": _password ?? "",
+      "page": 1,
+      "per_page": 0,
+      "refresh": false,
+    };
+
+    final Completer<void> completer = Completer<void>();
+    List<TikTokVideoItem> tiktokVideos = [];
+
+    await DioUtils.instance.requestNetwork<FileListRespEntity>(
+      Method.post, "fs/list",
+      params: body,
+      onSuccess: (data) {
+        final files = data?.content ?? [];
+        for (var file in files) {
+          if (!file.isDir && FileUtils.getFileType(false, file.name) == FileType.video) {
+            final filePath = folderPath == '/' ? '/${file.name}' : '$folderPath/${file.name}';
+            DateTime? modifyTime = file.parseModifiedTime();
+            tiktokVideos.add(TikTokVideoItem.fromFileItem(
+              name: file.name,
+              path: filePath,
+              size: file.size,
+              sizeDesc: file.formatBytes(),
+              sign: file.sign,
+              provider: data?.provider ?? '',
+              thumb: file.thumb,
+              modifiedMilliseconds: modifyTime?.millisecondsSinceEpoch ?? -1,
+            ));
+          }
+        }
+        completer.complete();
+      },
+      onError: (code, msg) {
+        SmartDialog.showToast('获取文件列表失败: $msg');
+        completer.complete();
+      },
+    );
+
+    await completer.future;
+    SmartDialog.dismiss();
+
+    if (tiktokVideos.isEmpty) {
+      SmartDialog.showToast('该文件夹下没有视频文件');
+      return;
+    }
+
+    // 如果开启了随机排序，对TikTok播放列表也进行随机排序
+    if (_menuAnchorController.sortBy.value == MenuId.random) {
+      tiktokVideos.shuffle();
+    }
+
+    final playList = TikTokPlayListModel(videos: tiktokVideos, initialIndex: 0);
+    Get.toNamed(NamedRouter.tiktokPlayer, arguments: playList);
+  }
+
+  /// 入口二：单文件 TikTok 播放 —— 播放当前视频及同目录所有视频，初始定位到当前视频
+  void _goTiktokPlayerScreen(FileItemVO file) {
+    // 从当前文件列表中筛选出所有视频文件
+    final allVideos = _files.where((f) => !f.isDir && f.type == FileType.video).toList();
+
+    List<TikTokVideoItem> tiktokVideos = allVideos.map((e) =>
+        TikTokVideoItem.fromFileItem(
+          name: e.name,
+          path: e.path,
+          size: e.size,
+          sizeDesc: e.sizeDesc,
+          sign: e.sign,
+          provider: e.provider,
+          thumb: e.thumb,
+          modifiedMilliseconds: e.modifiedMilliseconds,
+        )).toList();
+
+    // 如果开启了随机排序，对TikTok播放列表也进行随机排序
+    if (_menuAnchorController.sortBy.value == MenuId.random) {
+      tiktokVideos.shuffle();
+    }
+
+    // 找到当前视频在列表中的位置
+    int initialIndex = tiktokVideos.indexWhere((v) => v.filePath == file.path);
+    if (initialIndex < 0) initialIndex = 0;
+
+    final playList = TikTokPlayListModel(videos: tiktokVideos, initialIndex: initialIndex);
+    Get.toNamed(NamedRouter.tiktokPlayer, arguments: playList);
   }
 
   void _previewMarkdown(FileItemVO file) async {
@@ -3341,7 +3452,36 @@ class FileListWrapper extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return FileListScreen(path: path, isRootStack: true);
+    return Scaffold(
+      body: FileListScreen(path: path, isRootStack: true),
+      bottomNavigationBar: AlistBottomNavigationBar(
+        items: <BottomNavigationBarItem>[
+          BottomNavigationBarItem(
+            icon: const Icon(Icons.folder_rounded),
+            label: Intl.screenName_home.tr,
+          ),
+          BottomNavigationBarItem(
+            icon: const Icon(Icons.timelapse_rounded),
+            label: Intl.screenName_recents.tr,
+          ),
+          BottomNavigationBarItem(
+            icon: const Icon(Icons.star_rounded),
+            label: Intl.screenName_favorite.tr,
+          ),
+          BottomNavigationBarItem(
+            icon: const Icon(Icons.settings_rounded),
+            label: Intl.screenName_settings.tr,
+          ),
+        ],
+        currentIndex: 0,
+        type: BottomNavigationBarType.fixed,
+        onTap: (int idx) {
+          // 先设置目标 tab，再返回 HomeScreen，HomeScreen 监听到后会自动跳转
+          HomeScreen.pendingTabIndex.value = idx;
+          Get.until((route) => route.isFirst);
+        },
+      ),
+    );
   }
 }
 

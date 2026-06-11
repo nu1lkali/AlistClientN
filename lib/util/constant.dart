@@ -53,6 +53,7 @@ class AlistConstant {
   static const String menuSortExpanded = 'menuSortExpanded'; // 排序方式展开
   static const String menuPlayExpanded = 'menuPlayExpanded'; // 播放选项展开
   static const String menuToolsExpanded = 'menuToolsExpanded'; // 整理工具展开
+  static const String tiktokUiOpacity = 'tiktokUiOpacity'; // TikTok播放器控件透明度
 
   // 安全锁相关
   static const String securityLockEnabled = 'securityLockEnabled'; // 是否开启安全锁

@@ -9,8 +9,10 @@ import 'package:alist/util/file_utils.dart';
 import 'package:alist/util/log_utils.dart';
 import 'package:alist/util/proxy.dart';
 import 'package:alist/util/string_utils.dart';
+import 'package:alist/util/subtitle/subtitle.dart';
 import 'package:alist/util/user_controller.dart';
 import 'package:alist/widget/player_skin.dart';
+import 'package:alist/widget/subtitle_view.dart';
 import 'package:dio/dio.dart';
 import 'package:floor/floor.dart';
 import 'package:flustars/flustars.dart';
@@ -41,6 +43,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
   VideoViewingRecord? _videoViewingRecord;
   int _currentPos = 0;
   int _duration = 0;
+  late final SubtitleController _subtitleController;
 
   @override
   void initState() {
@@ -55,10 +58,12 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
     });
     LogUtil.d("currentIndex=$index");
 
+    // 初始化字幕控制器
+    _subtitleController = SubtitleController();
+
     var currentVideo = videos[index];
     _videoTitle = currentVideo.name.substringBeforeLast(".");
     _playWithProxyUrl(currentVideo);
-    // SystemChrome.setSystemUIOverlayStyle(SystemUiOverlayStyle.light);
   }
 
   void _playWithProxyUrl(VideoItem file) async {
@@ -88,8 +93,20 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
       await _fAliplayer.setUrl(file.localPath!);
       if (!mounted) return;
       _findAndCacheViewingRecord(file);
+      // 尝试加载字幕（本地优先，远程备选）
+      _subtitleController.loadSubtitle(
+        videoPath: file.localPath,
+        remotePath: file.remotePath,
+        sign: file.sign,
+      );
       return;
     }
+
+    // 远程视频也尝试加载字幕
+    _subtitleController.loadSubtitle(
+      remotePath: file.remotePath,
+      sign: file.sign,
+    );
 
     var target = await FileUtils.makeFileLink(file.remotePath, file.sign);
     if (!mounted) return;
@@ -138,6 +155,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
           child: Stack(
             children: [
               aliPlayerView,
+              SubtitleView(controller: _subtitleController),
               AlistPlayerSkin(
                 player: _fAliplayer,
                 buildContext: context,
@@ -146,6 +164,8 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
                 playNextCallback:
                     index == videos.length - 1 ? null : () => _playNext(),
                 onPlayProgressChange: (currentPos, duration) {
+                  // 同步播放进度到字幕控制器
+                  _subtitleController.updatePosition(currentPos);
                   if (_currentPos >= duration - 1000) {
                     _deleteViewingRecord();
                   } else if (currentPos < 10 * 1000 ||
@@ -237,6 +257,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
 
   @override
   void dispose() {
+    _subtitleController.clear();
     _releasePlayer();
     _cancelToken.cancel();
     if (_duration > 0) {
@@ -257,6 +278,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
       _videoTitle = videos[index].name.substringBeforeLast(".");
       _fAliplayer.stop();
       _playWithProxyUrl(videos[index]);
+      // 切换视频时重新加载字幕（_playWithProxyUrl 内部已处理）
       setState(() {});
     }
   }
@@ -268,6 +290,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
       _videoTitle = videos[index].name.substringBeforeLast(".");
       _fAliplayer.stop();
       _playWithProxyUrl(videos[index]);
+      // 切换视频时重新加载字幕（_playWithProxyUrl 内部已处理）
       _fileViewingRecord(videos[index]);
       setState(() {});
     }

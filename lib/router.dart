@@ -23,10 +23,12 @@ import 'package:alist/screen/disliked_videos_screen.dart';
 import 'package:alist/screen/search_filter_settings_screen.dart';
 import 'package:alist/screen/security_lock_screen.dart';
 import 'package:alist/screen/security_lock_settings_screen.dart';
+import 'package:alist/screen/subtitle_settings_screen.dart';
 import 'package:alist/screen/splash_screen.dart';
 import 'package:alist/screen/txt_reader_screen.dart';
 import 'package:alist/screen/uploading_files_screen.dart';
 import 'package:alist/screen/video_player_screen.dart';
+import 'package:alist/screen/tiktok_player_page.dart';
 import 'package:alist/screen/web_screen.dart';
 import 'package:alist/util/constant.dart';
 import 'package:alist/util/named_router.dart';
@@ -105,6 +107,16 @@ class AlistRouter {
           onVerified: args?['onVerified'] as VoidCallback?,
         );
       },
+    ),
+    // 字幕设置
+    GetPage(
+      name: NamedRouter.subtitleSettings,
+      page: () => const SubtitleSettingsScreen(),
+    ),
+    // TikTok 短视频播放器
+    GetPage(
+      name: NamedRouter.tiktokPlayer,
+      page: () => const TikTokPlayerPage(),
     ),
   ];
 }

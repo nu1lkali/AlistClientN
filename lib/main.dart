@@ -8,6 +8,7 @@ import 'package:alist/util/image_utils.dart';
 import 'package:alist/util/log_utils.dart';
 import 'package:alist/util/named_router.dart';
 import 'package:alist/util/proxy.dart';
+import 'package:alist/util/subtitle/subtitle_settings.dart';
 import 'package:alist/screen/security_lock_screen.dart';
 import 'package:alist/util/security_lock_controller.dart';
 import 'package:alist/util/user_controller.dart';
@@ -241,6 +242,8 @@ class MyApp extends StatelessWidget {
     Get.put(UserController());
     Get.put(ProxyServer());
     Get.put(SecurityLockController());
+    // 初始化字幕设置（从持久化存储加载）
+    SubtitleSettings.instance.loadFromStorage();
 
     return MediaQuery(
       data: MediaQuery.of(context).copyWith(textScaleFactor: 1),

@@ -272,9 +272,45 @@ public class AlistClientVideoPlayer extends NormalGSYVideoPlayer {
         return super.onTouch(v, event);
     }
 
+    /**
+     * 修复4K等高分辨率视频在ExoPlayer中缩放过小的问题。
+     * GSYVideoType.SCREEN_TYPE_FULL 只影响GSY内部的SurfaceView尺寸计算，
+     * 但ExoPlayer的AspectRatioFrameLayout默认使用RESIZE_MODE_FIT，
+     * 对于宽高比差异较大的高分辨率视频会导致显示过小。
+     * 这里将其改为RESIZE_MODE_ZOOM，裁剪铺满屏幕。
+     */
+    private void fixExoPlayerAspectRatio() {
+        ViewGroup surfaceContainer = findViewById(R.id.surface_container);
+        if (surfaceContainer != null) {
+            findAndFixAspectRatioFrameLayout(surfaceContainer);
+        }
+    }
+
+    private void findAndFixAspectRatioFrameLayout(ViewGroup viewGroup) {
+        for (int i = 0; i < viewGroup.getChildCount(); i++) {
+            View child = viewGroup.getChildAt(i);
+            // 检查类名匹配（支持ExoPlayer2和Media3两个版本）
+            String className = child.getClass().getSimpleName();
+            if ("AspectRatioFrameLayout".equals(className)) {
+                try {
+                    java.lang.reflect.Method setResizeMode = child.getClass().getMethod("setResizeMode", int.class);
+                    setResizeMode.invoke(child, 3); // RESIZE_MODE_ZOOM = 3（裁剪铺满）
+                } catch (Exception e) {
+                    // 忽略反射调用失败
+                }
+                return;
+            }
+            if (child instanceof ViewGroup) {
+                findAndFixAspectRatioFrameLayout((ViewGroup) child);
+            }
+        }
+    }
+
     @Override
     public void onPrepared() {
         super.onPrepared();
+        // 修复ExoPlayer对4K等高分辨率视频的缩放问题
+        fixExoPlayerAspectRatio();
         isEnableSeek = getDuration() > 0L;
         // 画中画模式下，不显示前进/后退按钮
         if (isInPipMode) {

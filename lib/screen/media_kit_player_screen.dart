@@ -7,8 +7,10 @@ import 'package:alist/screen/disliked_videos_screen.dart';
 import 'package:alist/database/table/favorite.dart';
 import 'package:alist/screen/video_player_screen.dart';
 import 'package:alist/util/alist_plugin.dart';
+import 'package:alist/util/subtitle/subtitle.dart';
 import 'package:alist/util/user_controller.dart';
 import 'package:alist/util/video_player_util.dart';
+import 'package:alist/widget/subtitle_view.dart' as subtitle_widget;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_smart_dialog/flutter_smart_dialog.dart';
@@ -22,6 +24,7 @@ import 'package:volume_controller/volume_controller.dart';
 enum VerticalDragType { brightness, volume }
 enum PlayerSheet { none, playbackSpeed, more, playlist }
 enum PlayDirection { next, previous }
+enum VideoFillMode { contain, cover, fill }
 
 class MediaKitPlayerScreen extends StatefulWidget {
   const MediaKitPlayerScreen({super.key});
@@ -48,6 +51,9 @@ class _MediaKitPlayerScreenState extends State<MediaKitPlayerScreen>
   // 记录上次播放方向，用于播放失败时决定跳过方向
   PlayDirection _lastPlayDirection = PlayDirection.next;
   StreamSubscription? _posSub, _durSub, _playSub, _bufSub, _errSub, _playAtSub, _compSub;
+  // 播放重试计数器，同一个视频最多重试2次（共尝试3次）
+  int _retryCount = 0;
+  static const int _maxRetries = 2;
   bool _isDraggingSlider = false;
   bool _seeking = false;
   Duration _seekTarget = Duration.zero;
@@ -74,6 +80,8 @@ class _MediaKitPlayerScreenState extends State<MediaKitPlayerScreen>
   bool _shuffleEnabled = false;
   bool _areControlsLocked = false;
   bool _showBrightnessSlider = false, _showVolumeSlider = false, _swapVolumeAndBrightness = false;
+  VideoFillMode _videoFillMode = VideoFillMode.contain;
+  late final SubtitleController _subtitleController;
 
   void _hideSystemUI() {
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
@@ -104,8 +112,14 @@ class _MediaKitPlayerScreenState extends State<MediaKitPlayerScreen>
     _checkFavoriteStatus();
     _checkDislikedStatus();
     _hideSystemUI();
+    // 初始化字幕控制器
+    _subtitleController = SubtitleController();
     WidgetsBinding.instance.addObserver(this);
-    _posSub = _player.stream.position.listen((p) { if (mounted && !_isDraggingSlider) setState(() => _position = p); });
+    _posSub = _player.stream.position.listen((p) {
+      if (mounted && !_isDraggingSlider) setState(() => _position = p);
+      // 同步播放进度到字幕控制器
+      _subtitleController.updatePosition(p.inMilliseconds);
+    });
     _durSub = _player.stream.duration.listen((d) { if (mounted) setState(() => _duration = d); });
     _playSub = _player.stream.playing.listen((p) { if (mounted) setState(() => _playing = p); if (p) _startHideTimer(); });
     _bufSub = _player.stream.buffering.listen((b) { if (mounted) setState(() => _buffering = b); });
@@ -118,8 +132,26 @@ class _MediaKitPlayerScreenState extends State<MediaKitPlayerScreen>
     });
     _errSub = _player.stream.error.listen((error) {
       if (!mounted) return;
-      setState(() { _playbackError = true; _buffering = false; _isSwitching = false; });
-      _showToast("播放出错: $error，跳过此视频");
+      // 延迟1.5秒后检查播放状态，过滤掉非致命错误（如单帧解码失败、字幕警告等）
+      // mpv 的 error stream 会报告所有级别的错误，但很多错误并不影响正常播放
+      Future.delayed(const Duration(milliseconds: 1500), () {
+        if (!mounted) return;
+        // 如果播放器仍在正常播放（position 在推进），说明是非致命错误，忽略
+        if (_playing && _position.inMilliseconds > 0) return;
+        setState(() { _playbackError = true; _buffering = false; _isSwitching = false; });
+        // 先尝试重试当前视频（最多重试2次）
+        if (_retryCount < _maxRetries) {
+          _retryCount++;
+          final delaySec = _retryCount;
+          _showToast("播放出错，${delaySec}秒后重试($_retryCount/$_maxRetries)...");
+          Future.delayed(Duration(seconds: delaySec), () {
+            if (mounted) _playAt(_index);
+          });
+          return;
+        }
+        // 重试耗尽，跳过此视频
+        _retryCount = 0;
+        _showToast("播放失败，跳过此视频");
       // 根据上次播放方向决定跳过方向
       if (_lastPlayDirection == PlayDirection.next) {
         // 尝试播放下一个
@@ -151,7 +183,8 @@ class _MediaKitPlayerScreenState extends State<MediaKitPlayerScreen>
       // 没有其他视频可选，关闭播放器
       _showToast("没有可播放的视频了");
       Get.back();
-    });
+    }); // end Future.delayed
+    }); // end listen
     WidgetsBinding.instance.addPostFrameCallback((_) => _playAt(_index));
     _playlistAnimationController = AnimationController(duration: const Duration(milliseconds: 250), vsync: this);
     _playlistSlideAnimation = Tween<Offset>(begin: const Offset(1.0, 0.0), end: Offset.zero)
@@ -161,29 +194,64 @@ class _MediaKitPlayerScreenState extends State<MediaKitPlayerScreen>
   void _configureForOldFormats() {
     try {
       final native = _player.platform as dynamic;
-      // 提升对老容器格式的探测能力
-      native.setProperty('demuxer-lavf-analyzeduration', '10'); // 秒
-      native.setProperty('demuxer-lavf-probesize', '50000000'); // 50MB
-      // 启用软件解码兜底（老格式硬件解码器往往不支持）
-      native.setProperty('vd-lavc-dr', 'no');
-      // 降低线程数避免老视频解码出错
-      native.setProperty('vd-lavc-threads', '4');
-      // FFmpeg 解码器白名单中启用老编解码器
-      native.setProperty('vd-lavc-codec-whitelist', '');
-      // 对于损坏的帧，尽量容错而不是报错
-      native.setProperty('demuxer-lavf-o', 'seekable=1');
 
-      // ========== 音频解码容错配置 ==========
-      // 启用音频软件解码兜底，解决部分格式硬件音频解码器不支持的问题
+      // ==================== 硬件解码配置 ====================
+      // 对老格式/兼容性场景，全面回退到软解以获得最佳兼容性
+      // FFmpeg 软解兼容性远超各种硬解芯片，可避免 "could not open codec" 等问题
+      native.setProperty('hwdec', 'no');
+
+      // ==================== 视频解码容错配置 ====================
+      // 禁用 direct rendering 以提升兼容性
+      native.setProperty('vd-lavc-dr', 'no');
+      // 自动检测最佳线程数（0=auto）
+      native.setProperty('vd-lavc-threads', '0');
+      // 错误恢复策略：尽可能恢复而非报错
+      native.setProperty('vd-lavc-error-resilience', '1');
+
+      // ==================== 容器格式探测配置 ====================
+      // 增大分析时长到5秒，帮助识别老格式和复杂容器
+      native.setProperty('demuxer-lavf-analyzeduration', '5000000');
+      // 增大探测大小到50MB，覆盖更多格式场景
+      native.setProperty('demuxer-lavf-probesize', '50000000');
+      // 允许所有解封装器
+      native.setProperty('demuxer-lavf-format', '');
+      // 网络超时配置（使用 mpv 专有属性，确保兼容各底层桥接）
+      native.setProperty('network-timeout', '30');
+
+      // ==================== 缓存配置 ====================
+      // 内存缓存大小 (KB)
+      native.setProperty('cache', 'yes');
+      native.setProperty('cache-secs', '30');
+      native.setProperty('demuxer-max-bytes', '100MiB');
+      native.setProperty('demuxer-max-back-bytes', '50MiB');
+
+      // ==================== 音频解码容错配置 ====================
       native.setProperty('ad-lavc-dr', 'no');
-      // 允许所有音频解码器
       native.setProperty('ad-lavc-codec-whitelist', '');
-      // 对损坏的音频帧采用容错而非报错策略
-      native.setProperty('ad-lavc-err_detect', '0');
-      // 忽略音频解码错误，避免因个别损坏音频帧导致整个播放失败
+      native.setProperty('ad-lavc-err-detect', '0');
       native.setProperty('audio-file-auto', 'fuzzy');
-      // 音频输出容错
       native.setProperty('audio-pitch-correction', 'yes');
+      // 音频同步容错
+      native.setProperty('audio-stream-silence', 'yes');
+      native.setProperty('audio-wait-open', 'yes');
+
+      // ==================== 同步与渲染配置 ====================
+      // 视频同步模式
+      native.setProperty('video-sync', 'audio');
+      // 精确seek
+      native.setProperty('hr-seek', 'framedrop');
+      // 帧丢弃策略：丢帧保持同步
+      native.setProperty('framedrop', 'decoder');
+
+      // ==================== 字幕容错 ====================
+      native.setProperty('sub-auto', 'fuzzy');
+      native.setProperty('sub-codepage', 'auto');
+
+      // ==================== 高分辨率视频兼容性 ====================
+      // 确保视频不被错误的像素宽高比缩放（部分4K视频PAR异常导致画面过小）
+      native.setProperty('correct-pts', 'yes');
+      native.setProperty('video-aspect-override', '0');
+      native.setProperty('video-unscaled', 'no');
     } catch (_) {
       // 非 NativePlayer 平台静默忽略
     }
@@ -201,6 +269,7 @@ class _MediaKitPlayerScreenState extends State<MediaKitPlayerScreen>
   void dispose() {
     _hideTimer?.cancel(); _doubleTapResetTimer?.cancel(); _speedIndicatorTimer?.cancel();
     _posSub?.cancel(); _durSub?.cancel(); _playSub?.cancel(); _bufSub?.cancel(); _errSub?.cancel(); _playAtSub?.cancel(); _compSub?.cancel();
+    _subtitleController.clear();
     WidgetsBinding.instance.removeObserver(this);
     // Fully exit immersive mode
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
@@ -216,6 +285,8 @@ class _MediaKitPlayerScreenState extends State<MediaKitPlayerScreen>
 
   void _playAt(int index) {
     if (index < 0 || index >= _videos.length) return;
+    // 切换到新视频时重置重试计数
+    if (index != _index) _retryCount = 0;
     _playAtSub?.cancel(); _playAtSub = null;
     setState(() { _index = index; _isSwitching = true; _buffering = true; _playbackError = false; _playbackSpeed = 1.0; });
     Future.delayed(const Duration(milliseconds: 50), () {
@@ -225,6 +296,8 @@ class _MediaKitPlayerScreenState extends State<MediaKitPlayerScreen>
       try {
         final httpHeaders = _headers.isNotEmpty ? _headers : null;
         _player.open(Media(url, httpHeaders: httpHeaders), play: true);
+        // 尝试加载同名字幕文件（仅对本地文件生效）
+        _loadSubtitleForCurrentVideo();
       } catch (e) {
         if (mounted) { setState(() { _playbackError = true; _isSwitching = false; _buffering = false; }); _showToast("播放失败: $e"); }
         return;
@@ -264,6 +337,19 @@ class _MediaKitPlayerScreenState extends State<MediaKitPlayerScreen>
         }
       });
     });
+  }
+
+  /// 加载当前视频对应的字幕文件
+  /// 仅对本地文件（localPath）有效，远程流媒体暂不支持同名字幕匹配
+  void _loadSubtitleForCurrentVideo() {
+    final localPath = _videos[_index]["localPath"];
+    final remotePath = _videos[_index]["remotePath"];
+    final sign = _videos[_index]["sign"];
+    _subtitleController.loadSubtitle(
+      videoPath: localPath,
+      remotePath: remotePath,
+      sign: sign,
+    );
   }
 
   void _openSheet(PlayerSheet sheet) {
@@ -426,6 +512,33 @@ class _MediaKitPlayerScreenState extends State<MediaKitPlayerScreen>
   void _toggleShuffle() { setState(() { _shuffleEnabled = !_shuffleEnabled; _showToast(_shuffleEnabled ? '随机播放: 开' : '随机播放: 关'); }); }
   void _enterPictureInPicture() async { await AlistPlugin.enterPictureInPicture(); }
 
+  Widget _buildVideoView() {
+    switch (_videoFillMode) {
+      case VideoFillMode.cover:
+        return ClipRect(
+          child: FittedBox(
+            fit: BoxFit.cover,
+            child: SizedBox(
+              width: _controller.player.state.width?.toDouble() ?? 1920,
+              height: _controller.player.state.height?.toDouble() ?? 1080,
+              child: Video(controller: _controller, controls: NoVideoControls),
+            ),
+          ),
+        );
+      case VideoFillMode.fill:
+        return Video(controller: _controller, controls: NoVideoControls, fit: BoxFit.fill);
+      case VideoFillMode.contain:
+      default:
+        return Video(controller: _controller, controls: NoVideoControls, fit: BoxFit.contain);
+    }
+  }
+
+  void _toggleVideoFillMode() {
+    final nextIndex = (VideoFillMode.values.indexOf(_videoFillMode) + 1) % VideoFillMode.values.length;
+    setState(() => _videoFillMode = VideoFillMode.values[nextIndex]);
+    _showToast(['适应', '填充', '拉伸'][nextIndex]);
+  }
+
   // ========== Gestures ==========
   void _onVerticalDragStart(DragStartDetails d) { _verticalDragStartY = d.localPosition.dy; _verticalDragType = null; _verticalDragging = false; }
   void _onVerticalDragUpdate(DragUpdateDetails d) {
@@ -475,7 +588,8 @@ class _MediaKitPlayerScreenState extends State<MediaKitPlayerScreen>
         child: Scaffold(
           backgroundColor: Colors.transparent,
           body: Stack(children: <Widget>[
-            Positioned.fill(child: Video(controller: _controller, controls: NoVideoControls, fit: BoxFit.contain)),
+            Positioned.fill(child: _buildVideoView()),
+            subtitle_widget.SubtitleView(controller: _subtitleController),
             if (_isSwitching) Positioned.fill(child: Container(color: Colors.black)),
             if (_areControlsLocked) Positioned.fill(child: GestureDetector(onTap: () {}, behavior: HitTestBehavior.opaque, child: Container(color: Colors.transparent))),
             if (!_areControlsLocked) Positioned.fill(child: GestureDetector(
@@ -501,7 +615,6 @@ class _MediaKitPlayerScreenState extends State<MediaKitPlayerScreen>
             )),
             if (_isDoubleTapSeekingLeft) _DoubleTapSeekIndicator(isForward: false, seekAmount: _doubleTapSeekAmount.abs()),
             if (_isDoubleTapSeekingRight) _DoubleTapSeekIndicator(isForward: true, seekAmount: _doubleTapSeekAmount.abs()),
-            if (_buffering && !_seeking && !_playing) Center(child: Container(width: 48, height: 48, decoration: const BoxDecoration(shape: BoxShape.circle, color: Colors.black54), child: const Center(child: SizedBox(width: 24, height: 24, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))))),
             if (_seeking) Positioned(top: _screenHeight * 0.3, left: 0, right: 0, child: Center(child: Container(padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12), decoration: BoxDecoration(color: Colors.black.withOpacity(0.7), borderRadius: BorderRadius.circular(8)), child: Row(mainAxisSize: MainAxisSize.min, children: [Icon(_seekTarget < _seekStartPos ? Icons.fast_rewind_rounded : Icons.fast_forward_rounded, color: Colors.white, size: 28), const SizedBox(width: 8), Text(_fmt(_seekTarget), style: const TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.w600))])))),
             if (_showBrightnessSlider && _verticalDragging) Positioned(left: _swapVolumeAndBrightness ? null : 20, right: _swapVolumeAndBrightness ? 20 : null, top: 0, bottom: 0, child: Center(child: _VerticalSliderIndicator(icon: Icons.brightness_high_rounded, value: _systemBrightnessValue, color: Colors.amber))),
             if (_showVolumeSlider && _verticalDragging) Positioned(left: _swapVolumeAndBrightness ? 20 : null, right: _swapVolumeAndBrightness ? null : 20, top: 0, bottom: 0, child: Center(child: _VerticalSliderIndicator(icon: Icons.volume_up_rounded, value: _systemVolumeValue, color: Colors.blue))),
@@ -601,6 +714,14 @@ class _MediaKitPlayerScreenState extends State<MediaKitPlayerScreen>
 
   Widget _buildMoreSheet() => _SheetContainer(title: '更多', onClose: _closeSheetAndPanel, child: SingleChildScrollView(child: Column(mainAxisSize: MainAxisSize.min, children: [
     _moreTile(_isDisliked ? Icons.thumb_down : Icons.thumb_down_alt_outlined, _isDisliked ? '取消不喜欢' : '标记不喜欢', _isDisliked ? '已标记' : null, () { _closeSheetAndPanel(); _toggleDisliked(); }),
+    _moreTile(
+      _videoFillMode == VideoFillMode.contain ? Icons.fit_screen_outlined
+        : _videoFillMode == VideoFillMode.cover ? Icons.zoom_out_map_rounded
+        : Icons.aspect_ratio_rounded,
+      '画面模式',
+      ['适应', '填充', '拉伸'][VideoFillMode.values.indexOf(_videoFillMode)],
+      () { _closeSheetAndPanel(); _toggleVideoFillMode(); },
+    ),
     _moreTile(Icons.swap_horiz_rounded, '交换亮度/音量位置', _swapVolumeAndBrightness ? '已交换' : null, () { setState(() => _swapVolumeAndBrightness = !_swapVolumeAndBrightness); _showToast(_swapVolumeAndBrightness ? '已交换' : '已恢复默认'); _closeSheetAndPanel(); }),
     _moreTile(Icons.camera_alt_rounded, '截图', null, () { _closeSheetAndPanel(); _captureFrame(); }),
     _moreTile(Icons.info_outline_rounded, '视频信息', null, () { _closeSheetAndPanel(); _showVideoInfo(); }),
