@@ -946,7 +946,10 @@ class _FileListScreenState extends State<FileListScreen>
           final data = await completer.future;
           if (data == null) continue;
 
-          for (final file in data.content ?? <FileListRespContent>[]) {
+          final files = data.content ?? <FileListRespContent>[];
+          files.shuffle(random);
+
+          for (final file in files) {
             if (file.isDir) {
               final subPath = dirPath == '/' ? '/${file.name}' : '$dirPath/${file.name}';
               if (!seenDirs.contains(subPath)) nextLevel.add(subPath);
