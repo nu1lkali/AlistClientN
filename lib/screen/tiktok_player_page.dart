@@ -18,8 +18,10 @@ import 'package:flutter/services.dart';
 import 'package:flutter_smart_dialog/flutter_smart_dialog.dart';
 import 'package:get/get.dart';
 import 'package:image_gallery_saver/image_gallery_saver.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:video_player/video_player.dart';
 import 'package:wakelock/wakelock.dart';
+import 'dart:io';
 
 class TikTokPlayerPage extends StatefulWidget {
   const TikTokPlayerPage({super.key});
@@ -322,15 +324,36 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
   Future<void> _takeScreenshot() async {
     try {
       SmartDialog.showLoading(msg: '截图中...');
+      // 等待一帧确保视频画面已合成
+      await Future.delayed(const Duration(milliseconds: 100));
+      if (!mounted) { SmartDialog.dismiss(); return; }
       final boundary = _repaintKey.currentContext?.findRenderObject() as RenderRepaintBoundary?;
       if (boundary == null) { SmartDialog.dismiss(); SmartDialog.showToast('截图失败'); return; }
-      final ui.Image image = await boundary.toImage(pixelRatio: 2.0);
+
+      // 计算pixelRatio，使截图分辨率为视频原始分辨率
+      // 原理：pixelRatio = 视频原始宽度 / 控件逻辑宽度
+      // 例如：视频1280x720，控件逻辑宽度384 → pixelRatio≈3.33 → 截图1280x720
+      double pixelRatio = MediaQuery.of(context).devicePixelRatio;
+      final ctrl = _controllers[_currentIndex];
+      if (ctrl != null && ctrl.value.isInitialized) {
+        final videoSize = ctrl.value.size;
+        final widgetWidth = boundary.size.width;
+        if (widgetWidth > 0 && videoSize.width > 0) {
+          pixelRatio = videoSize.width / widgetWidth;
+        }
+      }
+
+      final ui.Image image = await boundary.toImage(pixelRatio: pixelRatio);
       final ByteData? byteData = await image.toByteData(format: ui.ImageByteFormat.png);
       if (byteData == null) { SmartDialog.dismiss(); SmartDialog.showToast('截图失败'); return; }
-      final result = await ImageGallerySaver.saveImage(
-        byteData.buffer.asUint8List(), quality: 100,
-        name: "alist_${DateTime.now().millisecondsSinceEpoch}",
-      );
+      final bytes = byteData.buffer.asUint8List();
+      if (bytes.length < 100) { SmartDialog.dismiss(); SmartDialog.showToast('截图失败'); return; }
+      // 先写临时文件，再用 saveFile 保存到相册（与原生播放器行为一致）
+      final tempDir = await getTemporaryDirectory();
+      final fileName = "alist_${DateTime.now().millisecondsSinceEpoch}.png";
+      final tempFile = File('${tempDir.path}/$fileName');
+      await tempFile.writeAsBytes(bytes);
+      final result = await ImageGallerySaver.saveFile(tempFile.path, name: fileName);
       SmartDialog.dismiss();
       SmartDialog.showToast(result['isSuccess'] == true ? '截图已保存到相册' : '保存失败');
     } catch (e) { SmartDialog.dismiss(); SmartDialog.showToast('截图失败: $e'); }
@@ -380,7 +403,7 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
     return Scaffold(
       backgroundColor: Colors.black,
       body: Stack(children: [
-        RepaintBoundary(key: _repaintKey, child: Stack(children: [_buildPageView(), _buildPauseIcon()])),
+        Stack(children: [_buildPageView(), _buildPauseIcon()]),
         _buildTopBar(),
         if (!_hideUI) _buildToolBar(),
         if (!_hideUI) _buildProgress(),
@@ -437,7 +460,10 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
         itemBuilder: (context, idx) {
           final c = _controllers[idx];
           if (c != null && c.value.isInitialized) {
-            return Center(child: AspectRatio(aspectRatio: c.value.aspectRatio, child: VideoPlayer(c)));
+            return Center(child: RepaintBoundary(
+              key: idx == _currentIndex ? _repaintKey : null,
+              child: AspectRatio(aspectRatio: c.value.aspectRatio, child: VideoPlayer(c)),
+            ));
           }
           return const Center(child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2));
         },
