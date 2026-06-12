@@ -23,4 +23,5 @@ enum FileType {
   apk,
   markdown,
   iptv, // m3u/m3u8 playlist
+  strm, // .strm stream file (contains a URL pointing to real video stream)
 }

@@ -48,6 +48,7 @@ import com.shuyu.gsyvideoplayer.utils.GSYVideoType
 import com.shuyu.gsyvideoplayer.video.NormalGSYVideoPlayer
 import com.shuyu.gsyvideoplayer.video.base.GSYVideoView
 import tv.danmaku.ijk.media.exo2.Exo2PlayerManager
+import java.net.URLDecoder
 import kotlin.math.abs
 
 class PlayerActivity : AppCompatActivity(), GSYVideoProgressListener {
@@ -296,6 +297,13 @@ class PlayerActivity : AppCompatActivity(), GSYVideoProgressListener {
 
         Debuger.printfError("player = $playerType")
         PlayerFactory.setPlayManager(Exo2PlayerManager::class.java)
+        
+        // 确保 headers 包含 User-Agent，绕过 115/阿里等网盘的防盗链检测
+        if (!headers.containsKey("User-Agent") && !headers.containsKey("user-agent")) {
+            headers = headers.toMutableMap().apply {
+                put("User-Agent", "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36")
+            }
+        }
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
@@ -559,8 +567,31 @@ class PlayerActivity : AppCompatActivity(), GSYVideoProgressListener {
         }
     }
 
+    /**
+     * 对已编码的网络 URL 进行解码，防止底层 ExoPlayer/OkHttp 二次编码
+     * 例如 %E4%B8%83 → 七，避免 % → %25 导致签名失效或 404
+     */
+    private fun decodeNetworkUrl(url: String): String {
+        if (!url.startsWith("http://") && !url.startsWith("https://")) return url
+        if (!url.contains("%")) return url
+        return try {
+            val decoded = URLDecoder.decode(url, "UTF-8")
+            // 解码后仍应是合法 URL，否则回退
+            if (decoded.startsWith("http://") || decoded.startsWith("https://")) {
+                Debuger.printfLog("URL decoded for ExoPlayer: $url -> $decoded")
+                decoded
+            } else {
+                url
+            }
+        } catch (e: Exception) {
+            Debuger.printfError("URL decode failed: ${e.message}")
+            url
+        }
+    }
+
     private fun startPlay(index: Int, video: VideoItem) {
-        val playUrl = if (video.localPath.isNullOrEmpty()) video.url else video.localPath
+        val rawUrl = if (video.localPath.isNullOrEmpty()) video.url else video.localPath
+        val playUrl = decodeNetworkUrl(rawUrl ?: "")
         gsyVideoPlayer.currentPlayer.setUp(playUrl, false, video.name.substringBeforeLast("."))
         FlutterMethods.findVideoRecordByPath(video.remotePath) { record ->
             Debuger.printfLog("seekOnStart=${record.videoCurrentPosition}")

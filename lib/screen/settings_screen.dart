@@ -273,7 +273,33 @@ class _SettingsContainerState extends State<_SettingsContainer>
                   onChanged: (v) {
                     SpUtil.putBool(AlistConstant.autoPipEnabled, v);
                     _autoPipEnabled.value = v;
-                  }), 
+                  }),
+            ],
+          );
+        }),
+
+        // ===== .strm URL 主机替换 =====
+        _SectionHeader(title: '.strm 主机替换', icon: Icons.swap_horiz_rounded),
+        Builder(builder: (_) {
+          final enabled = SpUtil.getBool(AlistConstant.strmHostOverrideEnabled, defValue: false) ?? false;
+          final from = SpUtil.getString(AlistConstant.strmHostOverrideFrom) ?? '';
+          final to = SpUtil.getString(AlistConstant.strmHostOverrideTo) ?? '';
+          return _SettingsCard(
+            children: [
+              _switchTile(context, isDark, scheme,
+                  icon: Icons.swap_horiz_rounded,
+                  title: '启用主机替换',
+                  subtitle: '将 .strm 中的内网地址替换为 FRP/代理地址',
+                  value: enabled,
+                  onChanged: (v) {
+                    SpUtil.putBool(AlistConstant.strmHostOverrideEnabled, v);
+                    setState(() {});
+                  }),
+              _navTile(context, isDark, scheme,
+                  icon: Icons.edit_rounded,
+                  title: '设置替换地址',
+                  trailingText: enabled && from.isNotEmpty ? '$from → $to' : '未配置',
+                  onTap: () => _showStrmHostOverrideDialog(context)),
             ],
           );
         }),
@@ -339,22 +365,32 @@ class _SettingsContainerState extends State<_SettingsContainer>
       contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
       leading: _leadingIcon(scheme, isDark, icon),
       title: Text(title,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
           style: const TextStyle(
               fontSize: 15, fontWeight: FontWeight.w500, letterSpacing: -0.2)),
       subtitle: subtitle != null
           ? Text(subtitle,
               style: TextStyle(fontSize: 11, color: scheme.onSurfaceVariant))
           : null,
-      trailing: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          if (trailingText != null)
-            Text(trailingText,
-                style: TextStyle(fontSize: 13, color: scheme.onSurfaceVariant)),
-          if (trailingText != null) const SizedBox(width: 4),
-          Icon(Icons.chevron_right_rounded,
-              color: scheme.outlineVariant, size: 22),
-        ],
+      trailing: ConstrainedBox(
+        constraints: BoxConstraints(
+            maxWidth: MediaQuery.of(context).size.width * 0.4),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (trailingText != null)
+              Flexible(
+                child: Text(trailingText,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(fontSize: 13, color: scheme.onSurfaceVariant)),
+              ),
+            if (trailingText != null) const SizedBox(width: 4),
+            Icon(Icons.chevron_right_rounded,
+                color: scheme.outlineVariant, size: 22),
+          ],
+        ),
       ),
     );
   }
@@ -371,6 +407,8 @@ class _SettingsContainerState extends State<_SettingsContainer>
       contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
       leading: _leadingIcon(scheme, isDark, icon),
       title: Text(title,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
           style: TextStyle(
               fontSize: 15,
               fontWeight: FontWeight.w500,
@@ -725,6 +763,86 @@ class _SettingsContainerState extends State<_SettingsContainer>
                     child: const Text("取消"))
               ],
             ));
+  }
+
+  /// 显示 .strm URL 主机替换配置对话框
+  void _showStrmHostOverrideDialog(BuildContext context) {
+    final fromController = TextEditingController(
+        text: SpUtil.getString(AlistConstant.strmHostOverrideFrom) ?? '');
+    final toController = TextEditingController(
+        text: SpUtil.getString(AlistConstant.strmHostOverrideTo) ?? '');
+
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Text('.strm URL 主机替换',
+            style: TextStyle(fontWeight: FontWeight.w600)),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text(
+              '将 .strm 文件中的内网服务器地址替换为 FRP/代理后的公网地址，'
+              '实现非局域网环境下的视频流播放。',
+              style: TextStyle(fontSize: 13, color: Colors.grey),
+            ),
+            const SizedBox(height: 16),
+            // 原始主机
+            TextField(
+              controller: fromController,
+              autofocus: true,
+              decoration: const InputDecoration(
+                labelText: '原始主机地址',
+                hintText: '192.168.2.124:8024',
+                hintStyle: TextStyle(fontSize: 13),
+                border: OutlineInputBorder(),
+                isDense: true,
+              ),
+            ),
+            const SizedBox(height: 12),
+            // 替换后主机
+            TextField(
+              controller: toController,
+              decoration: const InputDecoration(
+                labelText: '替换后主机地址',
+                hintText: 'frp.example.com:12345',
+                hintStyle: TextStyle(fontSize: 13),
+                border: OutlineInputBorder(),
+                isDense: true,
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () {
+              final from = fromController.text.trim();
+              final to = toController.text.trim();
+              if (from.isNotEmpty) {
+                SpUtil.putString(AlistConstant.strmHostOverrideFrom, from);
+              } else {
+                SpUtil.remove(AlistConstant.strmHostOverrideFrom);
+              }
+              if (to.isNotEmpty) {
+                SpUtil.putString(AlistConstant.strmHostOverrideTo, to);
+              } else {
+                SpUtil.remove(AlistConstant.strmHostOverrideTo);
+              }
+              Navigator.pop(ctx);
+              setState(() {});
+              if (from.isNotEmpty && to.isNotEmpty) {
+                SmartDialog.showToast('已设置: $from → $to');
+              }
+            },
+            child: const Text('保存'),
+          ),
+        ],
+      ),
+    );
   }
 
   @override

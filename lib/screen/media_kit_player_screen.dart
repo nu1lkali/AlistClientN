@@ -132,9 +132,12 @@ class _MediaKitPlayerScreenState extends State<MediaKitPlayerScreen>
     });
     _errSub = _player.stream.error.listen((error) {
       if (!mounted) return;
-      // 延迟1.5秒后检查播放状态，过滤掉非致命错误（如单帧解码失败、字幕警告等）
-      // mpv 的 error stream 会报告所有级别的错误，但很多错误并不影响正常播放
-      Future.delayed(const Duration(milliseconds: 1500), () {
+      // 网络流（如 .strm 解析出的远程 URL）需要更长的缓冲时间，
+      // 1.5 秒内可能还在握手/缓冲，误判为播放失败会触发无意义的重试
+      final currentUrl = _videos[_index]["url"] ?? "";
+      final isNetworkStream = currentUrl.startsWith("http://") || currentUrl.startsWith("https://");
+      final delayMs = isNetworkStream ? 8000 : 1500;
+      Future.delayed(Duration(milliseconds: delayMs), () {
         if (!mounted) return;
         // 如果播放器仍在正常播放（position 在推进），说明是非致命错误，忽略
         if (_playing && _position.inMilliseconds > 0) return;

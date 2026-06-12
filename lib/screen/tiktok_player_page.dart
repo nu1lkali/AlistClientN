@@ -47,6 +47,7 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
   static const int _preloadRange = 1;
   static const int _cacheRange = 1;
   bool _hideUI = false;
+  bool _manualHideUI = false; // 竖屏下用户手动点击隐藏按钮
 
   final AlistDatabaseController _database = Get.find();
   final UserController _userController = Get.find();
@@ -61,15 +62,6 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
 
   /// 控件透明度
   double _uiOpacity = 1.0;
-
-  /// 滑动调整进度状态（使用Listener原始指针事件，避免与PageView手势冲突）
-  bool _isSwiping = false;
-  double _swipeProgress = 0.0; // 拖动中的预览进度 0.0~1.0
-  double _swipeBaseProgress = 0.0; // 拖动开始时的进度
-  double _swipeStartX = 0.0;
-  double _swipeStartY = 0.0;
-  bool _swipeDecided = false; // 是否已确定是水平滑动
-  bool _swipeJustEnded = false; // 刚结束滑动，阻止Slider的onChangeEnd重复seek
 
   Timer? _landscapeHideTimer;
   static const _landscapeAutoHide = Duration(seconds: 2);
@@ -210,12 +202,7 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
         final c = _controllers[_currentIndex];
         if (c != null && c.value.isInitialized) {
           // 滑动调整进度期间，不从播放器读取位置，避免覆盖预览进度导致闪烁
-          if (!_isSwiping) {
             setState(() { _pos = c.value.position; _dur = c.value.duration; });
-          } else {
-            // 滑动期间只更新总时长
-            _dur = c.value.duration;
-          }
           if (c.value.duration > Duration.zero &&
               c.value.position >= c.value.duration - const Duration(milliseconds: 500) &&
               !_completing) {
@@ -369,6 +356,7 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
       } else {
         c.play(); _isPlaying = true;
         _hideUI = false;
+        _manualHideUI = false;
         _startLandscapeAutoHide();
       }
       if (mounted) setState(() {});
@@ -379,21 +367,24 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
     if (_isLandscape) {
       if (_hideUI) {
         _hideUI = false;
+        _manualHideUI = false;
         _startLandscapeAutoHide();
       } else {
         _hideUI = true;
+        _manualHideUI = true;
         _cancelLandscapeAutoHide();
       }
-      if (mounted) setState(() {});
     } else {
       if (_hideUI) {
-        setState(() => _hideUI = false);
+        // 竖屏手动隐藏后，单击屏幕不恢复显示
+        if (_manualHideUI) return;
+        setState(() { _hideUI = false; _manualHideUI = false; });
       } else {
         _togglePlayPause();
       }
     }
+    if (mounted) setState(() {});
   }
-
   void _toggleOrientation() {
     if (_isLandscape) {
       SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
@@ -437,99 +428,16 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
   // ═══════════════ Seek ═══════════════
   void _onSeekStart() { _progressTimer?.cancel(); }
   void _onSeekChanged(double val) {
-    // 水平滑动seek期间，屏蔽Slider自身的回调，避免与PointerMove冲突导致闪烁
-    if (_isSwiping) return;
     if (_dur.inMilliseconds <= 0) return;
     setState(() => _pos = Duration(milliseconds: (val * _dur.inMilliseconds).round()));
   }
   void _onSeekEnd(double val) {
-    // 水平滑动seek期间或刚结束时，屏蔽Slider自身的回调
-    if (_isSwiping || _swipeJustEnded) {
-      _swipeJustEnded = false;
-      return;
-    }
     try {
       if (_dur.inMilliseconds > 0) {
         _controllers[_currentIndex]?.seekTo(Duration(milliseconds: (val * _dur.inMilliseconds).round()));
       }
     } catch (_) {}
     _startTimer();
-  }
-
-  // ═══════════════ Swipe Seek (Listener方式，避免与PageView手势冲突) ═══════════════
-  double _swipeTrackWidth = 0; // Listener区域的实际宽度
-
-  void _onPointerDown(PointerDownEvent event) {
-    _progressTimer?.cancel();
-    _cancelLandscapeAutoHide();
-    _swipeJustEnded = false;
-    _swipeStartX = event.position.dx;
-    _swipeStartY = event.position.dy;
-    _swipeDecided = false;
-    final totalMs = _dur.inMilliseconds.toDouble();
-    if (totalMs <= 0) return;
-    _swipeBaseProgress = (_pos.inMilliseconds.toDouble() / totalMs).clamp(0.0, 1.0);
-    _swipeProgress = _swipeBaseProgress;
-  }
-
-  void _onPointerMove(PointerMoveEvent event) {
-    final totalMs = _dur.inMilliseconds.toDouble();
-    if (totalMs <= 0) return;
-
-    final dx = event.position.dx - _swipeStartX;
-    final dy = event.position.dy - _swipeStartY;
-
-    if (!_swipeDecided) {
-      // 判断是否为水平滑动：水平偏移大于垂直偏移且超过10px阈值
-      if (dx.abs() > 10 && dx.abs() > dy.abs()) {
-        _swipeDecided = true;
-        _isSwiping = true;
-        if (mounted) setState(() {});
-      } else if (dy.abs() > 10) {
-        // 垂直滑动，不处理，让PageView接管
-        _swipeDecided = true;
-        _isSwiping = false;
-        return;
-      } else {
-        return; // 还没达到阈值
-      }
-    }
-
-    if (!_isSwiping) return;
-
-    // 使用Listener区域的实际宽度，而非估算值
-    final trackWidth = _swipeTrackWidth;
-    if (trackWidth <= 0) return;
-
-    final progressDelta = event.delta.dx / trackWidth;
-    _swipeProgress = (_swipeProgress + progressDelta).clamp(0.0, 1.0);
-    if (mounted) setState(() {
-      _pos = Duration(milliseconds: (_swipeProgress * _dur.inMilliseconds).round());
-    });
-  }
-
-  void _onPointerUp(PointerUpEvent event) {
-    if (!_isSwiping) return;
-    _swipeJustEnded = true;
-    _isSwiping = false;
-    _swipeDecided = false;
-    try {
-      if (_dur.inMilliseconds > 0) {
-        final targetMs = (_swipeProgress * _dur.inMilliseconds).round();
-        _pos = Duration(milliseconds: targetMs);
-        _controllers[_currentIndex]?.seekTo(Duration(milliseconds: targetMs)).then((_) {
-          if (mounted) {
-            _startTimer();
-            _startLandscapeAutoHide();
-          }
-        });
-        if (mounted) setState(() {});
-        return;
-      }
-    } catch (_) {}
-    _startTimer();
-    _startLandscapeAutoHide();
-    if (mounted) setState(() {});
   }
 
   // ═══════════════ Screenshot ═══════════════
@@ -714,7 +622,12 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
             IconButton(
               icon: Icon(_hideUI ? Icons.visibility : Icons.visibility_off,
                   color: Colors.white, size: 22),
-              onPressed: () { setState(() => _hideUI = !_hideUI); },
+              onPressed: () {
+                setState(() {
+                  _hideUI = !_hideUI;
+                  _manualHideUI = _hideUI;
+                });
+              },
             )
           else
             const SizedBox(width: 48),
@@ -766,57 +679,22 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
     final bottomPad = MediaQuery.of(context).padding.bottom;
     final bottomOffset = _isLandscape ? (bottomPad + 16) : 80.0;
     return Positioned(left: 0, right: 0, bottom: bottomOffset,
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          // 拖动预览时间提示
-          if (_isSwiping)
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-              decoration: BoxDecoration(
-                color: Colors.black87,
-                borderRadius: BorderRadius.circular(4),
-              ),
-              child: Text(
-                '${_fmtDur(_pos)} / ${_fmtDur(_dur)}',
-                style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w600),
-              ),
-            ),
-          // 使用Listener监听原始指针事件，避免与PageView垂直滚动手势冲突
-          LayoutBuilder(
-            builder: (context, constraints) {
-              // 使用Listener区域的完整宽度作为滑动计算基准
-              // 用户手指在该区域内滑动，全宽 = 100%进度
-              _swipeTrackWidth = constraints.maxWidth;
-              return Listener(
-                behavior: HitTestBehavior.translucent,
-                onPointerDown: _onPointerDown,
-                onPointerMove: _onPointerMove,
-                onPointerUp: _onPointerUp,
-                child: Opacity(opacity: _uiOpacity, child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 12),
-                  child: Row(children: [
-                    Text(_fmtDur(_pos), style: const TextStyle(color: Colors.white70, fontSize: 11)),
-                    Expanded(child: IgnorePointer(
-                      ignoring: _isSwiping,
-                      child: SliderTheme(
-                        data: SliderTheme.of(context).copyWith(trackHeight: 2,
-                          thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 5),
-                          overlayShape: const RoundSliderOverlayShape(overlayRadius: 12),
-                          activeTrackColor: Colors.white, inactiveTrackColor: Colors.white24,
-                          thumbColor: Colors.white, overlayColor: Colors.white24),
-                        child: Slider(value: val, onChangeStart: (_) => _onSeekStart(),
-                          onChanged: _onSeekChanged, onChangeEnd: _onSeekEnd),
-                      ),
-                    )),
-                    Text(_fmtDur(_dur), style: const TextStyle(color: Colors.white70, fontSize: 11)),
-                  ]),
-                )),
-              );
-            },
-          ),
-        ],
-      ),
+      child: Opacity(opacity: _uiOpacity, child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12),
+        child: Row(children: [
+          Text(_fmtDur(_pos), style: const TextStyle(color: Colors.white70, fontSize: 11)),
+          Expanded(child: SliderTheme(
+            data: SliderTheme.of(context).copyWith(trackHeight: 2,
+              thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 5),
+              overlayShape: const RoundSliderOverlayShape(overlayRadius: 12),
+              activeTrackColor: Colors.white, inactiveTrackColor: Colors.white24,
+              thumbColor: Colors.white, overlayColor: Colors.white24),
+            child: Slider(value: val, onChangeStart: (_) => _onSeekStart(),
+              onChanged: _onSeekChanged, onChangeEnd: _onSeekEnd),
+          )),
+          Text(_fmtDur(_dur), style: const TextStyle(color: Colors.white70, fontSize: 11)),
+        ]),
+      )),
     );
   }
 

@@ -29,7 +29,7 @@ class TikTokVideoItem {
   String? videoUrl;
 
   /// 文件大小（字节）
-  final int? fileSize;
+  int? fileSize;
 
   /// 文件大小描述
   final String? sizeDesc;
@@ -96,7 +96,7 @@ class TikTokVideoItem {
 
   /// 格式化文件大小
   String get formattedSize {
-    if (fileSize == null) return '未知';
+    if (fileSize == null || fileSize! <= 0) return '未知';
     if (fileSize! < 1024) return '${fileSize}B';
     if (fileSize! < 1024 * 1024) return '${(fileSize! / 1024).toStringAsFixed(1)}KB';
     if (fileSize! < 1024 * 1024 * 1024) {

@@ -62,6 +62,8 @@ class FileUtils {
       case "lzh":
       case "cab":
         return FileType.compress;
+      case "strm":
+        return FileType.strm;
       case "eml":
         return FileType.email;
       case "swf":
@@ -248,6 +250,7 @@ class FileUtils {
         return Images.fileTypeZip;
       case FileType.markdown:
         return Images.fileTypeMd;
+      case FileType.strm:
       case FileType.iptv:
         return Images.fileTypeVideo; // 复用视频图标
       default:

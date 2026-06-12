@@ -99,8 +99,15 @@ class VideoPlayerUtil {
         videoParam["sign"] = element.sign;
         videoParam["provider"] = element.provider;
         videoParam["thumb"] = element.thumb;
-        videoParam["url"] =
-            await FileUtils.makeFileLink(element.remotePath, element.sign);
+        // 如果 remotePath 已是完整 URL（如 .strm 解析结果），直接使用；
+        // 否则通过 FileUtils.makeFileLink 生成 alist 直链
+        if (element.remotePath.startsWith('http://') ||
+            element.remotePath.startsWith('https://')) {
+          videoParam["url"] = element.remotePath;
+        } else {
+          videoParam["url"] =
+              await FileUtils.makeFileLink(element.remotePath, element.sign);
+        }
         videoParam["modifiedMilliseconds"] =
             element.modifiedMilliseconds?.toString();
         videoParam["size"] = element.size?.toString();

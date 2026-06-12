@@ -47,6 +47,7 @@ import 'package:alist/util/markdown_utils.dart';
 import 'package:alist/util/named_router.dart';
 import 'package:alist/util/nature_sort.dart';
 import 'package:alist/util/security_lock_controller.dart';
+import 'package:alist/util/strm_parser.dart';
 import 'package:alist/util/proxy.dart';
 import 'package:alist/util/string_utils.dart';
 import 'package:alist/util/user_controller.dart';
@@ -1990,6 +1991,9 @@ class _FileListScreenState extends State<FileListScreen>
       case FileType.iptv:
         _goIptvScreen(file);
         break;
+      case FileType.strm:
+        _goStrmPlayerScreen(context, file);
+        break;
       case FileType.word:
       case FileType.excel:
       case FileType.ppt:
@@ -2665,6 +2669,15 @@ class _FileListScreenState extends State<FileListScreen>
                         _goTiktokPlayerScreen(file);
                       },
                     ),
+                  if (!file.isDir && file.type == FileType.strm)
+                    ListTile(
+                      leading: const Icon(Icons.swipe_vertical_rounded),
+                      title: const Text("视界流播放"),
+                      onTap: () {
+                        Navigator.pop(context);
+                        _goTiktokPlayerFromStrm(file);
+                      },
+                    ),
                   if (_hasWritePermission)
                     ListTile(
                       leading: const Icon(Icons.file_copy),
@@ -3173,6 +3186,186 @@ class _FileListScreenState extends State<FileListScreen>
     if (initialIndex < 0) initialIndex = 0;
 
     final playList = TikTokPlayListModel(videos: tiktokVideos, initialIndex: initialIndex, recordHistory: true);
+    Get.toNamed(NamedRouter.tiktokPlayer, arguments: playList);
+  }
+
+  /// .strm 文件播放入口 —— 解析 strm 内容获得真实视频流 URL，使用专用播放器
+  void _goStrmPlayerScreen(BuildContext context, FileItemVO file) async {
+    SmartDialog.showLoading(msg: '正在解析 .strm 文件…');
+
+    final currentUrl = await StrmParser.parseStrmUrl(file.path, file.sign);
+
+    if (currentUrl == null) {
+      SmartDialog.dismiss();
+      SmartDialog.showToast('无法解析 .strm 文件中的视频流 URL');
+      return;
+    }
+
+    // 先收集同目录其他 .strm 文件（await 确保收集完成再导航）
+    final otherUrls = await _collectSiblingStrmFiles(file.path);
+    SmartDialog.dismiss();
+
+    // 构建 strm 专用播放器的播放列表
+    final List<TikTokVideoItem> strmVideos = [];
+
+    strmVideos.add(TikTokVideoItem(
+      id: file.path,
+      fileName: file.name.replaceAll('.strm', ''),
+      videoUrl: currentUrl,
+      filePath: file.path,
+      sign: '',
+      provider: file.provider,
+      thumb: file.thumb,
+      fileSize: null,
+      modifiedMilliseconds: file.modifiedMilliseconds,
+    ));
+
+    for (final entry in otherUrls) {
+      strmVideos.add(TikTokVideoItem(
+        id: entry['path'] ?? '',
+        fileName: entry['name'] ?? '',
+        videoUrl: entry['url'] ?? '',
+        filePath: entry['path'] ?? '',
+        sign: '',
+        provider: file.provider,
+        thumb: '',
+        fileSize: 0,
+        modifiedMilliseconds: file.modifiedMilliseconds,
+      ));
+    }
+
+    if (!context.mounted) return;
+    final playList = TikTokPlayListModel(
+      videos: strmVideos,
+      initialIndex: 0,
+      recordHistory: true,
+    );
+    Get.toNamed(NamedRouter.strmPlayer, arguments: playList);
+  }
+
+  /// 异步收集当前文件所在目录下的其他 .strm 文件，并返回解析后的 URL 列表
+  ///
+  /// 不影响主流程，在后台异步执行后将结果添加到播放列表中。
+  Future<List<Map<String, String>>> _collectSiblingStrmFiles(String currentFilePath) async {
+    try {
+      // 从当前文件路径提取所在目录
+      final lastSlash = currentFilePath.lastIndexOf('/');
+      final parentDir = lastSlash > 0 ? currentFilePath.substring(0, lastSlash) : '/';
+
+      // 查找同目录下的所有 .strm 文件（使用已有的文件列表或远程获取）
+      final strmFiles = _files.where((f) =>
+        !f.isDir &&
+        f.type == FileType.strm &&
+        f.path != currentFilePath
+      ).toList();
+
+      if (strmFiles.isEmpty) return [];
+
+      // 批量解析 .strm URL
+      final entries = strmFiles.map((f) => {
+        'path': f.path,
+        'sign': f.sign,
+      }).toList();
+
+      final results = await StrmParser.batchParseStrmUrls(entries);
+
+      // 构建带文件名的结果列表
+      final nameMap = <String, String>{};
+      for (final f in strmFiles) {
+        nameMap[f.path] = f.name.replaceAll('.strm', '');
+      }
+
+      return results.map((r) => {
+        'name': nameMap[r['path']] ?? r['path'] ?? '',
+        'url': r['url'] ?? '',
+        'path': r['path'] ?? '',
+      }).toList();
+    } catch (e) {
+      debugPrint('_collectSiblingStrmFiles error: $e');
+      return [];
+    }
+  }
+
+  /// 入口三：.strm 文件 -> 视界流播放
+  /// 解析当前 .strm 及同目录所有 .strm 文件，构建 TikTokPlayListModel 并跳转
+  void _goTiktokPlayerFromStrm(FileItemVO file) async {
+    SmartDialog.showLoading(msg: '正在解析 .strm 文件…');
+
+    // 收集当前文件及同目录其他 .strm 文件
+    final strmFiles = _files.where((f) =>
+      !f.isDir && f.type == FileType.strm
+    ).toList();
+
+    if (strmFiles.isEmpty) {
+      SmartDialog.dismiss();
+      SmartDialog.showToast('没有找到 .strm 文件');
+      return;
+    }
+
+    // 批量解析所有 .strm 文件
+    final entries = strmFiles.map((f) => {
+      'path': f.path,
+      'sign': f.sign,
+    }).toList();
+
+    final parsedResults = await StrmParser.batchParseStrmUrls(entries);
+    SmartDialog.dismiss();
+
+    if (parsedResults.isEmpty) {
+      SmartDialog.showToast('无法解析 .strm 文件中的视频流 URL');
+      return;
+    }
+
+    // 构建 TikTokVideoItem 列表
+    // 创建一个 path -> url 的映射
+    final urlMap = <String, String>{};
+    for (final result in parsedResults) {
+      urlMap[result['path'] ?? ''] = result['url'] ?? '';
+    }
+
+    final tiktokVideos = <TikTokVideoItem>[];
+    int initialIndex = 0;
+    for (int i = 0; i < strmFiles.length; i++) {
+      final f = strmFiles[i];
+      final resolvedUrl = urlMap[f.path];
+      if (resolvedUrl == null || resolvedUrl.isEmpty) continue;
+
+      // 构建一个 TikTokVideoItem，其中 filePath 指向原始 strm 路径（作为 id），
+      // videoUrl 存储解析后的真实流 URL。TikTok 播放器会根据 videoUrl 播放。
+      tiktokVideos.add(TikTokVideoItem(
+        id: f.path, // 用 strm 路径作为唯一标识
+        fileName: f.name.replaceAll('.strm', ''),
+        videoUrl: resolvedUrl, // 预填充解析后的真实 URL
+        fileSize: f.size,
+        sizeDesc: f.sizeDesc,
+        filePath: f.path,
+        sign: f.sign,
+        provider: f.provider,
+        thumb: f.thumb,
+        modifiedMilliseconds: f.modifiedMilliseconds,
+      ));
+
+      if (f.path == file.path) {
+        initialIndex = tiktokVideos.length - 1;
+      }
+    }
+
+    if (tiktokVideos.isEmpty) {
+      SmartDialog.showToast('没有可播放的 .strm 视频');
+      return;
+    }
+
+    // 如果开启了随机排序
+    if (_menuAnchorController.sortBy.value == MenuId.random) {
+      tiktokVideos.shuffle();
+      initialIndex = 0;
+    }
+
+    final playList = TikTokPlayListModel(
+      videos: tiktokVideos,
+      initialIndex: initialIndex,
+      recordHistory: true,
+    );
     Get.toNamed(NamedRouter.tiktokPlayer, arguments: playList);
   }
 
