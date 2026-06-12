@@ -462,29 +462,48 @@ class _SettingsContainerState extends State<_SettingsContainer>
     final controller = TextEditingController(text: '$current');
     showDialog(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('随机播放数量'),
-        content: TextField(
-            controller: controller,
-            keyboardType: TextInputType.number,
-            autofocus: true,
-            decoration: const InputDecoration(
-                hintText: '默认 10', border: OutlineInputBorder())),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(ctx),
-              child: const Text('取消')),
-          FilledButton(
-              onPressed: () {
-                final v = int.tryParse(controller.text.trim());
-                if (v != null && v > 0) {
-                  SpUtil.putInt(AlistConstant.randomPlayCount, v);
-                }
-                Navigator.pop(ctx);
-                setState(() {});
-              },
-              child: const Text('确定')),
-        ],
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) {
+          final v = int.tryParse(controller.text.trim());
+          final overLimit = v != null && v > 100;
+          return AlertDialog(
+            title: const Text('随机播放数量'),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(
+                    controller: controller,
+                    keyboardType: TextInputType.number,
+                    autofocus: true,
+                    onChanged: (_) => setDialogState(() {}),
+                    decoration: const InputDecoration(
+                        hintText: '默认 10，最大 100', border: OutlineInputBorder())),
+                if (overLimit)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 8),
+                    child: Text(
+                      '数量过大可能导致收集缓慢和内存占用过高',
+                      style: TextStyle(color: Colors.orange.shade700, fontSize: 12),
+                    ),
+                  ),
+              ],
+            ),
+            actions: [
+              TextButton(
+                  onPressed: () => Navigator.pop(ctx),
+                  child: const Text('取消')),
+              FilledButton(
+                  onPressed: () {
+                    if (v != null && v > 0) {
+                      SpUtil.putInt(AlistConstant.randomPlayCount, v.clamp(1, 100));
+                    }
+                    Navigator.pop(ctx);
+                    setState(() {});
+                  },
+                  child: const Text('确定')),
+            ],
+          );
+        },
       ),
     );
   }

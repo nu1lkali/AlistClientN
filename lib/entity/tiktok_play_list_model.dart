@@ -7,9 +7,13 @@ class TikTokPlayListModel {
   /// 初始播放位置索引
   final int initialIndex;
 
+  /// 是否记录观看历史（单文件入口为true，收集N个视频入口为false）
+  final bool recordHistory;
+
   TikTokPlayListModel({
     required this.videos,
     this.initialIndex = 0,
+    this.recordHistory = false,
   });
 }
 

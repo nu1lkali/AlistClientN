@@ -907,8 +907,9 @@ class _FileListScreenState extends State<FileListScreen>
 
   Future<List<FileItemVO>> _collectRandomVideos(String startPath, int n) async {
     final reservoir = <FileItemVO>[];
+    final reservoirPaths = <String>{};
     final seenDirs = <String>{};
-    final seenVideos = <String>{};
+    final skippedVideos = <String>{};
     final dirVideoCount = <String, int>{};
     final dirMaxVideos = <String, int>{};
     final random = Random();
@@ -921,18 +922,23 @@ class _FileListScreenState extends State<FileListScreen>
 
     var currentLevel = <String>[startPath];
 
-    try {
+    Future<void> explore({bool relaxed = false}) async {
       while (currentLevel.isNotEmpty && seenDirs.length < maxApiCalls && mounted) {
         currentLevel.shuffle(random);
         final nextLevel = <String>[];
 
         for (final dirPath in currentLevel) {
           if (seenDirs.length >= maxApiCalls) break;
-          if (reservoir.length >= poolSize && seenDirs.length >= minDirs) break;
+          if (!relaxed && reservoir.length >= poolSize && seenDirs.length >= minDirs) break;
+          if (relaxed && reservoir.length >= n) break;
           if (seenDirs.contains(dirPath)) continue;
           seenDirs.add(dirPath);
 
-          dirMaxVideos.putIfAbsent(dirPath, () => (n * 0.25).ceil().clamp(3, 15) + random.nextInt(5));
+          if (!relaxed) {
+            dirMaxVideos.putIfAbsent(dirPath, () => (n * 0.25).ceil().clamp(3, 15) + random.nextInt(5));
+          } else {
+            dirMaxVideos[dirPath] = n;
+          }
 
           final body = {"path": dirPath, "password": _password ?? "", "page": 1, "per_page": 500, "refresh": false};
           final completer = Completer<FileListRespEntity?>();
@@ -955,13 +961,17 @@ class _FileListScreenState extends State<FileListScreen>
               if (!seenDirs.contains(subPath)) nextLevel.add(subPath);
             } else if (FileUtils.getFileType(false, file.name) == FileType.video) {
               final filePath = dirPath == '/' ? '/${file.name}' : '$dirPath/${file.name}';
-              if (seenVideos.contains(filePath)) continue;
-              seenVideos.add(filePath);
+              if (reservoirPaths.contains(filePath)) continue;
 
-              final count = dirVideoCount[dirPath] ?? 0;
-              final limit = dirMaxVideos[dirPath]!;
-              if (count >= limit) continue;
-              dirVideoCount[dirPath] = count + 1;
+              if (!relaxed) {
+                final count = dirVideoCount[dirPath] ?? 0;
+                final limit = dirMaxVideos[dirPath]!;
+                if (count >= limit) {
+                  skippedVideos.add(filePath);
+                  continue;
+                }
+                dirVideoCount[dirPath] = count + 1;
+              }
 
               DateTime? modifyTime = file.parseModifiedTime();
               final video = FileItemVO(
@@ -978,10 +988,14 @@ class _FileListScreenState extends State<FileListScreen>
               totalSeen++;
               if (reservoir.length < poolSize) {
                 reservoir.add(video);
+                reservoirPaths.add(filePath);
               } else {
                 final j = random.nextInt(totalSeen);
                 if (j < poolSize) {
+                  final oldPath = reservoir[j].path;
+                  reservoirPaths.remove(oldPath);
                   reservoir[j] = video;
+                  reservoirPaths.add(filePath);
                 }
               }
             }
@@ -992,13 +1006,29 @@ class _FileListScreenState extends State<FileListScreen>
             lastProgress = totalSeen;
             lastDialogUpdate = now;
             SmartDialog.showLoading(
-              msg: '探索中… 目录 ${seenDirs.length} | 候选 $totalSeen',
+              msg: relaxed
+                  ? '补充收集… ${reservoir.length.clamp(0, n)}/$n'
+                  : '探索中… 目录 ${seenDirs.length} | 候选 $totalSeen',
               backDismiss: false, clickMaskDismiss: false,
             );
           }
         }
 
         currentLevel = nextLevel;
+      }
+    }
+
+    try {
+      await explore();
+
+      if (reservoir.length < n && skippedVideos.isNotEmpty) {
+        final retryDirs = skippedVideos.map((p) {
+          final idx = p.lastIndexOf('/');
+          return idx > 0 ? p.substring(0, idx) : '/';
+        }).toSet().toList();
+        for (final d in retryDirs) { seenDirs.remove(d); }
+        currentLevel = retryDirs;
+        await explore(relaxed: true);
       }
     } finally {
       SmartDialog.dismiss();
@@ -3142,7 +3172,7 @@ class _FileListScreenState extends State<FileListScreen>
     int initialIndex = tiktokVideos.indexWhere((v) => v.filePath == file.path);
     if (initialIndex < 0) initialIndex = 0;
 
-    final playList = TikTokPlayListModel(videos: tiktokVideos, initialIndex: initialIndex);
+    final playList = TikTokPlayListModel(videos: tiktokVideos, initialIndex: initialIndex, recordHistory: true);
     Get.toNamed(NamedRouter.tiktokPlayer, arguments: playList);
   }
 

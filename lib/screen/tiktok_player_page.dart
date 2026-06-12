@@ -6,6 +6,7 @@ import 'dart:ui' as ui;
 import 'package:alist/database/alist_database_controller.dart';
 import 'package:alist/database/table/disliked_video.dart';
 import 'package:alist/database/table/favorite.dart';
+import 'package:alist/database/table/file_viewing_record.dart';
 import 'package:alist/entity/tiktok_play_list_model.dart';
 import 'package:alist/util/constant.dart';
 import 'package:alist/util/file_utils.dart';
@@ -95,8 +96,8 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
     _pageController = PageController(initialPage: _currentIndex);
     _uiOpacity = SpUtil.getDouble(AlistConstant.tiktokUiOpacity, defValue: 1.0) ?? 1.0;
 
-    PaintingBinding.instance.imageCache.maximumSize = 50;
-    PaintingBinding.instance.imageCache.maximumSizeBytes = 80 * 1024 * 1024;
+    PaintingBinding.instance.imageCache.maximumSize = 20;
+    PaintingBinding.instance.imageCache.maximumSizeBytes = 30 * 1024 * 1024;
 
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
     SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
@@ -128,18 +129,30 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.paused) _safePause();
-    else if (state == AppLifecycleState.resumed) _safePlay();
+    if (state == AppLifecycleState.paused) {
+      _safePause();
+      _releaseNonCurrentControllers();
+      _clearImageCache();
+    } else if (state == AppLifecycleState.resumed) {
+      _preloadNearby(_currentIndex);
+      _safePlay();
+    }
   }
 
   @override
   void didHaveMemoryPressure() {
+    _safePause();
+    _releaseNonCurrentControllers();
     _clearImageCache();
+  }
+
+  void _releaseNonCurrentControllers() {
     final rm = _controllers.keys.where((k) => k != _currentIndex).toList();
     for (final k in rm) {
       try { _controllers[k]?.dispose(); } catch (_) {}
       _controllers.remove(k);
     }
+    _initializingIndexes.clear();
   }
 
   // ═══════════════ DB Batch Flush ═══════════════
@@ -234,10 +247,34 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
     } catch (_) {}
   }
 
+  Future<void> _recordViewing(int idx) async {
+    if (!_playList.recordHistory) return;
+    if (idx < 0 || idx >= _playList.videos.length) return;
+    try {
+      final v = _playList.videos[idx];
+      final u = _userController.user.value;
+      await _database.fileViewingRecordDao.deleteByPath(u.serverUrl, u.username, v.filePath);
+      await _database.fileViewingRecordDao.insertRecord(FileViewingRecord(
+        serverUrl: u.serverUrl,
+        userId: u.username,
+        remotePath: v.filePath,
+        name: v.fileName,
+        path: v.filePath,
+        size: v.fileSize ?? 0,
+        sign: v.sign,
+        thumb: v.thumb,
+        modified: v.modifiedMilliseconds ?? 0,
+        provider: v.provider ?? '',
+        createTime: DateTime.now().millisecondsSinceEpoch,
+      ));
+    } catch (_) {}
+  }
+
   // ═══════════════ Controller Management ═══════════════
   Future<void> _safeInitCtrl(int idx) async {
     if (idx < 0 || idx >= _playList.videos.length) return;
     if (_controllers.containsKey(idx) || _initializingIndexes.contains(idx)) return;
+    if (_initializingIndexes.length >= 2) return;
     _initializingIndexes.add(idx);
     VideoPlayerController? ctrl;
     try {
@@ -266,7 +303,7 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
       ctrl.setLooping(_loopSingle);
       _controllers[idx] = ctrl;
       _initializingIndexes.remove(idx);
-      if (idx == _currentIndex) { ctrl.play(); _isPlaying = true; }
+      if (idx == _currentIndex) { ctrl.play(); _isPlaying = true; _recordViewing(idx); }
       if (mounted) setState(() {});
     } catch (e) {
       log.Log.e('initCtrl[$idx]: $e');
@@ -627,6 +664,7 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
           if (c != null && c.value.isInitialized) {
             c.play();
             _isPlaying = true;
+            _recordViewing(idx);
             if (mounted) setState(() {});
           } else {
             _safeInitCtrl(idx);
