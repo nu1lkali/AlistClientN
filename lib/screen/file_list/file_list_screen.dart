@@ -1628,7 +1628,7 @@ class _FileListScreenState extends State<FileListScreen>
     switch (mode) {
       case FilterMode.videoOnly:
         result = _files
-            .where((f) => f.isDir || f.type == FileType.video)
+            .where((f) => f.isDir || f.type == FileType.video || f.type == FileType.strm)
             .toList();
         break;
       case FilterMode.imageOnly:

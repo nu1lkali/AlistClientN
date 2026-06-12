@@ -109,11 +109,11 @@ class _StrmPlayerScreenState extends State<StrmPlayerScreen>
       final saved = SpUtil.getDouble(AlistConstant.strmBrightness);
       if (saved != null && saved >= 0 && saved <= 1) {
         _currentBrightness = saved;
-        ScreenBrightness().setScreenBrightness(_currentBrightness);
       } else {
         _currentBrightness = await ScreenBrightness().current;
       }
-    } catch (_) { _currentBrightness = 0.5; }
+      ScreenBrightness().setScreenBrightness(_currentBrightness);
+    } catch (_) { _currentBrightness = 1.0; }
     try { _currentVolume = await VolumeController().getVolume(); } catch (_) { _currentVolume = 0.5; }
   }
 
@@ -1094,7 +1094,7 @@ class _StrmPlayerScreenState extends State<StrmPlayerScreen>
   Widget _buildFloatingSwitchButton() {
     return Positioned(
       left: 16,
-      bottom: MediaQuery.of(context).padding.bottom + 80,
+      bottom: MediaQuery.of(context).padding.bottom + 110,
       child: GestureDetector(
         onTap: () {}, // absorb taps so they don't pass through
         child: Container(
