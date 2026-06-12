@@ -92,6 +92,11 @@ class _StrmPlayerScreenState extends State<StrmPlayerScreen>
   late List<TikTokVideoItem> _sortedVideos;
   late Map<int, int> _videoIndexMap;
 
+  // Preload next video
+  VideoPlayerController? _preloadController;
+  int _preloadIdx = -1;
+  Timer? _preloadTimer;
+
   void _startLandscapeAutoHide() {
     _landscapeHideTimer?.cancel();
     if (_isLandscape && _isPlaying && !_hideUI) {
@@ -249,7 +254,10 @@ class _StrmPlayerScreenState extends State<StrmPlayerScreen>
   void dispose() {
     _progressTimer?.cancel();
     _landscapeHideTimer?.cancel();
+    _preloadTimer?.cancel();
     _controller?.dispose();
+    _preloadController?.dispose();
+    _preloadController = null;
     _playlistAnimController.dispose();
     WidgetsBinding.instance.removeObserver(this);
     SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
@@ -328,11 +336,54 @@ class _StrmPlayerScreenState extends State<StrmPlayerScreen>
           if (mounted) setState(() {});
         }
       });
+
+      // Schedule preload of next video after 2 seconds
+      _schedulePreload(idx);
     } catch (e) {
       log.Log.e('StrmPlayer initCtrl[$idx]: $e');
       _isInitializing = false;
       if (mounted) setState(() {});
     }
+  }
+
+  void _schedulePreload(int currentIdx) {
+    _preloadTimer?.cancel();
+    _disposePreload();
+    final nextIdx = _loopSingle ? currentIdx : currentIdx + 1;
+    if (nextIdx < 0 || nextIdx >= _playList.videos.length) return;
+    if (_loopSingle && nextIdx == currentIdx) return;
+    _preloadTimer = Timer(const Duration(seconds: 2), () {
+      _preloadNext(nextIdx);
+    });
+  }
+
+  Future<void> _preloadNext(int idx) async {
+    if (idx < 0 || idx >= _playList.videos.length) return;
+    try {
+      final v = _playList.videos[idx];
+      final url = v.videoUrl;
+      if (url == null || url.isEmpty) return;
+
+      final ctrl = VideoPlayerController.networkUrl(
+        Uri.parse(url),
+        httpHeaders: v.provider == 'BaiduNetdisk'
+            ? {'User-Agent': 'pan.baidu.com'}
+            : {},
+      );
+      await ctrl.initialize();
+      if (!mounted) {
+        ctrl.dispose();
+        return;
+      }
+      _preloadController = ctrl;
+      _preloadIdx = idx;
+    } catch (_) {}
+  }
+
+  void _disposePreload() {
+    _preloadController?.dispose();
+    _preloadController = null;
+    _preloadIdx = -1;
   }
 
   void _safePlay() {
@@ -499,13 +550,35 @@ class _StrmPlayerScreenState extends State<StrmPlayerScreen>
   Future<void> _playAt(int idx) async {
     if (idx < 0 || idx >= _playList.videos.length) return;
     _progressTimer?.cancel();
+    _preloadTimer?.cancel();
     _currentIndex = idx;
     _pos = Duration.zero;
     _dur = Duration.zero;
     _isPlaying = false;
     if (mounted) setState(() {});
-    await _initController(idx);
-    _loadStates(idx);
+
+    if (_preloadIdx == idx && _preloadController != null) {
+      final ctrl = _preloadController!;
+      _preloadController = null;
+      _preloadIdx = -1;
+
+      _controller?.dispose();
+      _controller = ctrl;
+      _isInitializing = false;
+
+      ctrl.setLooping(_loopSingle);
+      ctrl.play();
+      _isPlaying = true;
+      _recordViewing(idx);
+      _startTimer();
+      _loadStates(idx);
+      if (mounted) setState(() {});
+      _schedulePreload(idx);
+    } else {
+      _disposePreload();
+      await _initController(idx);
+      _loadStates(idx);
+    }
   }
 
   void _togglePlayPause() {
@@ -874,7 +947,9 @@ class _StrmPlayerScreenState extends State<StrmPlayerScreen>
         child: SafeArea(
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-            child: Row(children: [
+            child: Opacity(
+              opacity: _uiOpacity,
+              child: Row(children: [
               IconButton(
                   icon: const Icon(Icons.arrow_back_ios_rounded,
                       color: Colors.white, size: 24),
@@ -937,6 +1012,7 @@ class _StrmPlayerScreenState extends State<StrmPlayerScreen>
               else
                 const SizedBox(width: 48),
             ]),
+            ),
           ),
         ));
   }
@@ -1107,6 +1183,7 @@ class _StrmPlayerScreenState extends State<StrmPlayerScreen>
 
   // ═══════════════ Floating Switch Button ═══════════════
   Widget _buildFloatingSwitchButton() {
+    final sortedIdx = _getCurrentSortedIndex();
     return Positioned(
       left: 16,
       bottom: MediaQuery.of(context).padding.bottom + 110,
@@ -1126,8 +1203,13 @@ class _StrmPlayerScreenState extends State<StrmPlayerScreen>
               mainAxisAlignment: MainAxisAlignment.spaceEvenly,
               children: [
                 GestureDetector(
-                  onTap: _currentIndex > 0
-                      ? () => _playAt(_currentIndex - 1)
+                  onTap: sortedIdx > 0
+                      ? () {
+                          final prev = _sortedVideos[sortedIdx - 1];
+                          final origIdx = _playList.videos.indexWhere(
+                              (v) => v.filePath == prev.filePath);
+                          if (origIdx >= 0) _playAt(origIdx);
+                        }
                       : null,
                   child: Container(
                     width: 36,
@@ -1137,22 +1219,27 @@ class _StrmPlayerScreenState extends State<StrmPlayerScreen>
                       color: Colors.white.withOpacity(0.1),
                     ),
                     child: Icon(Icons.skip_previous_rounded,
-                        color: _currentIndex > 0
+                        color: sortedIdx > 0
                             ? Colors.white
                             : Colors.white38,
                         size: 20),
                   ),
                 ),
                 Text(
-                  '${_currentIndex + 1}/${_playList.videos.length}',
+                  '${sortedIdx + 1}/${_sortedVideos.length}',
                   style: const TextStyle(
                       color: Colors.white70,
                       fontSize: 12,
                       fontWeight: FontWeight.w500),
                 ),
                 GestureDetector(
-                  onTap: _currentIndex < _playList.videos.length - 1
-                      ? () => _playAt(_currentIndex + 1)
+                  onTap: sortedIdx < _sortedVideos.length - 1
+                      ? () {
+                          final next = _sortedVideos[sortedIdx + 1];
+                          final origIdx = _playList.videos.indexWhere(
+                              (v) => v.filePath == next.filePath);
+                          if (origIdx >= 0) _playAt(origIdx);
+                        }
                       : null,
                   child: Container(
                     width: 36,
@@ -1163,7 +1250,7 @@ class _StrmPlayerScreenState extends State<StrmPlayerScreen>
                     ),
                     child: Icon(Icons.skip_next_rounded,
                         color:
-                            _currentIndex < _playList.videos.length - 1
+                            sortedIdx < _sortedVideos.length - 1
                                 ? Colors.white
                                 : Colors.white38,
                         size: 20),
@@ -1367,7 +1454,14 @@ class _StrmPlayerScreenState extends State<StrmPlayerScreen>
                             label: '随机',
                             onPressed: () {
                               setState(() {
+                                final current = _playList.videos[_currentIndex];
                                 _sortedVideos.shuffle();
+                                final curIdx = _sortedVideos.indexWhere(
+                                    (v) => v.filePath == current.filePath);
+                                if (curIdx > 0) {
+                                  _sortedVideos.removeAt(curIdx);
+                                  _sortedVideos.insert(0, current);
+                                }
                                 _updateVideoIndexMap();
                               });
                               SmartDialog.showToast('已打乱顺序');
