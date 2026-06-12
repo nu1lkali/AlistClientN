@@ -543,8 +543,19 @@ class _MediaKitPlayerScreenState extends State<MediaKitPlayerScreen>
   }
 
   // ========== Gestures ==========
-  void _onVerticalDragStart(DragStartDetails d) { _verticalDragStartY = d.localPosition.dy; _verticalDragType = null; _verticalDragging = false; }
+  static const _systemGestureBottomMargin = 40.0;
+  bool _ignoreCurrentGesture = false;
+
+  void _onVerticalDragStart(DragStartDetails d) {
+    final bottomInset = MediaQuery.of(context).viewPadding.bottom;
+    final bottomThreshold = bottomInset > 0 ? bottomInset : _systemGestureBottomMargin;
+    _ignoreCurrentGesture = d.localPosition.dy > _screenHeight - bottomThreshold;
+    _verticalDragStartY = d.localPosition.dy;
+    _verticalDragType = null;
+    _verticalDragging = false;
+  }
   void _onVerticalDragUpdate(DragUpdateDetails d) {
+    if (_ignoreCurrentGesture) return;
     if (!_verticalDragging) {
       _verticalDragging = true;
       if (d.localPosition.dx > _screenWidth / 2) { _verticalDragType = _swapVolumeAndBrightness ? VerticalDragType.brightness : VerticalDragType.volume; _systemVolumeDragStartValue = _systemVolumeValue; }
@@ -555,6 +566,11 @@ class _MediaKitPlayerScreenState extends State<MediaKitPlayerScreen>
     else { _systemVolumeValue = (_systemVolumeDragStartValue + ratio).clamp(0.0, 1.0); VolumeController().setVolume(_systemVolumeValue, showSystemUI: false); setState(() { _showVolumeSlider = true; _showBrightnessSlider = false; }); }
   }
   void _onVerticalDragEnd(DragEndDetails d) {
+    if (_ignoreCurrentGesture) {
+      _ignoreCurrentGesture = false;
+      return;
+    }
+    _ignoreCurrentGesture = false;
     if (!_verticalDragging) _toggleControls();
     setState(() { _verticalDragging = false; _verticalDragType = null; });
     Future.delayed(const Duration(seconds: 1), () { if (mounted) setState(() { _showBrightnessSlider = false; _showVolumeSlider = false; }); });

@@ -59,8 +59,10 @@ class _StrmPlayerScreenState extends State<StrmPlayerScreen>
 
   // ══════ Gesture state ══════
   static const _gestureDecideThreshold = 10.0; // px
+  static const _systemGestureBottomMargin = 40.0; // px, ignore touches near bottom edge
   double _screenWidth = 1;
   double _screenHeight = 1;
+  bool _ignoreCurrentGesture = false;
 
   // horizontal seek
   bool _isSeeking = false;
@@ -118,6 +120,11 @@ class _StrmPlayerScreenState extends State<StrmPlayerScreen>
   }
 
   void _onPointerDown(PointerDownEvent e) {
+    final bottomInset = MediaQuery.of(context).viewPadding.bottom;
+    final bottomThreshold = bottomInset > 0 ? bottomInset : _systemGestureBottomMargin;
+    _ignoreCurrentGesture = e.position.dy > _screenHeight - bottomThreshold;
+    if (_ignoreCurrentGesture) return;
+
     _seekStartX = e.position.dx;
     _verticalStartY = e.position.dy;
     _isSeeking = false;
@@ -127,6 +134,8 @@ class _StrmPlayerScreenState extends State<StrmPlayerScreen>
   }
 
   void _onPointerMove(PointerMoveEvent e) {
+    if (_ignoreCurrentGesture) return;
+
     final dx = e.position.dx - _seekStartX;
     final dy = e.position.dy - _verticalStartY;
 
@@ -179,6 +188,12 @@ class _StrmPlayerScreenState extends State<StrmPlayerScreen>
   }
 
   void _onPointerUp(PointerUpEvent e) {
+    if (_ignoreCurrentGesture) {
+      _ignoreCurrentGesture = false;
+      return;
+    }
+    _ignoreCurrentGesture = false;
+
     final dx = e.position.dx - _seekStartX;
     final dy = e.position.dy - _verticalStartY;
 
