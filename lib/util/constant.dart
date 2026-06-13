@@ -58,6 +58,7 @@ class AlistConstant {
   static const String strmHostOverrideFrom = 'strmHostOverrideFrom'; // 原始主机地址（如 192.168.2.124:8024）
   static const String strmHostOverrideTo = 'strmHostOverrideTo'; // 替换后主机地址（如 frp.example.com:12345）
   static const String strmBrightness = 'strmBrightness'; // strm 播放器亮度记忆
+  static const String strmPreloadEnabled = 'strmPreloadEnabled'; // strm 预加载下一个视频
 
   // 安全锁相关
   static const String securityLockEnabled = 'securityLockEnabled'; // 是否开启安全锁

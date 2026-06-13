@@ -11,6 +11,7 @@ import 'package:alist/entity/tiktok_play_list_model.dart';
 import 'package:alist/util/constant.dart';
 import 'package:alist/util/file_utils.dart';
 import 'package:alist/util/log_utils.dart' as log;
+import 'package:alist/util/stream_size_resolver.dart';
 import 'package:alist/util/user_controller.dart';
 import 'package:flustars/flustars.dart';
 import 'package:flutter/material.dart';
@@ -292,6 +293,16 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
       _initializingIndexes.remove(idx);
       if (idx == _currentIndex) { ctrl.play(); _isPlaying = true; _recordViewing(idx); }
       if (mounted) setState(() {});
+
+      // 异步获取真实视频流大小（解决 strm 文件显示 0B 的问题）
+      if (v.fileSize == null || v.fileSize! <= 0) {
+        StreamSizeResolver.resolveAsync(v.videoUrl!, (size) {
+          v.fileSize = size;
+          // 更新观看记录中的文件大小
+          if (idx == _currentIndex) _recordViewing(idx);
+          if (mounted) setState(() {});
+        });
+      }
     } catch (e) {
       log.Log.e('initCtrl[$idx]: $e');
       try { ctrl?.dispose(); } catch (_) {}
@@ -657,9 +668,11 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
           if (!_isLandscape)
             _btn(icon: _loopSingle ? Icons.repeat_one : Icons.repeat,
               label: _loopSingle ? '单视频循环' : '自动下一个', color: _loopSingle ? Colors.amber : Colors.white, onTap: _toggleLoop),
-          _btn(icon: _isLandscape ? Icons.stay_current_portrait : Icons.stay_current_landscape,
-            label: _isLandscape ? '竖屏' : '横屏', color: Colors.white, onTap: _toggleOrientation),
-          _btn(icon: Icons.camera_alt_outlined, label: '截图', color: Colors.white, onTap: _takeScreenshot),
+          if (_isLandscape) ...[
+            _btn(icon: _isLandscape ? Icons.stay_current_portrait : Icons.stay_current_landscape,
+              label: _isLandscape ? '竖屏' : '横屏', color: Colors.white, onTap: _toggleOrientation),
+            _btn(icon: Icons.camera_alt_outlined, label: '截图', color: Colors.white, onTap: _takeScreenshot),
+          ],
           _btn(icon: Icons.info_outline, label: '信息', color: Colors.white, onTap: _showInfo),
         ]),
       )),
@@ -700,20 +713,45 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
 
   Widget _buildBottomInfo() {
     final v = _playList.videos[_currentIndex];
-    return Positioned(left: 12, bottom: 20, right: 80,
-      child: Opacity(opacity: _uiOpacity, child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Builder(builder: (_) {
-          String dn = v.fileName;
-          final di = dn.lastIndexOf('.');
-          if (di > 0) dn = dn.substring(0, di);
-          if (dn.length > 30) dn = '${dn.substring(0, 27)}...';
-          return Text(dn, style: const TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.w600),
-            maxLines: 1, overflow: TextOverflow.ellipsis);
-        }),
-        const SizedBox(height: 4),
-        Text('${v.formattedSize}  |  ${v.filePath}',
-          style: const TextStyle(color: Colors.white70, fontSize: 11), maxLines: 1, overflow: TextOverflow.ellipsis),
-      ])),
+    return Positioned(left: 12, bottom: 20, right: 12,
+      child: Opacity(opacity: _uiOpacity, child: Row(
+        crossAxisAlignment: CrossAxisAlignment.end,
+        children: [
+          Expanded(
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Builder(builder: (_) {
+                String dn = v.fileName;
+                final di = dn.lastIndexOf('.');
+                if (di > 0) dn = dn.substring(0, di);
+                if (dn.length > 30) dn = '${dn.substring(0, 27)}...';
+                return Text(dn, style: const TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.w600),
+                  maxLines: 1, overflow: TextOverflow.ellipsis);
+              }),
+              const SizedBox(height: 4),
+              Text('${v.formattedSize}  |  ${v.filePath}',
+                style: const TextStyle(color: Colors.white70, fontSize: 11), maxLines: 1, overflow: TextOverflow.ellipsis),
+            ]),
+          ),
+          if (!_isLandscape) ...[
+            GestureDetector(
+              onTap: _toggleOrientation,
+              child: Padding(
+                padding: const EdgeInsets.all(8),
+                child: Icon(Icons.screen_rotation_outlined,
+                    color: Colors.white.withOpacity(0.7), size: 22),
+              ),
+            ),
+            GestureDetector(
+              onTap: _takeScreenshot,
+              child: Padding(
+                padding: const EdgeInsets.all(8),
+                child: Icon(Icons.camera_alt_outlined,
+                    color: Colors.white.withOpacity(0.7), size: 22),
+              ),
+            ),
+          ],
+        ],
+      )),
     );
   }
 

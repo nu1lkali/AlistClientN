@@ -117,7 +117,14 @@ class _StrmPlayerScreenState extends State<StrmPlayerScreen>
       if (saved != null && saved >= 0 && saved <= 1) {
         _currentBrightness = saved;
       } else {
-        _currentBrightness = await ScreenBrightness().current;
+        // 优先读取系统亮度（而非 App 级别亮度），避免首次安装时读到 0
+        try {
+          _currentBrightness = await ScreenBrightness().system;
+        } catch (_) {
+          _currentBrightness = await ScreenBrightness().current;
+        }
+        // 下限保护：防止系统亮度读取失败导致黑屏
+        if (_currentBrightness < 0.1) _currentBrightness = 1.0;
       }
       ScreenBrightness().setScreenBrightness(_currentBrightness);
     } catch (_) { _currentBrightness = 1.0; }
@@ -129,6 +136,14 @@ class _StrmPlayerScreenState extends State<StrmPlayerScreen>
     final bottomThreshold = bottomInset > 0 ? bottomInset : _systemGestureBottomMargin;
     _ignoreCurrentGesture = e.position.dy > _screenHeight - bottomThreshold;
     if (_ignoreCurrentGesture) return;
+
+    // 左右边缘 24dp 安全边距：避免与系统返回手势冲突
+    final edgeSafeZone = 24.0;
+    final dx = e.position.dx;
+    if (dx < edgeSafeZone || dx > _screenWidth - edgeSafeZone) {
+      _ignoreCurrentGesture = true;
+      return;
+    }
 
     _seekStartX = e.position.dx;
     _verticalStartY = e.position.dy;
@@ -263,6 +278,10 @@ class _StrmPlayerScreenState extends State<StrmPlayerScreen>
     SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
     Wakelock.disable();
+    // 释放系统亮度控制权，恢复系统默认亮度调节
+    try {
+      ScreenBrightness().resetScreenBrightness();
+    } catch (_) {}
     super.dispose();
   }
 
@@ -333,6 +352,8 @@ class _StrmPlayerScreenState extends State<StrmPlayerScreen>
       _fetchVideoSize(url).then((size) {
         if (size != null && size > 0 && mounted && _currentIndex == idx) {
           _playList.videos[idx].fileSize = size;
+          // 更新观看记录中的文件大小（解决 strm 文件记录显示 0B 的问题）
+          _recordViewing(idx);
           if (mounted) setState(() {});
         }
       });
@@ -349,6 +370,8 @@ class _StrmPlayerScreenState extends State<StrmPlayerScreen>
   void _schedulePreload(int currentIdx) {
     _preloadTimer?.cancel();
     _disposePreload();
+    final preloadEnabled = SpUtil.getBool(AlistConstant.strmPreloadEnabled, defValue: false) ?? false;
+    if (!preloadEnabled) return;
     final nextIdx = _loopSingle ? currentIdx : currentIdx + 1;
     if (nextIdx < 0 || nextIdx >= _playList.videos.length) return;
     if (_loopSingle && nextIdx == currentIdx) return;
@@ -377,6 +400,13 @@ class _StrmPlayerScreenState extends State<StrmPlayerScreen>
       }
       _preloadController = ctrl;
       _preloadIdx = idx;
+
+      _fetchVideoSize(url).then((size) {
+        if (size != null && size > 0 && mounted) {
+          _playList.videos[idx].fileSize = size;
+          if (mounted) setState(() {});
+        }
+      });
     } catch (_) {}
   }
 
@@ -1065,18 +1095,20 @@ class _StrmPlayerScreenState extends State<StrmPlayerScreen>
                         color:
                             _loopSingle ? Colors.amber : Colors.white,
                         onTap: _toggleLoop),
-                  _toolbarBtn(
-                      icon: _isLandscape
-                          ? Icons.stay_current_portrait
-                          : Icons.stay_current_landscape,
-                      label: _isLandscape ? '竖屏' : '横屏',
-                      color: Colors.white,
-                      onTap: _toggleOrientation),
-                  _toolbarBtn(
-                      icon: Icons.camera_alt_outlined,
-                      label: '截图',
-                      color: Colors.white,
-                      onTap: _takeScreenshot),
+                  if (_isLandscape) ...[
+                    _toolbarBtn(
+                        icon: _isLandscape
+                            ? Icons.stay_current_portrait
+                            : Icons.stay_current_landscape,
+                        label: _isLandscape ? '竖屏' : '横屏',
+                        color: Colors.white,
+                        onTap: _toggleOrientation),
+                    _toolbarBtn(
+                        icon: Icons.camera_alt_outlined,
+                        label: '截图',
+                        color: Colors.white,
+                        onTap: _takeScreenshot),
+                  ],
                   _toolbarBtn(
                       icon: Icons.info_outline,
                       label: '信息',
@@ -1154,31 +1186,59 @@ class _StrmPlayerScreenState extends State<StrmPlayerScreen>
     return Positioned(
         left: 12,
         bottom: 20,
-        right: 80,
-        child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+        right: 12,
+        child: Opacity(
+          opacity: _uiOpacity,
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.end,
             children: [
-              Builder(builder: (_) {
-                String dn = v.fileName;
-                final di = dn.lastIndexOf('.');
-                if (di > 0) dn = dn.substring(0, di);
-                if (dn.length > 30) dn = '${dn.substring(0, 27)}...';
-                return Text(dn,
-                    style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 15,
-                        fontWeight: FontWeight.w600),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis);
-              }),
-              const SizedBox(height: 4),
-              Text(
-                  '${_currentIndex + 1}/${_playList.videos.length}  |  ${v.formattedSize}',
-                  style: const TextStyle(
-                      color: Colors.white70, fontSize: 11),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis),
-            ]));
+              Expanded(
+                child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Builder(builder: (_) {
+                        String dn = v.fileName;
+                        final di = dn.lastIndexOf('.');
+                        if (di > 0) dn = dn.substring(0, di);
+                        if (dn.length > 30) dn = '${dn.substring(0, 27)}...';
+                        return Text(dn,
+                            style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 15,
+                                fontWeight: FontWeight.w600),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis);
+                      }),
+                      const SizedBox(height: 4),
+                      Text(
+                          '${_getCurrentSortedIndex() + 1}/${_sortedVideos.length}  |  ${v.formattedSize}',
+                          style: const TextStyle(
+                              color: Colors.white70, fontSize: 11),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis),
+                    ]),
+              ),
+              if (!_isLandscape) ...[
+                GestureDetector(
+                  onTap: _toggleOrientation,
+                  child: Padding(
+                    padding: const EdgeInsets.all(8),
+                    child: Icon(Icons.screen_rotation_outlined,
+                        color: Colors.white.withOpacity(0.7), size: 22),
+                  ),
+                ),
+                GestureDetector(
+                  onTap: _takeScreenshot,
+                  child: Padding(
+                    padding: const EdgeInsets.all(8),
+                    child: Icon(Icons.camera_alt_outlined,
+                        color: Colors.white.withOpacity(0.7), size: 22),
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ));
   }
 
   // ═══════════════ Floating Switch Button ═══════════════

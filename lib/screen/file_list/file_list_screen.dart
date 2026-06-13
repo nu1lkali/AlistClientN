@@ -48,12 +48,14 @@ import 'package:alist/util/named_router.dart';
 import 'package:alist/util/nature_sort.dart';
 import 'package:alist/util/security_lock_controller.dart';
 import 'package:alist/util/strm_parser.dart';
+import 'package:alist/util/stream_size_resolver.dart';
 import 'package:alist/util/proxy.dart';
 import 'package:alist/util/string_utils.dart';
 import 'package:alist/util/user_controller.dart';
 import 'package:alist/util/video_player_util.dart';
 import 'package:alist/util/video_thumbnail_manager.dart';
 import 'package:alist/util/file_organize_task.dart';
+import 'package:alist/util/filter_persistence.dart';
 import 'package:alist/widget/alist_scaffold.dart';
 import 'package:alist/widget/bottom_navigation_bar.dart';
 import 'package:alist/widget/config_file_name_max_lines_dialog.dart';
@@ -180,6 +182,8 @@ class _FileListScreenState extends State<FileListScreen>
     // restore view mode
     final savedViewMode = SpUtil.getBool(AlistConstant.fileViewMode) ?? false;
     _menuAnchorController.isGridView.value = savedViewMode;
+    // restore filter mode (持久化)
+    _menuAnchorController.filterMode.value = FilterPersistence.loadFilterMode();
     // sync FAB button visibility from SpUtil
     AlistConstant.showFabButtonRx.value = SpUtil.getBool(AlistConstant.showFabButton, defValue: true) ?? true;
     
@@ -1040,20 +1044,65 @@ class _FileListScreenState extends State<FileListScreen>
   }
 
   void _randomPlayVideo() {
+    final strmFiles = _files.where((f) => f.type == FileType.strm).toList();
     final videos = _files.where((f) => f.type == FileType.video).toList();
-    if (videos.isEmpty) {
+
+    if (strmFiles.isEmpty && videos.isEmpty) {
       SmartDialog.showToast('当前目录没有视频文件');
       return;
     }
-    
-    // 如果开启了随机排序，对播放列表也进行随机排序
+
+    // 只有 strm
+    if (strmFiles.isNotEmpty && videos.isEmpty) {
+      final random = Random();
+      _goStrmPlayerScreen(context, strmFiles[random.nextInt(strmFiles.length)]);
+      return;
+    }
+
+    // 只有普通视频
+    if (videos.isNotEmpty && strmFiles.isEmpty) {
+      _randomPlayRegularVideo(videos);
+      return;
+    }
+
+    // 两种都有，弹窗让用户选择
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Text('选择播放类型'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.stream_rounded),
+              title: Text('STRM 流媒体 (${strmFiles.length}个)'),
+              onTap: () {
+                Navigator.pop(ctx);
+                final random = Random();
+                _goStrmPlayerScreen(context, strmFiles[random.nextInt(strmFiles.length)]);
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.video_file_rounded),
+              title: Text('本地视频 (${videos.length}个)'),
+              onTap: () {
+                Navigator.pop(ctx);
+                _randomPlayRegularVideo(videos);
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _randomPlayRegularVideo(List<FileItemVO> videos) {
     if (_menuAnchorController.sortBy.value == MenuId.random) {
       videos.shuffle();
     }
-    
     final random = Random();
     final randomVideo = videos[random.nextInt(videos.length)];
-    // 随机选中的视频置顶，保证 index=0
     videos.remove(randomVideo);
     videos.insert(0, randomVideo);
     _goVideoPlayerScreen(context, randomVideo, videos, false);
@@ -1447,7 +1496,7 @@ class _FileListScreenState extends State<FileListScreen>
               ),
             ]
           : [
-              // 搜索/过滤/视图按钮，用 AnimatedSize 从右侧展开/收起
+              // 搜索/过滤按钮，用 AnimatedSize 从右侧展开/收起
               AnimatedSize(
                 duration: const Duration(milliseconds: 200),
                 curve: Curves.easeInOut,
@@ -1471,23 +1520,6 @@ class _FileListScreenState extends State<FileListScreen>
                                 onPressed: _cycleFilter,
                                 icon: _filterIcon(
                                     _menuAnchorController.filterMode.value),
-                              )),
-                          Obx(() => IconButton(
-                                onPressed: () {
-                                  final newVal =
-                                      !_menuAnchorController.isGridView.value;
-                                  _menuAnchorController.isGridView.value =
-                                      newVal;
-                                  SpUtil.putBool(
-                                      AlistConstant.fileViewMode, newVal);
-                                  if (newVal && _files.isNotEmpty) {
-                                    _loadFolderThumbs(_files.toList());
-                                  }
-                                },
-                                icon: Icon(
-                                    _menuAnchorController.isGridView.value
-                                        ? Icons.list_rounded
-                                        : Icons.grid_view_rounded),
                               )),
                         ],
                       )
@@ -1591,13 +1623,16 @@ class _FileListScreenState extends State<FileListScreen>
 
   void _cycleFilter() {
     final current = _menuAnchorController.filterMode.value;
+    FilterMode next;
     if (current == FilterMode.none) {
-      _menuAnchorController.filterMode.value = FilterMode.videoOnly;
+      next = FilterMode.videoOnly;
     } else if (current == FilterMode.videoOnly) {
-      _menuAnchorController.filterMode.value = FilterMode.imageOnly;
+      next = FilterMode.imageOnly;
     } else {
-      _menuAnchorController.filterMode.value = FilterMode.none;
+      next = FilterMode.none;
     }
+    _menuAnchorController.filterMode.value = next;
+    FilterPersistence.saveFilterMode(next);
   }
 
   Icon _filterIcon(FilterMode mode) {
@@ -1859,16 +1894,45 @@ class _FileListScreenState extends State<FileListScreen>
                     Expanded(child: _gridItem(Icons.create_new_folder, '新建', () { Navigator.pop(context); _showNewFolderDialog(); })),
                     Expanded(child: _gridItem(Icons.download_rounded, '下载全部', () { Navigator.pop(context); _downloadAll(); })),
                     Expanded(child: _gridItem(Icons.upload_rounded, '上传', () { Navigator.pop(context); Platform.isAndroid ? _uploadPhotos() : _uploadFiles(); })),
-                    Expanded(child: _gridItem(Icons.line_weight_rounded, '行数', () { Navigator.pop(context); SmartDialog.show(builder: (_) => const ConfigFileNameMaxLinesDialog()); })),
                     _buildFavoriteDirGridItem(scheme),
+                  ],
+                ),
+              ),
+              // 显示设置
+              _sectionLabel('显示设置'),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                  children: [
+                    Obx(() => Expanded(child: _gridItem(
+                      _menuAnchorController.isGridView.value ? Icons.list_rounded : Icons.grid_view_rounded,
+                      _menuAnchorController.isGridView.value ? '列表视图' : '网格视图',
+                      () {
+                        Navigator.pop(context);
+                        final newVal = !_menuAnchorController.isGridView.value;
+                        _menuAnchorController.isGridView.value = newVal;
+                        SpUtil.putBool(AlistConstant.fileViewMode, newVal);
+                        if (newVal && _files.isNotEmpty) {
+                          _loadFolderThumbs(_files.toList());
+                        }
+                      },
+                    ))),
+                    Expanded(child: _gridItem(Icons.line_weight_rounded, '文件名行数', () {
+                      Navigator.pop(context);
+                      SmartDialog.show(builder: (context) {
+                        return const ConfigFileNameMaxLinesDialog();
+                      });
+                    })),
                     Obx(() {
                       final lockController = Get.find<SecurityLockController>();
-                      if (!lockController.isEnabled.value) return const SizedBox.shrink();
+                      if (!lockController.isEnabled.value) return const Spacer();
                       return Expanded(child: _gridItem(Icons.lock_rounded, '锁定', () {
                         Navigator.pop(context);
                         lockController.lock();
                       }, iconColor: Colors.deepOrange));
                     }),
+                    const Spacer(),
                   ],
                 ),
               ),
@@ -2476,10 +2540,17 @@ class _FileListScreenState extends State<FileListScreen>
     if (_menuAnchorController.sortBy.value == MenuId.random) {
       final grouped = SpUtil.getBool(AlistConstant.groupedRandomSort, defValue: false) ?? false;
       if (grouped) {
-        // 顺序：文件夹 → 视频 → 其他类型（各组内 shuffle，其他类型组间顺序 shuffle）
+        // 顺序：文件夹 → 视频(含strm) → 其他类型（各组内 shuffle）
         final dirs = files.where((f) => f.isDir).toList()..shuffle();
-        final videos = files.where((f) => !f.isDir && f.type == FileType.video).toList()..shuffle();
-        final others = files.where((f) => !f.isDir && f.type != FileType.video).toList();
+        // 1. 视频组：非文件夹，且类型为 video 或 strm
+        final videos = files.where((f) => 
+        !f.isDir && (f.type == FileType.video || f.type == FileType.strm)
+        ).toList()..shuffle();
+
+      // 2. 其他组：非文件夹，且类型既不是 video 也不是 strm
+      final others = files.where((f) => 
+      !f.isDir && f.type != FileType.video && f.type != FileType.strm
+      ).toList();
         // 其他类型按 type 分组，各组内 shuffle，组间顺序 shuffle
         final Map<FileType, List<FileItemVO>> groups = {};
         for (final f in others) {
@@ -3205,12 +3276,12 @@ class _FileListScreenState extends State<FileListScreen>
     final otherUrls = await _collectSiblingStrmFiles(file.path);
     SmartDialog.dismiss();
 
-    // 构建 strm 专用播放器的播放列表
+    // 构建 strm 专用播放器的播放列表（大小由播放器在播放时按需获取，避免批量 HEAD 触发风控）
     final List<TikTokVideoItem> strmVideos = [];
 
     strmVideos.add(TikTokVideoItem(
       id: file.path,
-      fileName: file.name.replaceAll('.strm', ''),
+      fileName: file.name,
       videoUrl: currentUrl,
       filePath: file.path,
       sign: '',
@@ -3229,7 +3300,7 @@ class _FileListScreenState extends State<FileListScreen>
         sign: '',
         provider: file.provider,
         thumb: '',
-        fileSize: 0,
+        fileSize: null,
         modifiedMilliseconds: file.modifiedMilliseconds,
       ));
     }
@@ -3272,7 +3343,7 @@ class _FileListScreenState extends State<FileListScreen>
       // 构建带文件名的结果列表
       final nameMap = <String, String>{};
       for (final f in strmFiles) {
-        nameMap[f.path] = f.name.replaceAll('.strm', '');
+        nameMap[f.path] = f.name;
       }
 
       return results.map((r) => {
@@ -3323,6 +3394,7 @@ class _FileListScreenState extends State<FileListScreen>
       urlMap[result['path'] ?? ''] = result['url'] ?? '';
     }
 
+    // 大小由播放器在播放时按需获取，避免批量 HEAD 触发风控
     final tiktokVideos = <TikTokVideoItem>[];
     int initialIndex = 0;
     for (int i = 0; i < strmFiles.length; i++) {
@@ -3330,14 +3402,12 @@ class _FileListScreenState extends State<FileListScreen>
       final resolvedUrl = urlMap[f.path];
       if (resolvedUrl == null || resolvedUrl.isEmpty) continue;
 
-      // 构建一个 TikTokVideoItem，其中 filePath 指向原始 strm 路径（作为 id），
-      // videoUrl 存储解析后的真实流 URL。TikTok 播放器会根据 videoUrl 播放。
       tiktokVideos.add(TikTokVideoItem(
-        id: f.path, // 用 strm 路径作为唯一标识
-        fileName: f.name.replaceAll('.strm', ''),
-        videoUrl: resolvedUrl, // 预填充解析后的真实 URL
-        fileSize: f.size,
-        sizeDesc: f.sizeDesc,
+        id: f.path,
+        fileName: f.name,
+        videoUrl: resolvedUrl,
+        fileSize: null,
+        sizeDesc: null,
         filePath: f.path,
         sign: f.sign,
         provider: f.provider,

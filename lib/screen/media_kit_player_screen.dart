@@ -261,7 +261,14 @@ class _MediaKitPlayerScreenState extends State<MediaKitPlayerScreen>
   }
 
   Future<void> _initBrightnessAndVolume() async {
-    try { _systemBrightnessValue = await ScreenBrightness().current; } catch (_) { _systemBrightnessValue = 0.5; }
+    try {
+      try {
+        _systemBrightnessValue = await ScreenBrightness().system;
+      } catch (_) {
+        _systemBrightnessValue = await ScreenBrightness().current;
+      }
+      if (_systemBrightnessValue < 0.1) _systemBrightnessValue = 1.0;
+    } catch (_) { _systemBrightnessValue = 1.0; }
     try { _systemVolumeValue = await VolumeController().getVolume(); } catch (_) { _systemVolumeValue = 0.5; }
   }
 
@@ -282,6 +289,10 @@ class _MediaKitPlayerScreenState extends State<MediaKitPlayerScreen>
       statusBarColor: Colors.transparent,
     ));
     if (_isFullscreen) SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp, DeviceOrientation.portraitDown]);
+    // 释放系统亮度控制权，恢复系统默认亮度调节
+    try {
+      ScreenBrightness().resetScreenBrightness();
+    } catch (_) {}
     _player.dispose(); _playlistAnimationController.dispose();
     super.dispose();
   }

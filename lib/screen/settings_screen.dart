@@ -278,28 +278,41 @@ class _SettingsContainerState extends State<_SettingsContainer>
           );
         }),
 
-        // ===== .strm URL 主机替换 =====
-        _SectionHeader(title: '.strm 主机替换', icon: Icons.swap_horiz_rounded),
+        // ===== .strm 设置 =====
+        _SectionHeader(title: '.strm 设置', icon: Icons.swap_horiz_rounded),
         Builder(builder: (_) {
           final enabled = SpUtil.getBool(AlistConstant.strmHostOverrideEnabled, defValue: false) ?? false;
           final from = SpUtil.getString(AlistConstant.strmHostOverrideFrom) ?? '';
           final to = SpUtil.getString(AlistConstant.strmHostOverrideTo) ?? '';
+          final preloadEnabled = SpUtil.getBool(AlistConstant.strmPreloadEnabled, defValue: false) ?? false;
           return _SettingsCard(
             children: [
               _switchTile(context, isDark, scheme,
                   icon: Icons.swap_horiz_rounded,
-                  title: '启用主机替换',
+                  title: '启用主机映射',
                   subtitle: '将 .strm 中的内网地址替换为 FRP/代理地址',
                   value: enabled,
                   onChanged: (v) {
                     SpUtil.putBool(AlistConstant.strmHostOverrideEnabled, v);
                     setState(() {});
                   }),
-              _navTile(context, isDark, scheme,
-                  icon: Icons.edit_rounded,
-                  title: '设置替换地址',
-                  trailingText: enabled && from.isNotEmpty ? '$from → $to' : '未配置',
-                  onTap: () => _showStrmHostOverrideDialog(context)),
+              if (enabled && (from.isNotEmpty || to.isNotEmpty))
+                _buildHostMappingCard(context, scheme, isDark, from, to),
+              if (!enabled || (from.isEmpty && to.isEmpty))
+                _navTile(context, isDark, scheme,
+                    icon: Icons.edit_rounded,
+                    title: '内网→公网地址映射',
+                    trailingText: '未配置',
+                    onTap: () => _showStrmHostOverrideDialog(context)),
+              _switchTile(context, isDark, scheme,
+                  icon: Icons.speed_rounded,
+                  title: '预加载下一个视频',
+                  subtitle: '播放 2 秒后预加载下一段流，可能触发风控',
+                  value: preloadEnabled,
+                  onChanged: (v) {
+                    SpUtil.putBool(AlistConstant.strmPreloadEnabled, v);
+                    setState(() {});
+                  }),
             ],
           );
         }),
@@ -441,6 +454,117 @@ class _SettingsContainerState extends State<_SettingsContainer>
       child: Icon(icon,
           size: 20,
           color: isDark ? Colors.white.withOpacity(0.9) : scheme.primary),
+    );
+  }
+
+  /// Material 3 风格的主机映射地址卡片（纵向弹性布局，支持长按复制）
+  Widget _buildHostMappingCard(
+      BuildContext context, ColorScheme scheme, bool isDark, String from, String to) {
+    return InkWell(
+      onTap: () => _showStrmHostOverrideDialog(context),
+      child: Container(
+        margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(14),
+          gradient: LinearGradient(
+            colors: isDark
+                ? [scheme.surfaceVariant.withOpacity(0.4), scheme.surfaceVariant.withOpacity(0.2)]
+                : [scheme.primaryContainer.withOpacity(0.15), scheme.surface.withOpacity(0.6)],
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+          ),
+          border: Border.all(
+            color: scheme.outlineVariant.withOpacity(0.3),
+            width: 1,
+          ),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(Icons.swap_horiz_rounded, size: 16, color: scheme.primary),
+                const SizedBox(width: 6),
+                Text(
+                  '内网→公网地址映射',
+                  style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    color: scheme.primary,
+                    letterSpacing: 0.3,
+                  ),
+                ),
+                const Spacer(),
+                Icon(Icons.chevron_right_rounded, size: 18, color: scheme.outline),
+              ],
+            ),
+            const SizedBox(height: 10),
+            // 内网地址
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: scheme.error.withOpacity(0.12),
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                  child: Text('内网', style: TextStyle(fontSize: 10, fontWeight: FontWeight.w600, color: scheme.error)),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: SelectableText(
+                    from.isEmpty ? '未设置' : from,
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontFamily: 'monospace',
+                      color: from.isEmpty ? scheme.outline : scheme.onSurface,
+                      height: 1.4,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 6),
+              child: Row(
+                children: [
+                  const SizedBox(width: 30),
+                  Icon(Icons.arrow_downward_rounded, size: 14, color: scheme.outline),
+                  Expanded(child: Divider(indent: 6, color: scheme.outlineVariant.withOpacity(0.3))),
+                ],
+              ),
+            ),
+            // 公网地址
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: scheme.primary.withOpacity(0.12),
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                  child: Text('公网', style: TextStyle(fontSize: 10, fontWeight: FontWeight.w600, color: scheme.primary)),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: SelectableText(
+                    to.isEmpty ? '未设置' : to,
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontFamily: 'monospace',
+                      color: to.isEmpty ? scheme.outline : scheme.onSurface,
+                      height: 1.4,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
     );
   }
 
@@ -776,7 +900,7 @@ class _SettingsContainerState extends State<_SettingsContainer>
       context: context,
       builder: (ctx) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: const Text('.strm URL 主机替换',
+        title: const Text('内网→公网地址映射',
             style: TextStyle(fontWeight: FontWeight.w600)),
         content: Column(
           mainAxisSize: MainAxisSize.min,
