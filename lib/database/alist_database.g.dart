@@ -81,7 +81,7 @@ class _$AlistDatabase extends AlistDatabase {
     Callback? callback,
   ]) async {
     final databaseOptions = sqflite.OpenDatabaseOptions(
-      version: 8,
+      version: 9,
       onConfigure: (database) async {
         await database.execute('PRAGMA foreign_keys = ON');
         await callback?.onConfigure?.call(database);
@@ -112,6 +112,8 @@ class _$AlistDatabase extends AlistDatabase {
             'CREATE TABLE IF NOT EXISTS `search_history` (`id` INTEGER PRIMARY KEY AUTOINCREMENT, `server_url` TEXT NOT NULL, `user_id` TEXT NOT NULL, `keyword` TEXT NOT NULL, `timestamp` INTEGER NOT NULL)');
         await database.execute(
             'CREATE TABLE IF NOT EXISTS `disliked_video` (`id` INTEGER PRIMARY KEY AUTOINCREMENT, `server_url` TEXT NOT NULL, `user_id` TEXT NOT NULL, `remote_path` TEXT NOT NULL, `name` TEXT NOT NULL, `size` INTEGER NOT NULL, `sign` TEXT, `thumb` TEXT, `modified` INTEGER NOT NULL, `provider` TEXT NOT NULL, `create_time` INTEGER NOT NULL, `path` TEXT NOT NULL)');
+        await database.execute(
+            'CREATE TABLE IF NOT EXISTS `strm_url_cache` (`id` INTEGER PRIMARY KEY AUTOINCREMENT, `server_url` TEXT NOT NULL, `user_id` TEXT NOT NULL, `path` TEXT NOT NULL, `url` TEXT NOT NULL, `create_time` INTEGER NOT NULL)');
 
         await callback?.onCreate?.call(database, version);
       },
@@ -165,6 +167,14 @@ class _$AlistDatabase extends AlistDatabase {
   DislikedVideoDao get dislikedVideoDao {
     return _dislikedVideoDaoInstance ??=
         _$DislikedVideoDao(database, changeListener);
+  }
+
+  StrmUrlCacheDao? _strmUrlCacheDaoInstance;
+
+  @override
+  StrmUrlCacheDao get strmUrlCacheDao {
+    return _strmUrlCacheDaoInstance ??=
+        _$StrmUrlCacheDao(database, changeListener);
   }
 }
 
@@ -1141,5 +1151,84 @@ class _$DislikedVideoDao extends DislikedVideoDao {
   @override
   Future<int> deleteRecord(DislikedVideo video) {
     return _dislikedVideoDeletionAdapter.deleteAndReturnChangedRows(video);
+  }
+}
+
+class _$StrmUrlCacheDao extends StrmUrlCacheDao {
+  _$StrmUrlCacheDao(
+    this.database,
+    this.changeListener,
+  )   : _queryAdapter = QueryAdapter(database),
+        _strmUrlCacheInsertionAdapter = InsertionAdapter(
+            database,
+            'strm_url_cache',
+            (StrmUrlCache item) => <String, Object?>{
+                  'id': item.id,
+                  'server_url': item.serverUrl,
+                  'user_id': item.userId,
+                  'path': item.path,
+                  'url': item.url,
+                  'create_time': item.createTime
+                });
+
+  final sqflite.DatabaseExecutor database;
+
+  final StreamController<String> changeListener;
+
+  final QueryAdapter _queryAdapter;
+
+  final InsertionAdapter<StrmUrlCache> _strmUrlCacheInsertionAdapter;
+
+  @override
+  Future<StrmUrlCache?> findByPath(
+    String serverUrl,
+    String userId,
+    String path,
+  ) async {
+    return _queryAdapter.query(
+        'SELECT * FROM strm_url_cache WHERE server_url = ?1 AND user_id = ?2 AND path = ?3 LIMIT 1',
+        mapper: (Map<String, Object?> row) => StrmUrlCache(
+            id: row['id'] as int?,
+            serverUrl: row['server_url'] as String,
+            userId: row['user_id'] as String,
+            path: row['path'] as String,
+            url: row['url'] as String,
+            createTime: row['create_time'] as int),
+        arguments: [serverUrl, userId, path]);
+  }
+
+  @override
+  Future<void> deleteByPath(
+    String serverUrl,
+    String userId,
+    String path,
+  ) async {
+    await _queryAdapter.queryNoReturn(
+        'DELETE FROM strm_url_cache WHERE server_url = ?1 AND user_id = ?2 AND path = ?3',
+        arguments: [serverUrl, userId, path]);
+  }
+
+  @override
+  Future<void> deleteOlderThan(int timestamp) async {
+    await _queryAdapter.queryNoReturn(
+        'DELETE FROM strm_url_cache WHERE create_time < ?1',
+        arguments: [timestamp]);
+  }
+
+  @override
+  Future<void> deleteAll() async {
+    await _queryAdapter.queryNoReturn('DELETE FROM strm_url_cache');
+  }
+
+  @override
+  Future<int> insertRecord(StrmUrlCache record) {
+    return _strmUrlCacheInsertionAdapter.insertAndReturnId(
+        record, OnConflictStrategy.abort);
+  }
+
+  @override
+  Future<int?> count() async {
+    return _queryAdapter.query('SELECT COUNT(*) FROM strm_url_cache',
+        mapper: (Map<String, Object?> row) => row.values.first as int);
   }
 }

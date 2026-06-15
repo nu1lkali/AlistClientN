@@ -9,6 +9,7 @@ import 'package:alist/database/dao/file_password_dao.dart';
 import 'package:alist/database/dao/file_viewing_record_dao.dart';
 import 'package:alist/database/dao/search_history_dao.dart';
 import 'package:alist/database/dao/server_dao.dart';
+import 'package:alist/database/dao/strm_url_cache_dao.dart';
 import 'package:alist/database/table/disliked_video.dart';
 import 'package:alist/database/table/favorite.dart';
 import 'package:alist/database/table/file_download_record.dart';
@@ -16,6 +17,7 @@ import 'package:alist/database/table/file_password.dart';
 import 'package:alist/database/table/file_viewing_record.dart';
 import 'package:alist/database/table/search_history.dart';
 import 'package:alist/database/table/server.dart';
+import 'package:alist/database/table/strm_url_cache.dart';
 import 'package:floor/floor.dart';
 import 'package:sqflite/sqflite.dart' as sqflite;
 
@@ -24,7 +26,7 @@ import 'table/video_viewing_record.dart';
 
 part 'alist_database.g.dart'; // the generated code will be there
 
-@Database(version: 8, entities: [
+@Database(version: 9, entities: [
   VideoViewingRecord,
   FileDownloadRecord,
   FilePassword,
@@ -33,6 +35,7 @@ part 'alist_database.g.dart'; // the generated code will be there
   Favorite,
   SearchHistory,
   DislikedVideo,
+  StrmUrlCache,
 ])
 abstract class AlistDatabase extends FloorDatabase {
   VideoViewingRecordDao get videoViewingRecordDao;
@@ -50,4 +53,6 @@ abstract class AlistDatabase extends FloorDatabase {
   SearchHistoryDao get searchHistoryDao;
 
   DislikedVideoDao get dislikedVideoDao;
+
+  StrmUrlCacheDao get strmUrlCacheDao;
 }

@@ -9,6 +9,7 @@ import 'package:alist/database/dao/file_password_dao.dart';
 import 'package:alist/database/dao/file_viewing_record_dao.dart';
 import 'package:alist/database/dao/search_history_dao.dart';
 import 'package:alist/database/dao/server_dao.dart';
+import 'package:alist/database/dao/strm_url_cache_dao.dart';
 import 'package:alist/database/dao/video_viewing_record_dao.dart';
 import 'package:floor/floor.dart';
 import 'package:get/get.dart';
@@ -25,6 +26,7 @@ class AlistDatabaseController extends GetxController {
   late final FavoriteDao favoriteDao;
   late final SearchHistoryDao searchHistoryDao;
   late final DislikedVideoDao dislikedVideoDao;
+  late final StrmUrlCacheDao strmUrlCacheDao;
 
   // create migration
   final _migration1to2 = Migration(1, 2, (database) async {
@@ -84,6 +86,12 @@ class AlistDatabaseController extends GetxController {
         'CREATE TABLE IF NOT EXISTS `disliked_video` (`id` INTEGER PRIMARY KEY AUTOINCREMENT, `server_url` TEXT NOT NULL, `user_id` TEXT NOT NULL, `remote_path` TEXT NOT NULL, `name` TEXT NOT NULL, `size` INTEGER NOT NULL, `sign` TEXT, `thumb` TEXT, `modified` INTEGER NOT NULL, `provider` TEXT NOT NULL, `create_time` INTEGER NOT NULL, `path` TEXT NOT NULL)');
   });
 
+  // create migration: add strm_url_cache table
+  final _migration8to9 = Migration(8, 9, (database) async {
+    await database.execute(
+        'CREATE TABLE IF NOT EXISTS `strm_url_cache` (`id` INTEGER PRIMARY KEY AUTOINCREMENT, `server_url` TEXT NOT NULL, `user_id` TEXT NOT NULL, `path` TEXT NOT NULL, `url` TEXT NOT NULL, `create_time` INTEGER NOT NULL)');
+  });
+
   Future<void> init() async {
     var dbName = "alist.db";
     if (Platform.isIOS) {
@@ -107,6 +115,7 @@ class AlistDatabaseController extends GetxController {
       _migration5to6,
       _migration6to7,
       _migration7to8,
+      _migration8to9,
     ]).build();
     videoViewingRecordDao = database.videoViewingRecordDao;
     downloadRecordRecordDao = database.downloadRecordRecordDao;
@@ -116,5 +125,6 @@ class AlistDatabaseController extends GetxController {
     favoriteDao = database.favoriteDao;
     searchHistoryDao = database.searchHistoryDao;
     dislikedVideoDao = database.dislikedVideoDao;
+    strmUrlCacheDao = database.strmUrlCacheDao;
   }
 }

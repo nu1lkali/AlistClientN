@@ -6,6 +6,7 @@ import 'package:alist/database/alist_database_controller.dart';
 import 'package:alist/database/table/favorite.dart';
 import 'package:alist/database/table/file_viewing_record.dart';
 import 'package:alist/entity/file_list_resp_entity.dart';
+import 'package:alist/entity/tiktok_play_list_model.dart';
 import 'package:alist/l10n/intl_keys.dart';
 import 'package:alist/net/dio_utils.dart';
 import 'package:alist/screen/audio_player_screen.dart';
@@ -24,6 +25,7 @@ import 'package:alist/util/markdown_utils.dart';
 import 'package:alist/router.dart';
 import 'package:alist/util/named_router.dart';
 import 'package:alist/util/nature_sort.dart';
+import 'package:alist/util/strm_parser.dart';
 import 'package:alist/util/string_utils.dart';
 import 'package:alist/util/user_controller.dart';
 import 'package:alist/util/video_player_util.dart';
@@ -171,6 +173,10 @@ class _FavoriteScreenState extends State<FavoriteScreen>
 
   void _onFileTap(BuildContext context, Favorite file, bool fromDialog) {
     FileType fileType = FileUtils.getFileType(file.isDir, file.name);
+    // 兜底：如果 name 丢失了 .strm 后缀，通过 path 检测
+    if (fileType != FileType.strm && StrmParser.isStrmFile(file.path)) {
+      fileType = FileType.strm;
+    }
     if (!file.isDir) {
       _fileViewingRecord(file);
     }
@@ -186,6 +192,9 @@ class _FavoriteScreenState extends State<FavoriteScreen>
         break;
       case FileType.video:
         _gotoVideoPlayer(context, file, fromDialog);
+        break;
+      case FileType.strm:
+        _gotoStrmPlayer(file);
         break;
       case FileType.audio:
         _gotoAudioPlayer(file);
@@ -529,6 +538,40 @@ class _FavoriteScreenState extends State<FavoriteScreen>
     } else {
       VideoPlayerUtil.go(videos, index, password);
     }
+  }
+
+  /// .strm 文件播放入口：解析 strm 内容获取真实视频流 URL，跳转到 strm 专用播放器
+  void _gotoStrmPlayer(Favorite file) async {
+    SmartDialog.showLoading(msg: '正在解析 .strm 文件…');
+
+    final videoUrl = await StrmParser.parseStrmUrl(file.path, file.sign);
+    SmartDialog.dismiss();
+
+    if (videoUrl == null || videoUrl.isEmpty) {
+      SmartDialog.showToast('无法解析 .strm 文件中的视频流 URL');
+      return;
+    }
+
+    final tiktokVideos = <TikTokVideoItem>[
+      TikTokVideoItem(
+        id: file.path,
+        fileName: file.name,
+        videoUrl: videoUrl,
+        filePath: file.path,
+        sign: file.sign ?? '',
+        provider: file.provider,
+        thumb: file.thumb,
+        fileSize: file.size > 0 ? file.size : null,
+        modifiedMilliseconds: file.modified,
+      ),
+    ];
+
+    final playList = TikTokPlayListModel(
+      videos: tiktokVideos,
+      initialIndex: 0,
+      recordHistory: true,
+    );
+    Get.toNamed(NamedRouter.strmPlayer, arguments: playList);
   }
 
   void _gotoAudioPlayer(Favorite file) async {

@@ -63,6 +63,11 @@ class _MediaKitPlayerScreenState extends State<MediaKitPlayerScreen>
   late final AnimationController _playlistAnimationController;
   late final Animation<Offset> _playlistSlideAnimation;
   bool _isFullscreen = false, _isCapturing = false, _isFavorite = false, _isDisliked = false;
+
+  // Playlist filter
+  bool _showPlaylistFilter = false;
+  String _playlistFilter = '';
+  final TextEditingController _playlistFilterController = TextEditingController();
   VerticalDragType? _verticalDragType;
   bool _verticalDragging = false;
   double _systemVolumeValue = 0.5, _systemVolumeDragStartValue = 0.5;
@@ -293,7 +298,7 @@ class _MediaKitPlayerScreenState extends State<MediaKitPlayerScreen>
     try {
       ScreenBrightness().resetScreenBrightness();
     } catch (_) {}
-    _player.dispose(); _playlistAnimationController.dispose();
+    _player.dispose(); _playlistAnimationController.dispose(); _playlistFilterController.dispose();
     super.dispose();
   }
 
@@ -377,7 +382,7 @@ class _MediaKitPlayerScreenState extends State<MediaKitPlayerScreen>
     setState(() { _activeSheet = PlayerSheet.none; _showControls = true; });
     _playlistAnimationController.reverse(); _startHideTimer();
   }
-  void _hidePlaylist() { _closeSheetAndPanel(); }
+  void _hidePlaylist() { _showPlaylistFilter = false; _playlistFilter = ''; _playlistFilterController.clear(); _closeSheetAndPanel(); }
 
   Future<void> _setPlaybackSpeed(double speed) async {
     try {
@@ -761,13 +766,54 @@ class _MediaKitPlayerScreenState extends State<MediaKitPlayerScreen>
 
   Widget _buildPlaylistDrawer() {
     final w = _screenWidth * 0.75;
+    final filteredVideos = _playlistFilter.isEmpty
+        ? _videos.asMap().entries.toList()
+        : _videos.asMap().entries.where((e) =>
+            (e.value["name"] ?? "").toLowerCase().contains(_playlistFilter.toLowerCase())).toList();
     return Stack(children: <Widget>[
       GestureDetector(onTap: _hidePlaylist, child: Container(color: Colors.black54)),
       Positioned(right: 0, top: 0, bottom: 0, width: w, child: SlideTransition(position: _playlistSlideAnimation, child: Container(color: const Color(0xFF1E1E1E), child: SafeArea(child: Column(children: <Widget>[
-        Container(padding: const EdgeInsets.all(16), decoration: const BoxDecoration(border: Border(bottom: BorderSide(color: Colors.white24))), child: Row(children: [const Expanded(child: Text('播放列表', style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold))), IconButton(icon: const Icon(Icons.close, color: Colors.white), onPressed: _hidePlaylist)])),
-        Expanded(child: ListView.builder(itemCount: _videos.length, itemBuilder: (_, idx) {
-          final item = _videos[idx]; final name = item["name"] ?? ""; final isCur = idx == _index;
-          return ListTile(leading: Icon(isCur ? Icons.play_arrow : Icons.video_file, color: isCur ? Colors.blue : Colors.white70), title: Text(name, style: TextStyle(color: isCur ? Colors.blue : Colors.white, fontWeight: isCur ? FontWeight.bold : FontWeight.normal), maxLines: 2, overflow: TextOverflow.ellipsis), trailing: isCur ? Container(padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2), decoration: BoxDecoration(color: Colors.blue, borderRadius: BorderRadius.circular(4)), child: const Text("播放中", style: TextStyle(color: Colors.white, fontSize: 10))) : null, selected: isCur, selectedTileColor: Colors.blue.withOpacity(0.1), onTap: () => _playAt(idx));
+        Container(padding: const EdgeInsets.all(16), decoration: const BoxDecoration(border: Border(bottom: BorderSide(color: Colors.white24))), child: Column(children: [
+          Row(children: [
+            Expanded(child: Text(_playlistFilter.isEmpty ? '播放列表 (${_index + 1}/${_videos.length})' : '筛选结果 (${filteredVideos.length})', style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold))),
+            IconButton(icon: Icon(_showPlaylistFilter ? Icons.search_off : Icons.search, color: Colors.white), onPressed: () { setState(() { _showPlaylistFilter = !_showPlaylistFilter; if (!_showPlaylistFilter) { _playlistFilter = ''; _playlistFilterController.clear(); } }); }),
+            IconButton(icon: const Icon(Icons.close, color: Colors.white), onPressed: _hidePlaylist),
+          ]),
+          if (_showPlaylistFilter)
+            Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: Row(children: [
+                Expanded(
+                  child: TextField(
+                    controller: _playlistFilterController,
+                    autofocus: true,
+                    style: const TextStyle(color: Colors.white, fontSize: 14),
+                    decoration: InputDecoration(
+                      hintText: '输入关键词筛选…',
+                      hintStyle: const TextStyle(color: Colors.white38),
+                      isDense: true,
+                      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: Colors.white24)),
+                      enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: Colors.white24)),
+                      focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: Colors.blue)),
+                      filled: true,
+                      fillColor: Colors.white.withOpacity(0.08),
+                    ),
+                    onSubmitted: (_) { FocusScope.of(context).unfocus(); setState(() { _playlistFilter = _playlistFilterController.text; }); },
+                  ),
+                ),
+                const SizedBox(width: 8),
+                FilledButton(
+                  onPressed: () { FocusScope.of(context).unfocus(); setState(() { _playlistFilter = _playlistFilterController.text; }); },
+                  style: FilledButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8))),
+                  child: const Text('确定', style: TextStyle(fontSize: 13)),
+                ),
+              ]),
+            ),
+        ])),
+        Expanded(child: ListView.builder(itemCount: filteredVideos.length, itemBuilder: (_, i) {
+          final idx = filteredVideos[i].key; final item = filteredVideos[i].value; final name = item["name"] ?? ""; final isCur = idx == _index;
+          return ListTile(leading: Icon(isCur ? Icons.play_arrow : Icons.video_file, color: isCur ? Colors.blue : Colors.white70), title: Text(name, style: TextStyle(color: isCur ? Colors.blue : Colors.white, fontWeight: isCur ? FontWeight.bold : FontWeight.normal), maxLines: 2, overflow: TextOverflow.ellipsis), trailing: isCur ? Container(padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2), decoration: BoxDecoration(color: Colors.blue, borderRadius: BorderRadius.circular(4)), child: const Text("播放中", style: TextStyle(color: Colors.white, fontSize: 10))) : null, selected: isCur, selectedTileColor: Colors.blue.withOpacity(0.1), onTap: () { _hidePlaylist(); _playAt(idx); });
         })),
         Container(decoration: const BoxDecoration(color: Color(0x1AFFFFFF), border: Border(top: BorderSide(color: Colors.white24))), padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12), child: Row(mainAxisAlignment: MainAxisAlignment.spaceEvenly, children: [
           _SortButton(icon: _nameSortAscending ? Icons.arrow_upward : Icons.arrow_downward, label: '名称${_nameSortAscending ? "↑" : "↓"}', onPressed: () { setState(() { if (_nameSortAscending) { _videos.sort((a, b) => _naturalCompare(b["name"] ?? "", a["name"] ?? "")); _showToast('名称降序'); } else { _videos.sort((a, b) => _naturalCompare(a["name"] ?? "", b["name"] ?? "")); _showToast('名称升序'); } _nameSortAscending = !_nameSortAscending; }); }),

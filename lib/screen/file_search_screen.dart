@@ -302,6 +302,7 @@ class FileSearchController extends GetxController {
   final FocusNode focusNode = FocusNode();
   final TextEditingController textEditingController = TextEditingController();
   CancelToken? _cancelToken;
+  CancelToken? _strmCancelToken;
   var list = <FileSearchRespContent>[].obs;
   Timer? _searchDelayTimer;
   Timer? _saveHistoryTimer;
@@ -414,6 +415,7 @@ class FileSearchController extends GetxController {
   @override
   void onClose() {
     _cancelToken?.cancel();
+    _strmCancelToken?.cancel();
     _searchDelayTimer?.cancel();
     _saveHistoryTimer?.cancel();
     super.onClose();
@@ -698,9 +700,12 @@ class FileSearchController extends GetxController {
 
   /// .strm 文件播放入口：解析 strm 内容获取真实视频流 URL
   void _gotoStrmPlayer(String path, FileSearchRespContent file) async {
+    _strmCancelToken?.cancel();
+    _strmCancelToken = CancelToken();
+
     SmartDialog.showLoading(msg: '正在解析 .strm 文件…');
 
-    final videoUrl = await StrmParser.parseStrmUrl(path, null);
+    final videoUrl = await StrmParser.parseStrmUrl(path, null, cancelToken: _strmCancelToken);
     SmartDialog.dismiss();
 
     if (videoUrl == null || videoUrl.isEmpty) {

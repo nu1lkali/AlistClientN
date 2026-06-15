@@ -1,8 +1,10 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:alist/database/alist_database_controller.dart';
 import 'package:alist/l10n/intl_keys.dart';
 import 'package:alist/util/download/download_manager.dart';
+import 'package:alist/util/strm_parser.dart';
 import 'package:alist/widget/alist_scaffold.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_smart_dialog/flutter_smart_dialog.dart';
@@ -58,6 +60,11 @@ class CacheManagerScreen extends StatelessWidget {
                     icon: Icons.folder_rounded,
                     sizeStr: controller.otherCacheSizeStr,
                     onClear: () => _confirm(context, "清除其他缓存？", controller.clearOtherCache),
+                  ),
+                  Divider(height: 1, indent: 68, endIndent: 16, color: scheme.outlineVariant.withOpacity(0.3)),
+                  _StrmCacheTile(
+                    countStr: controller.strmCacheCountStr,
+                    onClear: () => _confirm(context, "清除 strm URL 缓存？", controller.clearStrmCache),
                   ),
                 ],
               ),
@@ -186,6 +193,53 @@ class _CacheTile extends StatelessWidget {
   }
 }
 
+class _StrmCacheTile extends StatelessWidget {
+  const _StrmCacheTile({
+    required this.countStr,
+    required this.onClear,
+  });
+  final RxString countStr;
+  final VoidCallback onClear;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    
+    return ListTile(
+      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+      leading: Container(
+        width: 44,
+        height: 44,
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            colors: [
+              scheme.primaryContainer.withOpacity(0.8),
+              scheme.primaryContainer.withOpacity(0.5),
+            ],
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+          ),
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Icon(Icons.link_rounded, 
+          size: 22, 
+          color: isDark ? Colors.white.withOpacity(0.9) : scheme.primary),
+      ),
+      title: const Text("strm URL 缓存", 
+        style: TextStyle(fontSize: 15, fontWeight: FontWeight.w500)),
+      subtitle: Obx(() => Padding(
+        padding: const EdgeInsets.only(top: 4),
+        child: Text(countStr.value,
+          style: TextStyle(fontSize: 13, color: scheme.onSurfaceVariant)),
+      )),
+      trailing: Icon(Icons.delete_outline_rounded,
+          color: scheme.outlineVariant, size: 22),
+      onTap: onClear,
+    );
+  }
+}
+
 class CacheManagerController extends GetxController {
   var _imageCacheSize = 0;
   var _audioCacheSize = 0;
@@ -196,6 +250,7 @@ class CacheManagerController extends GetxController {
   var videoCacheSizeStr = "0 B".obs;
   var otherCacheSizeStr = "0 B".obs;
   var totalCacheSizeStr = "0 B".obs;
+  var strmCacheCountStr = "0 条".obs;
 
   final Set<String> _imageCachePaths = {};
   final Set<String> _audioCachePaths = {};
@@ -206,6 +261,7 @@ class CacheManagerController extends GetxController {
   void onInit() {
     super.onInit();
     _calculateCacheFilesSize();
+    _loadStrmCacheCount();
   }
 
   void _calculateCacheFilesSize() async {
@@ -397,6 +453,29 @@ class CacheManagerController extends GetxController {
     SmartDialog.dismiss();
   }
 
+  Future<void> _loadStrmCacheCount() async {
+    try {
+      final db = Get.find<AlistDatabaseController>();
+      final count = await db.strmUrlCacheDao.count() ?? 0;
+      if (!isClosed) {
+        strmCacheCountStr.value = "$count 条";
+      }
+    } catch (_) {}
+  }
+
+  void clearStrmCache() async {
+    SmartDialog.showLoading(msg: Intl.cacheManagement_tips_clearing_cache.tr);
+    try {
+      StrmParser.clearCache();
+      final db = Get.find<AlistDatabaseController>();
+      await db.strmUrlCacheDao.deleteAll();
+      if (!isClosed) {
+        strmCacheCountStr.value = "0 条";
+      }
+    } catch (_) {}
+    SmartDialog.dismiss();
+  }
+
   void clearAllCache() async {
     SmartDialog.showLoading(msg: Intl.cacheManagement_tips_clearing_cache.tr);
     var temporaryDirectory = await getTemporaryDirectory();
@@ -406,6 +485,13 @@ class CacheManagerController extends GetxController {
     _audioCacheSize = 0; audioCacheSizeStr.value = "0 B";
     _otherCacheSize = 0; otherCacheSizeStr.value = "0 B";
     totalCacheSizeStr.value = "0 B";
+    // 清除 strm URL 缓存
+    try {
+      StrmParser.clearCache();
+      final db = Get.find<AlistDatabaseController>();
+      await db.strmUrlCacheDao.deleteAll();
+      strmCacheCountStr.value = "0 条";
+    } catch (_) {}
     SmartDialog.dismiss();
   }
 }

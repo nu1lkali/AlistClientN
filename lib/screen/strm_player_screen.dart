@@ -7,6 +7,7 @@ import 'package:alist/database/alist_database_controller.dart';
 import 'package:alist/database/table/disliked_video.dart';
 import 'package:alist/database/table/favorite.dart';
 import 'package:alist/database/table/file_viewing_record.dart';
+import 'package:alist/database/table/video_viewing_record.dart';
 import 'package:alist/entity/tiktok_play_list_model.dart';
 import 'package:alist/util/constant.dart';
 import 'package:alist/util/log_utils.dart' as log;
@@ -52,6 +53,11 @@ class _StrmPlayerScreenState extends State<StrmPlayerScreen>
   Timer? _progressTimer;
   final GlobalKey _repaintKey = GlobalKey();
 
+  // 播放进度记忆
+  VideoViewingRecord? _videoViewingRecord;
+  DateTime _lastProgressSave = DateTime.fromMillisecondsSinceEpoch(0);
+  static const _progressSaveInterval = Duration(seconds: 5);
+
   Timer? _landscapeHideTimer;
   static const _landscapeAutoHide = Duration(seconds: 2);
 
@@ -92,10 +98,18 @@ class _StrmPlayerScreenState extends State<StrmPlayerScreen>
   late List<TikTokVideoItem> _sortedVideos;
   late Map<int, int> _videoIndexMap;
 
+  // Playlist filter
+  bool _showPlaylistFilter = false;
+  String _playlistFilter = '';
+  final TextEditingController _playlistFilterController = TextEditingController();
+
   // Preload next video
   VideoPlayerController? _preloadController;
   int _preloadIdx = -1;
   Timer? _preloadTimer;
+
+  // 后台 siblings 同步
+  Timer? _playlistSyncTimer;
 
   void _startLandscapeAutoHide() {
     _landscapeHideTimer?.cancel();
@@ -111,23 +125,31 @@ class _StrmPlayerScreenState extends State<StrmPlayerScreen>
   }
 
   // ═══════════════ Gesture handlers ═══════════════
+  static const double _defaultBrightness = 0.7;
+
   void _initBrightnessAndVolume() async {
     try {
       final saved = SpUtil.getDouble(AlistConstant.strmBrightness);
-      if (saved != null && saved >= 0 && saved <= 1) {
+      if (saved != null && saved >= 0.1 && saved <= 1) {
         _currentBrightness = saved;
       } else {
-        // 优先读取系统亮度（而非 App 级别亮度），避免首次安装时读到 0
         try {
           _currentBrightness = await ScreenBrightness().system;
         } catch (_) {
-          _currentBrightness = await ScreenBrightness().current;
+          try {
+            _currentBrightness = await ScreenBrightness().current;
+          } catch (_) {
+            _currentBrightness = _defaultBrightness;
+          }
         }
-        // 下限保护：防止系统亮度读取失败导致黑屏
-        if (_currentBrightness < 0.1) _currentBrightness = 1.0;
+        if (_currentBrightness < 0.1) _currentBrightness = _defaultBrightness;
       }
+    } catch (_) {
+      _currentBrightness = _defaultBrightness;
+    }
+    try {
       ScreenBrightness().setScreenBrightness(_currentBrightness);
-    } catch (_) { _currentBrightness = 1.0; }
+    } catch (_) {}
     try { _currentVolume = await VolumeController().getVolume(); } catch (_) { _currentVolume = 0.5; }
   }
 
@@ -250,6 +272,13 @@ class _StrmPlayerScreenState extends State<StrmPlayerScreen>
     _sortedVideos = List.from(_playList.videos);
     _updateVideoIndexMap();
 
+    // 定期同步播放列表（后台 siblings 解析完成后会追加到 _playList.videos）
+    // 首次延迟 500ms 后立即检查一次，之后每秒检查
+    Future.delayed(const Duration(milliseconds: 500), _syncPlaylistFromSource);
+    _playlistSyncTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+      _syncPlaylistFromSource();
+    });
+
     _playlistAnimController = AnimationController(
         duration: const Duration(milliseconds: 250), vsync: this);
     _playlistSlideAnim = Tween<Offset>(
@@ -270,10 +299,13 @@ class _StrmPlayerScreenState extends State<StrmPlayerScreen>
     _progressTimer?.cancel();
     _landscapeHideTimer?.cancel();
     _preloadTimer?.cancel();
+    _playlistSyncTimer?.cancel();
+    _saveProgress(); // 退出时保存播放进度
     _controller?.dispose();
     _preloadController?.dispose();
     _preloadController = null;
     _playlistAnimController.dispose();
+    _playlistFilterController.dispose();
     WidgetsBinding.instance.removeObserver(this);
     SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
@@ -341,6 +373,9 @@ class _StrmPlayerScreenState extends State<StrmPlayerScreen>
       ctrl.setLooping(_loopSingle);
       _controller = ctrl;
       _isInitializing = false;
+
+      // 加载上次播放进度并跳转
+      await _loadProgressAndSeek(idx, ctrl);
 
       ctrl.play();
       _isPlaying = true;
@@ -462,6 +497,75 @@ class _StrmPlayerScreenState extends State<StrmPlayerScreen>
     } catch (_) {}
   }
 
+  // ═══════════════ 播放进度记忆 ═══════════════
+  Future<void> _loadProgressAndSeek(int idx, VideoPlayerController ctrl) async {
+    try {
+      final v = _playList.videos[idx];
+      final u = _userController.user.value;
+      final record = await _database.videoViewingRecordDao
+          .findRecordByPath(u.serverUrl, u.username, v.filePath);
+      if (record != null && record.videoCurrentPosition > 0) {
+        _videoViewingRecord = record;
+        final seekTo = Duration(milliseconds: record.videoCurrentPosition);
+        // 不跳到片尾（距结尾 3 秒内视为已看完）
+        final duration = ctrl.value.duration;
+        if (duration > Duration.zero &&
+            seekTo >= duration - const Duration(seconds: 3)) {
+          return;
+        }
+        await ctrl.seekTo(seekTo);
+      } else {
+        _videoViewingRecord = null;
+      }
+    } catch (_) {
+      _videoViewingRecord = null;
+    }
+  }
+
+  Future<void> _saveProgress() async {
+    final ctrl = _controller;
+    if (ctrl == null || !ctrl.value.isInitialized) return;
+    final position = ctrl.value.position.inMilliseconds;
+    final duration = ctrl.value.duration.inMilliseconds;
+    if (duration <= 0) return;
+
+    try {
+      final v = _playList.videos[_currentIndex];
+      final u = _userController.user.value;
+      final existing = _videoViewingRecord;
+      if (existing != null && existing.id != null) {
+        _database.videoViewingRecordDao.updateRecord(VideoViewingRecord(
+          id: existing.id,
+          serverUrl: u.serverUrl,
+          userId: u.username,
+          videoSign: v.sign ?? '',
+          path: v.filePath,
+          videoDuration: duration,
+          videoCurrentPosition: position,
+        ));
+      } else {
+        final record = VideoViewingRecord(
+          serverUrl: u.serverUrl,
+          userId: u.username,
+          videoSign: v.sign ?? '',
+          path: v.filePath,
+          videoDuration: duration,
+          videoCurrentPosition: position,
+        );
+        final id = await _database.videoViewingRecordDao.insertRecord(record);
+        _videoViewingRecord = VideoViewingRecord(
+          id: id,
+          serverUrl: record.serverUrl,
+          userId: record.userId,
+          videoSign: record.videoSign,
+          path: record.path,
+          videoDuration: record.videoDuration,
+          videoCurrentPosition: record.videoCurrentPosition,
+        );
+      }
+    } catch (_) {}
+  }
+
   Future<void> _loadStates(int idx) async {
     if (idx < 0 || idx >= _playList.videos.length || !mounted) return;
     try {
@@ -552,12 +656,21 @@ class _StrmPlayerScreenState extends State<StrmPlayerScreen>
             _pos = c.value.position;
             _dur = c.value.duration;
           });
+
+          // 定期保存播放进度
+          final now = DateTime.now();
+          if (now.difference(_lastProgressSave) >= _progressSaveInterval) {
+            _lastProgressSave = now;
+            _saveProgress();
+          }
+
           if (c.value.duration > Duration.zero &&
               c.value.position >=
                   c.value.duration -
                       const Duration(milliseconds: 500) &&
               !_completing) {
             _completing = true;
+            _saveProgress(); // 播放完成时也保存一次
             if (_loopSingle) {
               c.seekTo(Duration.zero)
                   .then((_) {
@@ -829,6 +942,16 @@ class _StrmPlayerScreenState extends State<StrmPlayerScreen>
   }
 
   // ═══════════════ Playlist Drawer ═══════════════
+  void _syncPlaylistFromSource() {
+    if (!mounted) return;
+    if (_sortedVideos.length != _playList.videos.length) {
+      setState(() {
+        _sortedVideos = List.from(_playList.videos);
+        _updateVideoIndexMap();
+      });
+    }
+  }
+
   void _updateVideoIndexMap() {
     _videoIndexMap = {};
     for (int sortedIdx = 0; sortedIdx < _sortedVideos.length; sortedIdx++) {
@@ -848,6 +971,9 @@ class _StrmPlayerScreenState extends State<StrmPlayerScreen>
       _playlistAnimController.reverse();
       setState(() {
         _isPlaylistVisible = false;
+        _showPlaylistFilter = false;
+        _playlistFilter = '';
+        _playlistFilterController.clear();
       });
     } else {
       setState(() {
@@ -1366,50 +1492,144 @@ class _StrmPlayerScreenState extends State<StrmPlayerScreen>
   }
 
   Widget _buildPlaylistDrawer() {
-    final drawerWidth = MediaQuery.of(context).size.width * 0.75;
-    final currentSortedIdx = _getCurrentSortedIndex();
+    final filteredVideos = _playlistFilter.isEmpty
+        ? _sortedVideos
+        : _sortedVideos.where((v) =>
+            v.fileName.toLowerCase().contains(_playlistFilter.toLowerCase())).toList();
+    final drawerWidth = MediaQuery.of(context).size.width * 0.7;
+
     return Positioned(
-        right: 0,
-        top: 0,
-        bottom: 0,
-        width: drawerWidth,
-        child: SlideTransition(
-          position: _playlistSlideAnim,
-          child: Container(
-            color: const Color(0xFF1E1E1E),
-            child: SafeArea(
-              child: Column(children: [
-                Container(
-                  padding: const EdgeInsets.all(16),
-                  decoration: const BoxDecoration(
-                      border: Border(
-                          bottom:
-                              BorderSide(color: Colors.white24))),
-                  child: Row(children: [
+      right: 0,
+      top: 0,
+      bottom: 0,
+      width: drawerWidth,
+      child: SlideTransition(
+        position: _playlistSlideAnim,
+        child: Container(
+          color: const Color(0xFF1E1E1E),
+          child: SafeArea(
+            child: Column(children: [
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                decoration: const BoxDecoration(
+                    border: Border(
+                        bottom:
+                            BorderSide(color: Colors.white24))),
+                child: Column(children: [
+                  Row(children: [
                     Expanded(
                         child: Text(
-                            '播放列表 (${_playList.videos.length})',
+                            _playlistFilter.isEmpty
+                                ? '播放列表 (${_currentIndex + 1}/${_playList.videos.length})'
+                                : '筛选结果 (${filteredVideos.length})',
                             style: const TextStyle(
                                 color: Colors.white,
-                                fontSize: 18,
+                                fontSize: 16,
                                 fontWeight: FontWeight.bold))),
                     IconButton(
+                        icon: Icon(
+                            _showPlaylistFilter ? Icons.search_off : Icons.search,
+                            color: Colors.white,
+                            size: 20),
+                        padding: EdgeInsets.zero,
+                        constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                        onPressed: () {
+                          setState(() {
+                            _showPlaylistFilter = !_showPlaylistFilter;
+                            if (!_showPlaylistFilter) {
+                              _playlistFilter = '';
+                              _playlistFilterController.clear();
+                            }
+                          });
+                        }),
+                    IconButton(
                         icon: const Icon(Icons.close,
-                            color: Colors.white),
+                            color: Colors.white,
+                            size: 20),
+                        padding: EdgeInsets.zero,
+                        constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
                         onPressed: _togglePlaylist),
                   ]),
-                ),
+                  if (_showPlaylistFilter)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 6),
+                      child: Row(children: [
+                        Expanded(
+                          child: TextField(
+                            controller: _playlistFilterController,
+                            autofocus: true,
+                            style: const TextStyle(color: Colors.white, fontSize: 13),
+                            decoration: InputDecoration(
+                              hintText: '输入关键词筛选…',
+                              hintStyle: const TextStyle(color: Colors.white38, fontSize: 13),
+                              isDense: true,
+                              contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                              border: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(6),
+                                borderSide: const BorderSide(color: Colors.white24),
+                              ),
+                              enabledBorder: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(6),
+                                borderSide: const BorderSide(color: Colors.white24),
+                              ),
+                              focusedBorder: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(6),
+                                borderSide: const BorderSide(color: Colors.blue),
+                              ),
+                              filled: true,
+                              fillColor: Colors.white.withOpacity(0.08),
+                            ),
+                            onSubmitted: (_) {
+                              FocusScope.of(context).unfocus();
+                              setState(() {
+                                _playlistFilter = _playlistFilterController.text;
+                              });
+                            },
+                          ),
+                        ),
+                        const SizedBox(width: 6),
+                        SizedBox(
+                          height: 36,
+                          child: FilledButton(
+                            onPressed: () {
+                              FocusScope.of(context).unfocus();
+                              setState(() {
+                                _playlistFilter = _playlistFilterController.text;
+                              });
+                            },
+                            style: FilledButton.styleFrom(
+                              padding: const EdgeInsets.symmetric(horizontal: 10),
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+                            ),
+                            child: const Text('确定', style: TextStyle(fontSize: 12)),
+                          ),
+                        ),
+                      ]),
+                    ),
+                ]),
+              ),
+              if (filteredVideos.isEmpty)
+                const Expanded(
+                  child: Center(
+                    child: Text('没有匹配的视频', style: TextStyle(color: Colors.white38, fontSize: 14)),
+                  ),
+                )
+              else
                 Expanded(
                   child: ListView.builder(
-                    itemCount: _sortedVideos.length,
+                    itemCount: filteredVideos.length,
                     itemBuilder: (_, idx) {
-                      final item = _sortedVideos[idx];
-                      final isPlaying = idx == currentSortedIdx;
+                      final item = filteredVideos[idx];
+                      final originalIdx = _sortedVideos.indexOf(item);
+                      final isPlaying = _playList.videos[_currentIndex].filePath == item.filePath;
                       return ListTile(
+                        dense: true,
+                        contentPadding: const EdgeInsets.symmetric(horizontal: 10),
                         leading: Icon(
                             isPlaying
                                 ? Icons.play_arrow
                                 : Icons.video_file,
+                            size: 18,
                             color: isPlaying
                                 ? Colors.blue
                                 : Colors.white70),
@@ -1418,6 +1638,7 @@ class _StrmPlayerScreenState extends State<StrmPlayerScreen>
                           style: TextStyle(
                               color:
                                   isPlaying ? Colors.blue : Colors.white,
+                              fontSize: 12,
                               fontWeight: isPlaying
                                   ? FontWeight.bold
                                   : FontWeight.normal),
@@ -1427,7 +1648,7 @@ class _StrmPlayerScreenState extends State<StrmPlayerScreen>
                         trailing: isPlaying
                             ? Container(
                                 padding: const EdgeInsets.symmetric(
-                                    horizontal: 8, vertical: 2),
+                                    horizontal: 6, vertical: 2),
                                 decoration: BoxDecoration(
                                     color: Colors.blue,
                                     borderRadius:
@@ -1435,16 +1656,15 @@ class _StrmPlayerScreenState extends State<StrmPlayerScreen>
                                 child: const Text("播放中",
                                     style: TextStyle(
                                         color: Colors.white,
-                                        fontSize: 10)))
+                                        fontSize: 9)))
                             : null,
                         selected: isPlaying,
                         selectedTileColor:
                             Colors.blue.withOpacity(0.1),
                         onTap: () {
-                          final originalIdx =
-                              _videoIndexMap[idx] ?? idx;
+                          final mapIdx = _videoIndexMap[originalIdx] ?? originalIdx;
                           _togglePlaylist();
-                          _playAt(originalIdx);
+                          _playAt(mapIdx);
                         },
                       );
                     },

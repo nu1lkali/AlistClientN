@@ -74,6 +74,7 @@ import 'package:flutter_smart_dialog/flutter_smart_dialog.dart';
 import 'package:get/get.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:permission_handler/permission_handler.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:pull_to_refresh/pull_to_refresh.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -142,6 +143,7 @@ class _FileListScreenState extends State<FileListScreen>
   // use key to get the more icon's location and size
   final GlobalKey _moreIconKey = GlobalKey();
   dio.CancelToken? _cancelToken;
+  dio.CancelToken? _strmCancelToken;
   String? _pageName;
   String? _password;
 
@@ -463,6 +465,8 @@ class _FileListScreenState extends State<FileListScreen>
     }
     // async load video watch progress
     _loadVideoProgress(allFiles);
+    // background preload strm URLs
+    _preloadStrmUrls(allFiles);
     // cache this result and preload subdirectories
     _preloadCache[path] = allFiles;
     
@@ -505,6 +509,7 @@ class _FileListScreenState extends State<FileListScreen>
     _userStreamSubscription?.cancel();
     _fileDeletedSubscription?.cancel();
     _cancelToken?.cancel();
+    _strmCancelToken?.cancel();
     _fabScrollController.dispose();
     Log.d("dispose", tag: tag);
   }
@@ -1472,6 +1477,12 @@ class _FileListScreenState extends State<FileListScreen>
                 tooltip: "批量下载",
                 onPressed: _selectedIndices.isEmpty ? null : _batchDownload,
               ),
+              if (_selectedIndices.any((i) => i < _filteredFiles.length && _filteredFiles[i].type == FileType.strm))
+                IconButton(
+                  icon: const Icon(Icons.link_rounded),
+                  tooltip: "导出 strm URL",
+                  onPressed: _selectedIndices.isEmpty ? null : _batchExportStrmUrls,
+                ),
               if (_hasWritePermission)
                 IconButton(
                   icon: const Icon(Icons.drive_file_move_rounded),
@@ -2413,6 +2424,20 @@ class _FileListScreenState extends State<FileListScreen>
     }
   }
 
+  /// 后台预解析目录中的 .strm 文件，结果存入数据库缓存
+  void _preloadStrmUrls(List<FileItemVO> files) async {
+    final strmFiles = files.where((f) => !f.isDir && f.type == FileType.strm).toList();
+    if (strmFiles.isEmpty) return;
+
+    // 延迟 2 秒启动，避免影响首屏加载
+    await Future.delayed(const Duration(seconds: 2));
+    if (!mounted) return;
+
+    final entries = strmFiles.map((f) => {'path': f.path, 'sign': f.sign}).toList();
+    // 使用 StrmParser 的并发池，结果自动写入数据库缓存
+    await StrmParser.batchParseStrmUrls(entries);
+  }
+
   void _generateVideoThumbnails(List<FileItemVO> files) async {
     for (final file in files) {
       if (!mounted) return;
@@ -2958,6 +2983,79 @@ class _FileListScreenState extends State<FileListScreen>
     });
   }
 
+  void _batchExportStrmUrls() {
+    final strmFiles = _selectedIndices
+        .where((i) => i < _filteredFiles.length && _filteredFiles[i].type == FileType.strm)
+        .map((i) => _filteredFiles[i])
+        .toList();
+
+    if (strmFiles.isEmpty) {
+      SmartDialog.showToast("没有选中 .strm 文件");
+      return;
+    }
+
+    SmartDialog.show(
+      builder: (context) => AlertDialog(
+        title: const Text("导出 strm URL"),
+        content: Text("将解析 ${strmFiles.length} 个 .strm 文件的真实视频 URL"),
+        actions: [
+          TextButton(
+            onPressed: () {
+              SmartDialog.dismiss();
+              _doExportStrmUrls(strmFiles, toClipboard: true);
+            },
+            child: const Text("复制到剪贴板"),
+          ),
+          TextButton(
+            onPressed: () {
+              SmartDialog.dismiss();
+              _doExportStrmUrls(strmFiles, toClipboard: false);
+            },
+            child: const Text("保存到文件"),
+          ),
+          TextButton(
+            onPressed: () => SmartDialog.dismiss(),
+            child: const Text("取消"),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _doExportStrmUrls(List<FileItemVO> strmFiles, {required bool toClipboard}) async {
+    SmartDialog.showLoading(msg: "正在解析 ${strmFiles.length} 个 .strm 文件…");
+
+    final entries = strmFiles.map((f) => {'path': f.path, 'sign': f.sign}).toList();
+    final results = await StrmParser.batchParseStrmUrls(entries);
+
+    SmartDialog.dismiss();
+
+    if (results.isEmpty) {
+      SmartDialog.showToast("没有成功解析的 URL");
+      return;
+    }
+
+    final sb = StringBuffer();
+    for (final r in results) {
+      sb.writeln(r['url']);
+    }
+    final text = sb.toString().trimRight();
+
+    if (toClipboard) {
+      await Clipboard.setData(ClipboardData(text: text));
+      SmartDialog.showToast("已复制 ${results.length} 个 URL 到剪贴板");
+    } else {
+      try {
+        final dir = await getTemporaryDirectory();
+        final file = File('${dir.path}/strm_urls_export_${DateTime.now().millisecondsSinceEpoch}.txt');
+        await file.writeAsString(text);
+        SmartDialog.showToast("已导出到 ${file.path}");
+      } catch (e) {
+        SmartDialog.showToast("导出失败: $e");
+      }
+    }
+  }
+
   void _batchDelete() {
     final names = _selectedIndices.map((i) => _filteredFiles[i].name).toList();
     SmartDialog.show(
@@ -3262,105 +3360,91 @@ class _FileListScreenState extends State<FileListScreen>
 
   /// .strm 文件播放入口 —— 解析 strm 内容获得真实视频流 URL，使用专用播放器
   void _goStrmPlayerScreen(BuildContext context, FileItemVO file) async {
+    _strmCancelToken?.cancel();
+    SmartDialog.dismiss(); // 先清理掉旧的 loading/toast
+    _strmCancelToken = dio.CancelToken();
+    final token = _strmCancelToken; // 捕获当前 token 引用
+
     SmartDialog.showLoading(msg: '正在解析 .strm 文件…');
 
-    final currentUrl = await StrmParser.parseStrmUrl(file.path, file.sign);
+    // 1. 解析当前文件
+    String? currentUrl;
+    try {
+      currentUrl = await StrmParser.parseStrmUrl(file.path, file.sign, cancelToken: token);
+    } catch (e) {
+      debugPrint('_goStrmPlayerScreen parse error: $e');
+    }
 
+    if (token?.isCancelled ?? false) return;
+
+    if (!mounted) {
+      SmartDialog.dismiss();
+      return;
+    }
     if (currentUrl == null) {
       SmartDialog.dismiss();
       SmartDialog.showToast('无法解析 .strm 文件中的视频流 URL');
       return;
     }
-
-    // 先收集同目录其他 .strm 文件（await 确保收集完成再导航）
-    final otherUrls = await _collectSiblingStrmFiles(file.path);
     SmartDialog.dismiss();
 
-    // 构建 strm 专用播放器的播放列表（大小由播放器在播放时按需获取，避免批量 HEAD 触发风控）
-    final List<TikTokVideoItem> strmVideos = [];
-
-    strmVideos.add(TikTokVideoItem(
-      id: file.path,
-      fileName: file.name,
-      videoUrl: currentUrl,
-      filePath: file.path,
-      sign: '',
-      provider: file.provider,
-      thumb: file.thumb,
-      fileSize: null,
-      modifiedMilliseconds: file.modifiedMilliseconds,
-    ));
-
-    for (final entry in otherUrls) {
-      strmVideos.add(TikTokVideoItem(
-        id: entry['path'] ?? '',
-        fileName: entry['name'] ?? '',
-        videoUrl: entry['url'] ?? '',
-        filePath: entry['path'] ?? '',
-        sign: '',
-        provider: file.provider,
-        thumb: '',
-        fileSize: null,
-        modifiedMilliseconds: file.modifiedMilliseconds,
-      ));
-    }
-
-    if (!context.mounted) return;
+    // 2. 构建播放列表（先只有当前文件）
     final playList = TikTokPlayListModel(
-      videos: strmVideos,
+      videos: [
+        TikTokVideoItem(
+          id: file.path,
+          fileName: file.name,
+          videoUrl: currentUrl,
+          filePath: file.path,
+          sign: '',
+          provider: file.provider,
+          thumb: file.thumb,
+          fileSize: null,
+          modifiedMilliseconds: file.modifiedMilliseconds,
+        ),
+      ],
       initialIndex: 0,
       recordHistory: true,
     );
+
+    if (!context.mounted) return;
     Get.toNamed(NamedRouter.strmPlayer, arguments: playList);
-  }
 
-  /// 异步收集当前文件所在目录下的其他 .strm 文件，并返回解析后的 URL 列表
-  ///
-  /// 不影响主流程，在后台异步执行后将结果添加到播放列表中。
-  Future<List<Map<String, String>>> _collectSiblingStrmFiles(String currentFilePath) async {
-    try {
-      // 从当前文件路径提取所在目录
-      final lastSlash = currentFilePath.lastIndexOf('/');
-      final parentDir = lastSlash > 0 ? currentFilePath.substring(0, lastSlash) : '/';
+    // 3. 后台逐个解析同目录其他 .strm 文件，每完成一个立即追加到播放列表
+    //    已缓存的直接读数据库（毫秒级），未缓存的走网络请求（慢但会存库）
+    final siblingFiles = _files.where((f) =>
+      !f.isDir && f.type == FileType.strm && f.path != file.path
+    ).toList();
+    if (siblingFiles.isEmpty) return;
 
-      // 查找同目录下的所有 .strm 文件（使用已有的文件列表或远程获取）
-      final strmFiles = _files.where((f) =>
-        !f.isDir &&
-        f.type == FileType.strm &&
-        f.path != currentFilePath
-      ).toList();
-
-      if (strmFiles.isEmpty) return [];
-
-      // 批量解析 .strm URL
-      final entries = strmFiles.map((f) => {
-        'path': f.path,
-        'sign': f.sign,
-      }).toList();
-
-      final results = await StrmParser.batchParseStrmUrls(entries);
-
-      // 构建带文件名的结果列表
-      final nameMap = <String, String>{};
-      for (final f in strmFiles) {
-        nameMap[f.path] = f.name;
-      }
-
-      return results.map((r) => {
-        'name': nameMap[r['path']] ?? r['path'] ?? '',
-        'url': r['url'] ?? '',
-        'path': r['path'] ?? '',
-      }).toList();
-    } catch (e) {
-      debugPrint('_collectSiblingStrmFiles error: $e');
-      return [];
+    for (final sibling in siblingFiles) {
+      if (token?.isCancelled ?? false) break;
+      try {
+        final url = await StrmParser.parseStrmUrl(sibling.path, sibling.sign, cancelToken: token);
+        if (url != null && url.isNotEmpty) {
+          playList.videos.add(TikTokVideoItem(
+            id: sibling.path,
+            fileName: sibling.name,
+            videoUrl: url,
+            filePath: sibling.path,
+            sign: '',
+            provider: sibling.provider,
+            thumb: '',
+            fileSize: null,
+            modifiedMilliseconds: sibling.modifiedMilliseconds,
+          ));
+        }
+      } catch (_) {}
     }
   }
 
   /// 入口三：.strm 文件 -> 视界流播放
   /// 解析当前 .strm 及同目录所有 .strm 文件，构建 TikTokPlayListModel 并跳转
   void _goTiktokPlayerFromStrm(FileItemVO file) async {
-    SmartDialog.showLoading(msg: '正在解析 .strm 文件…');
+    _strmCancelToken?.cancel();
+    SmartDialog.dismiss(); // 先清理掉旧的 loading/toast
+    _strmCancelToken = dio.CancelToken();
+    final token = _strmCancelToken; // 捕获当前 token 引用
 
     // 收集当前文件及同目录其他 .strm 文件
     final strmFiles = _files.where((f) =>
@@ -3368,18 +3452,30 @@ class _FileListScreenState extends State<FileListScreen>
     ).toList();
 
     if (strmFiles.isEmpty) {
-      SmartDialog.dismiss();
       SmartDialog.showToast('没有找到 .strm 文件');
       return;
     }
 
-    // 批量解析所有 .strm 文件
-    final entries = strmFiles.map((f) => {
-      'path': f.path,
-      'sign': f.sign,
-    }).toList();
+    SmartDialog.showLoading(msg: '正在解析 ${strmFiles.length} 个 .strm 文件…');
 
-    final parsedResults = await StrmParser.batchParseStrmUrls(entries);
+    List<Map<String, String>> parsedResults = [];
+    try {
+      final entries = strmFiles.map((f) => {
+        'path': f.path,
+        'sign': f.sign,
+      }).toList();
+      parsedResults = await StrmParser.batchParseStrmUrls(entries, cancelToken: token);
+    } catch (e) {
+      debugPrint('_goTiktokPlayerFromStrm batchParse error: $e');
+    }
+
+    // token 已被新的调用取消，静默退出
+    if (token?.isCancelled ?? false) return;
+
+    if (!mounted) {
+      SmartDialog.dismiss();
+      return;
+    }
     SmartDialog.dismiss();
 
     if (parsedResults.isEmpty) {

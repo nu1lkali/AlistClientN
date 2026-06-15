@@ -50,6 +50,7 @@ class _RecentsScreenState extends State<RecentsScreen>
     with AutomaticKeepAliveClientMixin {
   final UserController _userController = Get.find();
   final CancelToken _cancelToken = CancelToken();
+  CancelToken? _strmCancelToken;
   final AlistDatabaseController _databaseController = Get.find();
   final _loading = true.obs;
   final _list = <FileViewingRecord>[].obs;
@@ -76,6 +77,7 @@ class _RecentsScreenState extends State<RecentsScreen>
   @override
   void dispose() {
     _cancelToken.cancel();
+    _strmCancelToken?.cancel();
     _userStreamSubscription?.cancel();
     _recordListSubscription?.cancel();
     super.dispose();
@@ -261,9 +263,12 @@ class _RecentsScreenState extends State<RecentsScreen>
 
   /// .strm 文件播放入口：解析 strm 内容获取真实视频流 URL，跳转到 strm 专用播放器
   void _gotoStrmPlayer(FileViewingRecord file) async {
+    _strmCancelToken?.cancel();
+    _strmCancelToken = CancelToken();
+
     SmartDialog.showLoading(msg: '正在解析 .strm 文件…');
 
-    final videoUrl = await StrmParser.parseStrmUrl(file.path, file.sign);
+    final videoUrl = await StrmParser.parseStrmUrl(file.path, file.sign, cancelToken: _strmCancelToken);
     SmartDialog.dismiss();
 
     if (videoUrl == null || videoUrl.isEmpty) {

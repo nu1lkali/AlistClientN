@@ -1,7 +1,7 @@
 /// TikTok 播放列表数据模型
 /// 用于在文件列表页和 TikTok 播放器页之间传递数据
 class TikTokPlayListModel {
-  /// 播放列表
+  /// 播放列表（可变，支持后台动态追加）
   final List<TikTokVideoItem> videos;
 
   /// 初始播放位置索引
