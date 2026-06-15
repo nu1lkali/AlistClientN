@@ -11,6 +11,7 @@ import 'package:alist/database/table/video_viewing_record.dart';
 import 'package:alist/entity/tiktok_play_list_model.dart';
 import 'package:alist/util/constant.dart';
 import 'package:alist/util/log_utils.dart' as log;
+import 'package:alist/util/stream_size_resolver.dart';
 import 'package:alist/util/user_controller.dart';
 import 'package:flustars/flustars.dart';
 import 'package:flutter/material.dart';
@@ -327,19 +328,6 @@ class _StrmPlayerScreenState extends State<StrmPlayerScreen>
   }
 
   // ═══════════════ Controller Management ═══════════════
-  Future<int?> _fetchVideoSize(String url) async {
-    try {
-      final client = HttpClient();
-      client.connectionTimeout = const Duration(seconds: 5);
-      final req = await client.openUrl('HEAD', Uri.parse(url));
-      final resp = await req.close();
-      final length = resp.contentLength;
-      client.close();
-      if (length > 0) return length;
-    } catch (_) {}
-    return null;
-  }
-
   Future<void> _initController(int idx) async {
     if (idx < 0 || idx >= _playList.videos.length) return;
     if (_isInitializing) return;
@@ -383,15 +371,16 @@ class _StrmPlayerScreenState extends State<StrmPlayerScreen>
       _startTimer();
       if (mounted) setState(() {});
 
-      // Fetch real video size in background (non-blocking)
-      _fetchVideoSize(url).then((size) {
-        if (size != null && size > 0 && mounted && _currentIndex == idx) {
-          _playList.videos[idx].fileSize = size;
-          // 更新观看记录中的文件大小（解决 strm 文件记录显示 0B 的问题）
-          _recordViewing(idx);
-          if (mounted) setState(() {});
-        }
-      });
+      // Fetch real video size in background (non-blocking, cached)
+      if (_playList.videos[idx].fileSize == null || _playList.videos[idx].fileSize! <= 0) {
+        StreamSizeResolver.resolve(url).then((size) {
+          if (size != null && size > 0 && mounted && _currentIndex == idx) {
+            _playList.videos[idx].fileSize = size;
+            _recordViewing(idx);
+            if (mounted) setState(() {});
+          }
+        });
+      }
 
       // Schedule preload of next video after 2 seconds
       _schedulePreload(idx);
@@ -435,13 +424,6 @@ class _StrmPlayerScreenState extends State<StrmPlayerScreen>
       }
       _preloadController = ctrl;
       _preloadIdx = idx;
-
-      _fetchVideoSize(url).then((size) {
-        if (size != null && size > 0 && mounted) {
-          _playList.videos[idx].fileSize = size;
-          if (mounted) setState(() {});
-        }
-      });
     } catch (_) {}
   }
 

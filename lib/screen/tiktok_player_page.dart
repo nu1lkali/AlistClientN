@@ -294,11 +294,10 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
       if (idx == _currentIndex) { ctrl.play(); _isPlaying = true; _recordViewing(idx); }
       if (mounted) setState(() {});
 
-      // 异步获取真实视频流大小（解决 strm 文件显示 0B 的问题）
-      if (v.fileSize == null || v.fileSize! <= 0) {
+      // 仅当前播放视频获取大小，预加载视频延迟到切换时再获取（减少CDN请求）
+      if (idx == _currentIndex && (v.fileSize == null || v.fileSize! <= 0)) {
         StreamSizeResolver.resolveAsync(v.videoUrl!, (size) {
           v.fileSize = size;
-          // 更新观看记录中的文件大小
           if (idx == _currentIndex) _recordViewing(idx);
           if (mounted) setState(() {});
         });

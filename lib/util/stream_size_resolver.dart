@@ -1,6 +1,5 @@
 import 'dart:io';
 
-import 'package:alist/util/log_utils.dart';
 import 'package:alist/util/strm_parser.dart';
 
 /// 公共的流媒体真实大小解析服务
@@ -14,16 +13,61 @@ import 'package:alist/util/strm_parser.dart';
 class StreamSizeResolver {
   StreamSizeResolver._();
 
-  /// 通过 HEAD 请求获取远程流媒体的实际大小
+  static final Map<String, int> _sizeCache = {};
+
+  /// 获取远程流媒体的实际大小（结果会缓存，同一URL只请求一次）
+  ///
+  /// 优先用 GET Range bytes=0-0 从 Content-Range 头解析总大小，
+  /// CDN 将其视为正常播放请求，不易触发风控。
+  /// 若 Range 请求失败或未返回大小，则兜底 HEAD。
   ///
   /// [url] - 远程视频流的完整 URL
-  /// [timeout] - 请求超时时间，默认 3 秒（避免阻塞播放体验）
+  /// [timeout] - 请求超时时间，默认 3 秒
   ///
   /// 返回文件大小（字节），失败返回 null
   static Future<int?> resolve(String url, {Duration? timeout}) async {
+    if (_sizeCache.containsKey(url)) return _sizeCache[url];
+    final effectiveTimeout = timeout ?? const Duration(seconds: 3);
+    int? size = await _resolveWithRangeGet(url, effectiveTimeout);
+    size ??= await _resolveWithHead(url, effectiveTimeout);
+    if (size != null && size > 0) {
+      _sizeCache[url] = size;
+      return size;
+    }
+    return null;
+  }
+
+  /// GET Range bytes=0-0，从 Content-Range: bytes 0-0/TOTAL 解析总大小
+  static Future<int?> _resolveWithRangeGet(String url, Duration timeout) async {
     try {
       final client = HttpClient();
-      client.connectionTimeout = timeout ?? const Duration(seconds: 3);
+      client.connectionTimeout = timeout;
+      client.idleTimeout = const Duration(seconds: 3);
+      final req = await client.openUrl('GET', Uri.parse(url));
+      req.headers.set('Range', 'bytes=0-0');
+      final resp = await req.close();
+      int? size;
+      if (resp.statusCode == 206) {
+        final cr = resp.headers.value('content-range');
+        if (cr != null) {
+          final m = RegExp(r'/(\d+)').firstMatch(cr);
+          if (m != null) size = int.tryParse(m.group(1)!);
+        }
+        size ??= resp.contentLength;
+      } else if (resp.statusCode == 200) {
+        size = resp.contentLength;
+      }
+      client.close(force: true);
+      if (size != null && size > 0) return size;
+    } catch (_) {}
+    return null;
+  }
+
+  /// HEAD 请求兜底
+  static Future<int?> _resolveWithHead(String url, Duration timeout) async {
+    try {
+      final client = HttpClient();
+      client.connectionTimeout = timeout;
       client.idleTimeout = const Duration(seconds: 3);
       final req = await client.openUrl('HEAD', Uri.parse(url));
       final resp = await req.close();
