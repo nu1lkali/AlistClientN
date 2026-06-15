@@ -34,24 +34,94 @@
             android:layout_height="match_parent"
             android:orientation="vertical">
 
+            <!-- 安全边距：避免覆盖状态栏 -->
+            <View
+                android:id="@+id/playlist_status_bar_spacer"
+                android:layout_width="match_parent"
+                android:layout_height="0dp" />
+
             <!-- 标题栏 -->
             <LinearLayout
                 android:layout_width="match_parent"
-                android:layout_height="56dp"
+                android:layout_height="48dp"
                 android:orientation="horizontal"
                 android:gravity="center_vertical"
-                android:paddingStart="20dp"
-                android:paddingEnd="20dp"
+                android:paddingStart="16dp"
+                android:paddingEnd="8dp"
                 android:background="#1AFFFFFF">
 
                 <TextView
+                    android:id="@+id/tv_playlist_title"
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
                     android:layout_weight="1"
                     android:text="播放列表"
                     android:textColor="#FFFFFF"
-                    android:textSize="17sp"
+                    android:textSize="15sp"
                     android:fontFamily="sans-serif-medium" />
+
+                <ImageView
+                    android:id="@+id/btn_playlist_search"
+                    android:layout_width="36dp"
+                    android:layout_height="36dp"
+                    android:padding="8dp"
+                    android:scaleType="centerInside"
+                    android:src="@android:drawable/ic_menu_search"
+                    android:contentDescription="搜索" />
+
+                <ImageView
+                    android:id="@+id/btn_playlist_close"
+                    android:layout_width="36dp"
+                    android:layout_height="36dp"
+                    android:padding="8dp"
+                    android:scaleType="centerInside"
+                    android:src="@android:drawable/ic_menu_close_clear_cancel"
+                    android:contentDescription="关闭" />
+
+            </LinearLayout>
+
+            <!-- 搜索栏（默认隐藏） -->
+            <LinearLayout
+                android:id="@+id/playlist_search_bar"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:paddingStart="12dp"
+                android:paddingEnd="8dp"
+                android:paddingTop="6dp"
+                android:paddingBottom="6dp"
+                android:background="#1AFFFFFF"
+                android:visibility="gone">
+
+                <EditText
+                    android:id="@+id/et_playlist_search"
+                    android:layout_width="0dp"
+                    android:layout_height="36dp"
+                    android:layout_weight="1"
+                    android:hint="输入关键词筛选…"
+                    android:textColorHint="#80FFFFFF"
+                    android:textColor="#FFFFFF"
+                    android:textSize="13sp"
+                    android:background="@drawable/playlist_search_bg"
+                    android:paddingStart="10dp"
+                    android:paddingEnd="10dp"
+                    android:singleLine="true"
+                    android:imeOptions="actionSearch"
+                    android:inputType="text" />
+
+                <TextView
+                    android:id="@+id/btn_playlist_search_confirm"
+                    android:layout_width="wrap_content"
+                    android:layout_height="36dp"
+                    android:gravity="center"
+                    android:text="确定"
+                    android:textColor="#FFFFFF"
+                    android:textSize="13sp"
+                    android:background="?attr/selectableItemBackground"
+                    android:paddingStart="10dp"
+                    android:paddingEnd="10dp"
+                    android:layout_marginStart="6dp" />
 
             </LinearLayout>
 

@@ -406,10 +406,14 @@ class _FileListScreenState extends State<FileListScreen>
         "refresh": _forceRefresh
       };
 
-      await DioUtils.instance.requestNetwork<FileListRespEntity>(
+      final completer = Completer<void>();
+      DioUtils.instance.requestNetwork<FileListRespEntity>(
         Method.post, "fs/list", cancelToken: _cancelToken, params: body,
         onSuccess: (data) async {
-          if (data == null) return;
+          if (data == null) {
+            if (!completer.isCompleted) completer.complete();
+            return;
+          }
           lastData = data;
           final files = data.content ?? [];
           
@@ -418,19 +422,27 @@ class _FileListScreenState extends State<FileListScreen>
             allFiles.add(fileItemVO);
           }
           
-          // 使用服务端返回的 hasMore 和 pagesTotal 判断是否还有更多数据
           hasMore = data.hasMore;
           pagesTotal = data.pagesTotal;
           
-          // 如果还有更多数据，增加页码
           if (hasMore && currentPage < pagesTotal) {
             currentPage++;
           }
+          if (!completer.isCompleted) completer.complete();
         },
         onError: (code, msg) {
           debugPrint(msg);
+          hasMore = false;
+          if (!completer.isCompleted) completer.complete();
         },
       );
+      // 超时保护：防止 requestNetwork 既不调 onSuccess 也不调 onError 导致挂起
+      try {
+        await completer.future.timeout(const Duration(seconds: 15));
+      } on TimeoutException {
+        debugPrint('[FileList] loadPage timeout for page $page');
+        hasMore = false;
+      }
     }
 
     // 加载第一页
@@ -457,7 +469,16 @@ class _FileListScreenState extends State<FileListScreen>
     setState(() {
       _files = allFiles;
     });
-    _refreshController.refreshCompleted();
+    // 大目录可能因超时/网络问题返回空，保留已有缓存数据不覆盖
+    if (allFiles.isEmpty && _preloadCache.containsKey(path)) {
+      _files = _preloadCache[path]!;
+      setState(() {});
+      _refreshController.refreshCompleted();
+    } else if (allFiles.isEmpty) {
+      _refreshController.refreshFailed();
+    } else {
+      _refreshController.refreshCompleted();
+    }
     
     // async load folder thumbnails in grid view
     if (_menuAnchorController.isGridView.value) {
@@ -1108,8 +1129,6 @@ class _FileListScreenState extends State<FileListScreen>
     }
     final random = Random();
     final randomVideo = videos[random.nextInt(videos.length)];
-    videos.remove(randomVideo);
-    videos.insert(0, randomVideo);
     _goVideoPlayerScreen(context, randomVideo, videos, false);
   }
 
@@ -1205,9 +1224,6 @@ class _FileListScreenState extends State<FileListScreen>
       // Pick a random video from the found directory
       final random = Random();
       final randomVideo = videoFiles[random.nextInt(videoFiles.length)];
-      // 随机选中的视频置顶，保证 index=0
-      videoFiles.remove(randomVideo);
-      videoFiles.insert(0, randomVideo);
       _goVideoPlayerScreen(context, randomVideo, videoFiles, false);
     } catch (e) {
       SmartDialog.dismiss();
@@ -3367,7 +3383,7 @@ class _FileListScreenState extends State<FileListScreen>
 
     SmartDialog.showLoading(msg: '正在解析 .strm 文件…');
 
-    // 1. 解析当前文件
+    // 1. 解析当前点击的文件（只等这一个，快速打开页面）
     String? currentUrl;
     try {
       currentUrl = await StrmParser.parseStrmUrl(file.path, file.sign, cancelToken: token);
@@ -3376,7 +3392,6 @@ class _FileListScreenState extends State<FileListScreen>
     }
 
     if (token?.isCancelled ?? false) return;
-
     if (!mounted) {
       SmartDialog.dismiss();
       return;
@@ -3388,51 +3403,55 @@ class _FileListScreenState extends State<FileListScreen>
     }
     SmartDialog.dismiss();
 
-    // 2. 构建播放列表（先只有当前文件）
+    // 2. 收集所有同目录 .strm 文件（保持 _files 中的顺序）
+    final strmFiles = _files.where((f) =>
+      !f.isDir && f.type == FileType.strm
+    ).toList();
+
+    // 找到当前文件在 strmFiles 列表中的下标
+    final initialIndex = strmFiles.indexWhere((f) => f.path == file.path).clamp(0, strmFiles.length - 1);
+
+    // 3. 预构建完整播放列表（按 _files 顺序，未解析的 url 暂为空，后续懒填充）
+    final videos = <TikTokVideoItem>[];
+    for (int i = 0; i < strmFiles.length; i++) {
+      final f = strmFiles[i];
+      videos.add(TikTokVideoItem(
+        id: f.path,
+        fileName: f.name,
+        videoUrl: (f.path == file.path) ? currentUrl : null, // 当前文件已解析
+        filePath: f.path,
+        sign: '',
+        provider: f.provider,
+        thumb: f.thumb,
+        fileSize: null,
+        modifiedMilliseconds: f.modifiedMilliseconds,
+      ));
+    }
+
     final playList = TikTokPlayListModel(
-      videos: [
-        TikTokVideoItem(
-          id: file.path,
-          fileName: file.name,
-          videoUrl: currentUrl,
-          filePath: file.path,
-          sign: '',
-          provider: file.provider,
-          thumb: file.thumb,
-          fileSize: null,
-          modifiedMilliseconds: file.modifiedMilliseconds,
-        ),
-      ],
-      initialIndex: 0,
+      videos: videos,
+      initialIndex: initialIndex,
       recordHistory: true,
     );
 
     if (!context.mounted) return;
     Get.toNamed(NamedRouter.strmPlayer, arguments: playList);
 
-    // 3. 后台逐个解析同目录其他 .strm 文件，每完成一个立即追加到播放列表
-    //    已缓存的直接读数据库（毫秒级），未缓存的走网络请求（慢但会存库）
-    final siblingFiles = _files.where((f) =>
-      !f.isDir && f.type == FileType.strm && f.path != file.path
-    ).toList();
-    if (siblingFiles.isEmpty) return;
-
-    for (final sibling in siblingFiles) {
+    // 4. 后台逐个解析其余未解析的 .strm 文件，每完成一个立即填充 url
+    //    已缓存的直接读数据库（毫秒级），未缓存的走网络（慢但会存库）
+    for (final sibling in strmFiles) {
       if (token?.isCancelled ?? false) break;
+      if (sibling.path == file.path) continue; // 已经解析过
       try {
         final url = await StrmParser.parseStrmUrl(sibling.path, sibling.sign, cancelToken: token);
         if (url != null && url.isNotEmpty) {
-          playList.videos.add(TikTokVideoItem(
-            id: sibling.path,
-            fileName: sibling.name,
-            videoUrl: url,
-            filePath: sibling.path,
-            sign: '',
-            provider: sibling.provider,
-            thumb: '',
-            fileSize: null,
-            modifiedMilliseconds: sibling.modifiedMilliseconds,
-          ));
+          // 按 path 匹配到对应的预构建条目，填充 videoUrl
+          for (final v in videos) {
+            if (v.filePath == sibling.path) {
+              v.videoUrl = url;
+              break;
+            }
+          }
         }
       } catch (_) {}
     }

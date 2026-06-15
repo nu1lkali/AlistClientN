@@ -94,6 +94,11 @@ class _RecentsScreenState extends State<RecentsScreen>
           tooltip: '输入流媒体地址播放',
           onPressed: _showUrlInputDialog,
         ),
+        IconButton(
+          icon: const Icon(Icons.delete_sweep_rounded),
+          tooltip: '清空记录',
+          onPressed: _confirmClearAll,
+        ),
       ],
       body: Obx(
         () => !_loading.value && _list.isEmpty
@@ -297,6 +302,43 @@ class _RecentsScreenState extends State<RecentsScreen>
       recordHistory: true,
     );
     Get.toNamed(NamedRouter.strmPlayer, arguments: playList);
+  }
+
+  void _confirmClearAll() {
+    if (_list.isEmpty) {
+      SmartDialog.showToast('没有访问记录');
+      return;
+    }
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('清空访问记录'),
+        content: Text('确定要清空全部 ${_list.length} 条访问记录吗？此操作不可撤销。'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('取消'),
+          ),
+          TextButton(
+            onPressed: () {
+              Navigator.pop(ctx);
+              _clearAllRecords();
+            },
+            child: Text(Intl.deleteFileDialog_btn_ok.tr, style: const TextStyle(color: Colors.red)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _clearAllRecords() async {
+    try {
+      final u = _userController.user.value;
+      await _databaseController.fileViewingRecordDao.deleteAllByUser(u.serverUrl, u.username);
+      SmartDialog.showToast('已清空全部访问记录');
+    } catch (e) {
+      SmartDialog.showToast('清空失败: $e');
+    }
   }
 
   void _showUrlInputDialog() {

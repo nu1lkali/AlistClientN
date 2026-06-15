@@ -966,6 +966,13 @@ class _StrmPlayerScreenState extends State<StrmPlayerScreen>
         (v) => v.filePath == _playList.videos[_currentIndex].filePath);
   }
 
+  void _syncCurrentIndexAfterSort(String currentPath) {
+    final sortedIdx = _sortedVideos.indexWhere((v) => v.filePath == currentPath);
+    if (sortedIdx >= 0) {
+      _currentIndex = _videoIndexMap[sortedIdx] ?? sortedIdx;
+    }
+  }
+
   void _togglePlaylist() {
     if (_isPlaylistVisible) {
       _playlistAnimController.reverse();
@@ -1494,8 +1501,12 @@ class _StrmPlayerScreenState extends State<StrmPlayerScreen>
   Widget _buildPlaylistDrawer() {
     final filteredVideos = _playlistFilter.isEmpty
         ? _sortedVideos
-        : _sortedVideos.where((v) =>
-            v.fileName.toLowerCase().contains(_playlistFilter.toLowerCase())).toList();
+        : _sortedVideos.where((v) {
+            final nameWithoutExt = v.fileName.contains('.')
+                ? v.fileName.substring(0, v.fileName.lastIndexOf('.'))
+                : v.fileName;
+            return nameWithoutExt.toLowerCase().contains(_playlistFilter.toLowerCase());
+          }).toList();
     final drawerWidth = MediaQuery.of(context).size.width * 0.7;
 
     return Positioned(
@@ -1520,7 +1531,7 @@ class _StrmPlayerScreenState extends State<StrmPlayerScreen>
                     Expanded(
                         child: Text(
                             _playlistFilter.isEmpty
-                                ? '播放列表 (${_currentIndex + 1}/${_playList.videos.length})'
+                                ? '播放列表 (${_getCurrentSortedIndex() + 1}/${_sortedVideos.length})'
                                 : '筛选结果 (${filteredVideos.length})',
                             style: const TextStyle(
                                 color: Colors.white,
@@ -1689,6 +1700,7 @@ class _StrmPlayerScreenState extends State<StrmPlayerScreen>
                                 '名称${_nameSortAscending ? "↑" : "↓"}',
                             onPressed: () {
                               setState(() {
+                                final currentPath = _playList.videos[_currentIndex].filePath;
                                 if (_nameSortAscending) {
                                   _sortedVideos.sort((a, b) =>
                                       _naturalCompare(
@@ -1702,6 +1714,7 @@ class _StrmPlayerScreenState extends State<StrmPlayerScreen>
                                 }
                                 _nameSortAscending =
                                     !_nameSortAscending;
+                                _syncCurrentIndexAfterSort(currentPath);
                                 _updateVideoIndexMap();
                               });
                             }),
@@ -1713,6 +1726,7 @@ class _StrmPlayerScreenState extends State<StrmPlayerScreen>
                                 '大小${_sizeSortAscending ? "↑" : "↓"}',
                             onPressed: () {
                               setState(() {
+                                final currentPath = _playList.videos[_currentIndex].filePath;
                                 if (_sizeSortAscending) {
                                   _sortedVideos.sort((a, b) =>
                                       (b.fileSize ?? 0)
@@ -1726,6 +1740,7 @@ class _StrmPlayerScreenState extends State<StrmPlayerScreen>
                                 }
                                 _sizeSortAscending =
                                     !_sizeSortAscending;
+                                _syncCurrentIndexAfterSort(currentPath);
                                 _updateVideoIndexMap();
                               });
                             }),
@@ -1807,14 +1822,16 @@ class _VerticalSliderIndicator extends StatelessWidget {
                 color: Colors.white.withOpacity(0.1),
                 borderRadius: BorderRadius.circular(12)),
             child: Stack(alignment: Alignment.bottomCenter, children: [
-              Container(
-                  width: 8,
-                  height: 100,
-                  decoration: BoxDecoration(
-                      color: Colors.white.withOpacity(0.2),
-                      borderRadius: BorderRadius.circular(4))),
               Positioned(
-                  bottom: 0,
+                  bottom: 6,
+                  child: Container(
+                      width: 8,
+                      height: 100,
+                      decoration: BoxDecoration(
+                          color: Colors.white.withOpacity(0.2),
+                          borderRadius: BorderRadius.circular(4)))),
+              Positioned(
+                  bottom: 6,
                   child: Container(
                       width: 8,
                       height: 100 * value,

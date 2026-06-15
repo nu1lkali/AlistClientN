@@ -768,8 +768,11 @@ class _MediaKitPlayerScreenState extends State<MediaKitPlayerScreen>
     final w = _screenWidth * 0.75;
     final filteredVideos = _playlistFilter.isEmpty
         ? _videos.asMap().entries.toList()
-        : _videos.asMap().entries.where((e) =>
-            (e.value["name"] ?? "").toLowerCase().contains(_playlistFilter.toLowerCase())).toList();
+        : _videos.asMap().entries.where((e) {
+            final name = e.value["name"] ?? "";
+            final nameWithoutExt = name.contains('.') ? name.substring(0, name.lastIndexOf('.')) : name;
+            return nameWithoutExt.toLowerCase().contains(_playlistFilter.toLowerCase());
+          }).toList();
     return Stack(children: <Widget>[
       GestureDetector(onTap: _hidePlaylist, child: Container(color: Colors.black54)),
       Positioned(right: 0, top: 0, bottom: 0, width: w, child: SlideTransition(position: _playlistSlideAnimation, child: Container(color: const Color(0xFF1E1E1E), child: SafeArea(child: Column(children: <Widget>[
@@ -816,9 +819,9 @@ class _MediaKitPlayerScreenState extends State<MediaKitPlayerScreen>
           return ListTile(leading: Icon(isCur ? Icons.play_arrow : Icons.video_file, color: isCur ? Colors.blue : Colors.white70), title: Text(name, style: TextStyle(color: isCur ? Colors.blue : Colors.white, fontWeight: isCur ? FontWeight.bold : FontWeight.normal), maxLines: 2, overflow: TextOverflow.ellipsis), trailing: isCur ? Container(padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2), decoration: BoxDecoration(color: Colors.blue, borderRadius: BorderRadius.circular(4)), child: const Text("播放中", style: TextStyle(color: Colors.white, fontSize: 10))) : null, selected: isCur, selectedTileColor: Colors.blue.withOpacity(0.1), onTap: () { _hidePlaylist(); _playAt(idx); });
         })),
         Container(decoration: const BoxDecoration(color: Color(0x1AFFFFFF), border: Border(top: BorderSide(color: Colors.white24))), padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12), child: Row(mainAxisAlignment: MainAxisAlignment.spaceEvenly, children: [
-          _SortButton(icon: _nameSortAscending ? Icons.arrow_upward : Icons.arrow_downward, label: '名称${_nameSortAscending ? "↑" : "↓"}', onPressed: () { setState(() { if (_nameSortAscending) { _videos.sort((a, b) => _naturalCompare(b["name"] ?? "", a["name"] ?? "")); _showToast('名称降序'); } else { _videos.sort((a, b) => _naturalCompare(a["name"] ?? "", b["name"] ?? "")); _showToast('名称升序'); } _nameSortAscending = !_nameSortAscending; }); }),
-          _SortButton(icon: _sizeSortAscending ? Icons.arrow_upward : Icons.arrow_downward, label: '大小${_sizeSortAscending ? "↑" : "↓"}', onPressed: () { setState(() { if (_sizeSortAscending) { _videos.sort((a, b) => (int.tryParse(b["size"] ?? "0") ?? 0).compareTo(int.tryParse(a["size"] ?? "0") ?? 0)); _showToast('大小降序'); } else { _videos.sort((a, b) => (int.tryParse(a["size"] ?? "0") ?? 0).compareTo(int.tryParse(b["size"] ?? "0") ?? 0)); _showToast('大小升序'); } _sizeSortAscending = !_sizeSortAscending; }); }),
-          _SortButton(icon: Icons.shuffle, label: '随机', onPressed: () { setState(() => _videos.shuffle()); _showToast('已打乱顺序'); }),
+          _SortButton(icon: _nameSortAscending ? Icons.arrow_upward : Icons.arrow_downward, label: '名称${_nameSortAscending ? "↑" : "↓"}', onPressed: () { setState(() { final curPath = _videos[_index]["path"]; if (_nameSortAscending) { _videos.sort((a, b) => _naturalCompare(b["name"] ?? "", a["name"] ?? "")); _showToast('名称降序'); } else { _videos.sort((a, b) => _naturalCompare(a["name"] ?? "", b["name"] ?? "")); _showToast('名称升序'); } _nameSortAscending = !_nameSortAscending; final newIdx = _videos.indexWhere((v) => v["path"] == curPath); if (newIdx >= 0) _index = newIdx; }); }),
+          _SortButton(icon: _sizeSortAscending ? Icons.arrow_upward : Icons.arrow_downward, label: '大小${_sizeSortAscending ? "↑" : "↓"}', onPressed: () { setState(() { final curPath = _videos[_index]["path"]; if (_sizeSortAscending) { _videos.sort((a, b) => (int.tryParse(b["size"] ?? "0") ?? 0).compareTo(int.tryParse(a["size"] ?? "0") ?? 0)); _showToast('大小降序'); } else { _videos.sort((a, b) => (int.tryParse(a["size"] ?? "0") ?? 0).compareTo(int.tryParse(b["size"] ?? "0") ?? 0)); _showToast('大小升序'); } _sizeSortAscending = !_sizeSortAscending; final newIdx = _videos.indexWhere((v) => v["path"] == curPath); if (newIdx >= 0) _index = newIdx; }); }),
+          _SortButton(icon: Icons.shuffle, label: '随机', onPressed: () { setState(() { final curPath = _videos[_index]["path"]; _videos.shuffle(); final newIdx = _videos.indexWhere((v) => v["path"] == curPath); if (newIdx >= 0) _index = newIdx; }); _showToast('已打乱顺序'); }),
         ])),
       ]))))),
     ]);

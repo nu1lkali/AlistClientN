@@ -29,4 +29,11 @@ abstract class FileViewingRecordDao {
     String userId,
     String remotePath,
   );
+
+  @Query(
+      "DELETE FROM file_viewing_record WHERE server_url = :serverUrl AND user_id=:userId")
+  Future<void> deleteAllByUser(
+    String serverUrl,
+    String userId,
+  );
 }

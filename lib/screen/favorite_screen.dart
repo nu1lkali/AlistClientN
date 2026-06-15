@@ -98,6 +98,11 @@ class _FavoriteScreenState extends State<FavoriteScreen>
           tooltip: '随机播放视频',
           onPressed: _randomPlayVideo,
         ),
+        IconButton(
+          icon: const Icon(Icons.delete_sweep_rounded),
+          tooltip: '清空收藏',
+          onPressed: _confirmClearAll,
+        ),
       ],
       body: Obx(
         () => !_loading.value && _list.isEmpty
@@ -769,15 +774,61 @@ class _FavoriteScreenState extends State<FavoriteScreen>
   
   // 随机播放一个收藏的视频
   void _randomPlayVideo() {
-    final videos = _list.where((f) => !f.isDir && FileUtils.getFileType(f.isDir, f.name) == FileType.video).toList();
-    
+    final videos = _list.where((f) => !f.isDir && (
+      FileUtils.getFileType(f.isDir, f.name) == FileType.video ||
+      FileUtils.getFileType(f.isDir, f.name) == FileType.strm ||
+      StrmParser.isStrmFile(f.path)
+    )).toList();
+
     if (videos.isEmpty) {
       SmartDialog.showToast('收藏夹中没有视频');
       return;
     }
-    
+
     final random = Random();
     final randomVideo = videos[random.nextInt(videos.length)];
-    _gotoVideoPlayer(context, randomVideo, false);
+    final fileType = FileUtils.getFileType(randomVideo.isDir, randomVideo.name);
+    if (fileType == FileType.strm || StrmParser.isStrmFile(randomVideo.path)) {
+      _gotoStrmPlayer(randomVideo);
+    } else {
+      _gotoVideoPlayer(context, randomVideo, false);
+    }
+  }
+
+  void _confirmClearAll() {
+    if (_list.isEmpty) {
+      SmartDialog.showToast('收藏夹为空');
+      return;
+    }
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('清空收藏夹'),
+        content: Text('确定要清空全部 ${_list.length} 条收藏吗？此操作不可撤销。'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('取消'),
+          ),
+          TextButton(
+            onPressed: () {
+              Navigator.pop(ctx);
+              _clearAllFavorites();
+            },
+            child: const Text('确定', style: TextStyle(color: Colors.red)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _clearAllFavorites() async {
+    try {
+      final u = _userController.user.value;
+      await _databaseController.favoriteDao.deleteAllByUser(u.serverUrl, u.username);
+      SmartDialog.showToast('已清空全部收藏');
+    } catch (e) {
+      SmartDialog.showToast('清空失败: $e');
+    }
   }
 }

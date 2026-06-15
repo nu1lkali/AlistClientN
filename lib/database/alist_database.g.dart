@@ -748,6 +748,16 @@ class _$FileViewingRecordDao extends FileViewingRecordDao {
   }
 
   @override
+  Future<void> deleteAllByUser(
+    String serverUrl,
+    String userId,
+  ) async {
+    await _queryAdapter.queryNoReturn(
+        'DELETE FROM file_viewing_record WHERE server_url = ?1 AND user_id=?2',
+        arguments: [serverUrl, userId]);
+  }
+
+  @override
   Future<int> insertRecord(FileViewingRecord record) {
     return _fileViewingRecordInsertionAdapter.insertAndReturnId(
         record, OnConflictStrategy.abort);
@@ -903,6 +913,16 @@ class _$FavoriteDao extends FavoriteDao {
     await _queryAdapter.queryNoReturn(
         'DELETE FROM favorite WHERE server_url = ?1 AND user_id=?2 AND remote_path=?3',
         arguments: [serverUrl, userId, remotePath]);
+  }
+
+  @override
+  Future<void> deleteAllByUser(
+    String serverUrl,
+    String userId,
+  ) async {
+    await _queryAdapter.queryNoReturn(
+        'DELETE FROM favorite WHERE server_url = ?1 AND user_id=?2',
+        arguments: [serverUrl, userId]);
   }
 
   @override

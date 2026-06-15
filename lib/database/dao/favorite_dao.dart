@@ -40,4 +40,11 @@ abstract class FavoriteDao {
     String userId,
     String remotePath,
   );
+
+  @Query(
+      "DELETE FROM favorite WHERE server_url = :serverUrl AND user_id=:userId")
+  Future<void> deleteAllByUser(
+    String serverUrl,
+    String userId,
+  );
 }

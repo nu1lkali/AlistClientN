@@ -20,6 +20,7 @@ import android.os.Message
 import android.util.Rational
 import android.view.View
 import android.view.ViewGroup.MarginLayoutParams
+import android.widget.EditText
 import android.widget.ImageView
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
@@ -84,6 +85,10 @@ class PlayerActivity : AppCompatActivity(), GSYVideoProgressListener {
     private var videoIndexMap: MutableMap<Int, Int> = mutableMapOf()
     private var isNameSortAscending = true
     private var isDurationSortAscending = false
+
+    // 播放列表搜索过滤
+    private var isSearchVisible = false
+    private var currentFilter = ""
 
     private val messageRecordWatchTime = 1
     private val handler = object : Handler(Looper.getMainLooper()) {
@@ -341,6 +346,52 @@ class PlayerActivity : AppCompatActivity(), GSYVideoProgressListener {
         playlistDrawer.visibility = View.GONE
         playlistScrim.visibility = View.GONE
         playlistScrim.setOnClickListener { togglePlaylist() }
+
+        // 设置状态栏安全边距
+        val statusBarHeight = getStatusBarHeight()
+        findViewById<View>(R.id.playlist_status_bar_spacer).layoutParams.height = statusBarHeight
+
+        // 搜索按钮
+        val btnSearch = findViewById<ImageView>(R.id.btn_playlist_search)
+        val searchBar = findViewById<View>(R.id.playlist_search_bar)
+        val etSearch = findViewById<EditText>(R.id.et_playlist_search)
+        val btnConfirm = findViewById<TextView>(R.id.btn_playlist_search_confirm)
+
+        val tvTitle = findViewById<TextView>(R.id.tv_playlist_title)
+
+        btnSearch.setOnClickListener {
+            isSearchVisible = !isSearchVisible
+            searchBar.visibility = if (isSearchVisible) View.VISIBLE else View.GONE
+            if (!isSearchVisible) {
+                currentFilter = ""
+                etSearch.setText("")
+                playlistAdapter.filter("")
+                tvTitle.text = "播放列表 (${index + 1}/${videos.size})"
+            }
+        }
+
+        btnConfirm.setOnClickListener {
+            currentFilter = etSearch.text.toString().trim()
+            playlistAdapter.filter(currentFilter)
+            tvTitle.text = if (currentFilter.isEmpty()) {
+                "播放列表 (${index + 1}/${videos.size})"
+            } else {
+                "筛选结果 (${playlistAdapter.filteredCount})"
+            }
+            // 隐藏键盘
+            val imm = getSystemService(INPUT_METHOD_SERVICE) as android.view.inputmethod.InputMethodManager
+            imm.hideSoftInputFromWindow(etSearch.windowToken, 0)
+        }
+
+        etSearch.setOnEditorActionListener { _, actionId, _ ->
+            if (actionId == android.view.inputmethod.EditorInfo.IME_ACTION_SEARCH) {
+                btnConfirm.performClick()
+                true
+            } else false
+        }
+
+        // 关闭按钮
+        findViewById<ImageView>(R.id.btn_playlist_close).setOnClickListener { togglePlaylist() }
 
         val rvPlaylist = findViewById<RecyclerView>(R.id.rv_playlist)
         playlistAdapter = PlaylistAdapter(sortedVideos, getCurrentSortedIndex()) { clickedSortedIndex ->
@@ -844,6 +895,12 @@ class PlayerActivity : AppCompatActivity(), GSYVideoProgressListener {
         val drawerWidth = resources.displayMetrics.density * 280
         if (isPlaylistVisible) {
             playlistScrim.visibility = View.GONE
+            // 重置搜索状态
+            isSearchVisible = false
+            currentFilter = ""
+            findViewById<View>(R.id.playlist_search_bar).visibility = View.GONE
+            findViewById<EditText>(R.id.et_playlist_search).setText("")
+            playlistAdapter.filter("")
             ObjectAnimator.ofFloat(playlistDrawer, "translationX", 0f, drawerWidth).apply {
                 duration = 250
                 addListener(object : AnimatorListenerAdapter() {
@@ -857,6 +914,9 @@ class PlayerActivity : AppCompatActivity(), GSYVideoProgressListener {
             playlistDrawer.translationX = drawerWidth
             playlistDrawer.visibility = View.VISIBLE
             playlistScrim.visibility = View.VISIBLE
+            // 更新标题显示当前位置
+            val tvTitle = findViewById<TextView>(R.id.tv_playlist_title)
+            tvTitle.text = "播放列表 (${index + 1}/${videos.size})"
             ObjectAnimator.ofFloat(playlistDrawer, "translationX", drawerWidth, 0f).apply {
                 duration = 250
                 start()
@@ -877,6 +937,15 @@ class PlayerActivity : AppCompatActivity(), GSYVideoProgressListener {
         }
     }
 
+    private fun updatePlaylistTitle() {
+        val tvTitle = findViewById<TextView>(R.id.tv_playlist_title)
+        tvTitle.text = if (currentFilter.isEmpty()) {
+            "播放列表 (${getCurrentSortedIndex() + 1}/${videos.size})"
+        } else {
+            "筛选结果 (${playlistAdapter.filteredCount})"
+        }
+    }
+
     private fun sortByName() {
         isNameSortAscending = !isNameSortAscending
         if (isNameSortAscending) {
@@ -889,12 +958,18 @@ class PlayerActivity : AppCompatActivity(), GSYVideoProgressListener {
         updateVideoIndexMap()
         playlistAdapter.updateVideos(sortedVideos)
         playlistAdapter.updateCurrentIndex(getCurrentSortedIndex())
+        updatePlaylistTitle()
     }
     
     private fun naturalSortKey(name: String): String {
         return name.replace(Regex("\\d+")) { matchResult ->
             matchResult.value.padStart(10, '0')
         }
+    }
+
+    private fun getStatusBarHeight(): Int {
+        val resourceId = resources.getIdentifier("status_bar_height", "dimen", "android")
+        return if (resourceId > 0) resources.getDimensionPixelSize(resourceId) else 0
     }
 
     private fun sortByDuration() {
@@ -909,6 +984,7 @@ class PlayerActivity : AppCompatActivity(), GSYVideoProgressListener {
         updateVideoIndexMap()
         playlistAdapter.updateVideos(sortedVideos)
         playlistAdapter.updateCurrentIndex(getCurrentSortedIndex())
+        updatePlaylistTitle()
     }
 
     private fun shufflePlaylist() {
@@ -916,6 +992,7 @@ class PlayerActivity : AppCompatActivity(), GSYVideoProgressListener {
         updateVideoIndexMap()
         playlistAdapter.updateVideos(sortedVideos)
         playlistAdapter.updateCurrentIndex(getCurrentSortedIndex())
+        updatePlaylistTitle()
         SmartToast.show(this, "已打乱顺序")
     }
 
@@ -1172,6 +1249,10 @@ class PlaylistAdapter(
     private val onItemClick: (Int) -> Unit
 ) : RecyclerView.Adapter<PlaylistAdapter.VH>() {
 
+    private var filteredVideos: List<VideoItem> = videos
+    private var filterKeyword: String = ""
+    val filteredCount: Int get() = filteredVideos.size
+
     inner class VH(view: View) : RecyclerView.ViewHolder(view) {
         val tvIndex: TextView = view.findViewById(R.id.tv_index)
         val tvName: TextView = view.findViewById(R.id.tv_name)
@@ -1184,8 +1265,9 @@ class PlaylistAdapter(
     }
 
     override fun onBindViewHolder(holder: VH, position: Int) {
-        val video = videos[position]
-        val isPlaying = position == currentIndex
+        val video = filteredVideos[position]
+        val originalIndex = videos.indexOf(video)
+        val isPlaying = originalIndex == currentIndex
         
         holder.tvIndex.text = "${position + 1}"
         holder.tvIndex.alpha = if (isPlaying) 1f else 0.6f
@@ -1200,20 +1282,32 @@ class PlaylistAdapter(
             holder.itemView.setBackgroundColor(0x00000000)
         }
         
-        holder.itemView.setOnClickListener { onItemClick(position) }
+        holder.itemView.setOnClickListener { onItemClick(originalIndex) }
     }
 
-    override fun getItemCount() = videos.size
+    override fun getItemCount() = filteredVideos.size
 
     fun updateCurrentIndex(newIndex: Int) {
         val old = currentIndex
         currentIndex = newIndex
-        notifyItemChanged(old)
-        notifyItemChanged(newIndex)
+        notifyDataSetChanged()
     }
 
     fun updateVideos(newVideos: List<VideoItem>) {
         videos = newVideos
+        filter(filterKeyword)
+    }
+
+    fun filter(keyword: String) {
+        filterKeyword = keyword
+        filteredVideos = if (keyword.isEmpty()) {
+            videos
+        } else {
+            videos.filter {
+                val nameWithoutExt = if (it.name.contains('.')) it.name.substringBeforeLast('.') else it.name
+                nameWithoutExt.contains(keyword, ignoreCase = true)
+            }
+        }
         notifyDataSetChanged()
     }
 }
