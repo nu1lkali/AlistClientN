@@ -832,21 +832,52 @@ class _StrmPlayerScreenState extends State<StrmPlayerScreen>
         return;
       }
 
-      double pixelRatio = MediaQuery.of(context).devicePixelRatio;
+      final devicePixelRatio = MediaQuery.of(context).devicePixelRatio;
+      final ui.Image image =
+          await boundary.toImage(pixelRatio: devicePixelRatio);
+
+      // 裁剪出视频实际渲染区域，去除 Center/AspectRatio 产生的透明填充
+      ui.Image finalImage = image;
       final ctrl = _controller;
       if (ctrl != null && ctrl.value.isInitialized) {
-        final videoSize = ctrl.value.size;
-        final widgetWidth = boundary.size.width;
-        if (widgetWidth > 0 && videoSize.width > 0) {
-          pixelRatio = videoSize.width / widgetWidth;
+        final videoAspectRatio = ctrl.value.aspectRatio;
+        final imgW = image.width.toDouble();
+        final imgH = image.height.toDouble();
+        final boundaryAspectRatio = imgW / imgH;
+
+        double cropX = 0, cropY = 0, cropW = imgW, cropH = imgH;
+
+        if (videoAspectRatio > boundaryAspectRatio) {
+          // 视频比屏幕更宽（横屏视频在竖屏中）—— 裁掉上下黑边
+          cropH = imgW / videoAspectRatio;
+          cropY = (imgH - cropH) / 2;
+        } else {
+          // 视频比屏幕更窄（竖屏视频在竖屏中）—— 裁掉左右黑边
+          cropW = imgH * videoAspectRatio;
+          cropX = (imgW - cropW) / 2;
+        }
+
+        if ((cropW - imgW).abs() > 1 || (cropH - imgH).abs() > 1) {
+          final recorder = ui.PictureRecorder();
+          final canvas = Canvas(recorder, Rect.fromLTWH(0, 0, cropW, cropH));
+          canvas.drawImageRect(
+            image,
+            Rect.fromLTWH(cropX, cropY, cropW, cropH),
+            Rect.fromLTWH(0, 0, cropW, cropH),
+            Paint(),
+          );
+          final croppedImage = await recorder.endRecording().toImage(
+            cropW.toInt(),
+            cropH.toInt(),
+          );
+          image.dispose();
+          finalImage = croppedImage;
         }
       }
 
-      final ui.Image image =
-          await boundary.toImage(pixelRatio: pixelRatio);
       final ByteData? byteData =
-          await image.toByteData(format: ui.ImageByteFormat.png);
-      image.dispose();
+          await finalImage.toByteData(format: ui.ImageByteFormat.png);
+      finalImage.dispose();
       if (byteData == null) {
         SmartDialog.dismiss();
         SmartDialog.showToast('截图失败');
