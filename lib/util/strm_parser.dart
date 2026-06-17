@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:collection';
+import 'dart:io';
 import 'dart:isolate';
 import 'dart:math' show Random;
 
@@ -72,7 +73,7 @@ class StrmParser {
       _cache.remove(path);
       return null;
     }
-    return entry.url;
+    return applyHostOverride(entry.url);
   }
 
   /// 从数据库获取缓存（持久层）
@@ -86,9 +87,8 @@ class StrmParser {
         path,
       );
       if (record != null) {
-        // 写入内存缓存
         _cache[path] = _CacheEntry(record.url);
-        return record.url;
+        return applyHostOverride(record.url);
       }
     } catch (_) {}
     return null;
@@ -124,8 +124,37 @@ class StrmParser {
   /// 手动清除缓存（列表刷新时调用）
   static void clearCache() {
     _cache.clear();
-    // 异步清除数据库缓存
     _clearDbCache();
+  }
+
+  /// 批量替换缓存中的 URL 主机映射（启用/修改映射时调用，无需重新解析）
+  static Future<void> batchReplaceHostOverride() async {
+    // 1. 替换内存缓存
+    for (final entry in _cache.entries) {
+      final overridden = applyHostOverride(entry.value.url);
+      if (overridden != null && overridden != entry.value.url) {
+        _cache[entry.key] = _CacheEntry(overridden);
+      }
+    }
+    // 2. 替换数据库缓存
+    try {
+      final db = Get.find<AlistDatabaseController>();
+      final user = Get.find<UserController>().user.value;
+      final records = await db.strmUrlCacheDao.findByServerAndUser(user.serverUrl, user.username);
+      for (final record in records) {
+        final overridden = applyHostOverride(record.url);
+        if (overridden != null && overridden != record.url) {
+          await db.strmUrlCacheDao.deleteByPath(user.serverUrl, user.username, record.path);
+          await db.strmUrlCacheDao.insertRecord(StrmUrlCache(
+            serverUrl: user.serverUrl,
+            userId: user.username,
+            path: record.path,
+            url: overridden,
+            createTime: record.createTime,
+          ));
+        }
+      }
+    } catch (_) {}
   }
 
   static Future<void> _clearDbCache() async {
@@ -257,7 +286,7 @@ class StrmParser {
     for (var i = 0; i < validFetches.length; i++) {
       final pureUrl = sanitizedUrls[i];
       if (pureUrl != null) {
-        final url = _applyHostOverride(pureUrl);
+        final url = applyHostOverride(pureUrl);
         if (url != null) {
           _putCache(validFetches[i].path, url);
           results.add({'path': validFetches[i].path, 'url': url});
@@ -384,14 +413,15 @@ class StrmParser {
   static String? _sanitizeUrl(String rawContent) {
     final pure = _sanitizeUrlPure(rawContent);
     if (pure == null) return null;
-    return _applyHostOverride(pure);
+    return applyHostOverride(pure);
   }
 
   /// 根据设置中的开关与地址映射，替换 .strm URL 中的原始主机为代理后的主机
   ///
   /// 场景：内网服务器 (192.168.x.x:8024) 通过 frp 穿透暴露到公网
   /// (frp.example.com:12345)，应用此替换后可在外网直接播放。
-  static String? _applyHostOverride(String url) {
+  /// 根据设置中的开关与地址映射，替换 .strm URL 中的原始主机为代理后的主机
+  static String? applyHostOverride(String url) {
     try {
       final enabled = SpUtil.getBool(AlistConstant.strmHostOverrideEnabled, defValue: false) ?? false;
       if (!enabled) return url;
@@ -419,6 +449,39 @@ class StrmParser {
     return url;
   }
 
+  // ============ 主机可达性检测 ============
+  static final Map<String, _ReachableEntry> _hostReachableCache = {};
+  static const Duration _reachableCacheTTL = Duration(minutes: 1);
+
+  /// 检测 STRM 视频源站是否可达（TCP 连接 host:port，2秒超时）
+  /// 不走 CDN，仅测试网络连通性，结果按 host 缓存（1分钟过期）
+  static Future<bool> checkHostReachable(String url) async {
+    try {
+      final uri = Uri.parse(url);
+      final host = uri.host;
+      if (host.isEmpty) return true;
+      final cached = _hostReachableCache[host];
+      if (cached != null && !cached.isExpired) {
+        debugPrint('[StrmReachable] cache hit: $host -> ${cached.reachable}');
+        return cached.reachable;
+      }
+      final port = uri.hasPort ? uri.port : (uri.scheme == 'https' ? 443 : 80);
+      debugPrint('[StrmReachable] TCP $host:$port ...');
+      final socket = await Socket.connect(host, port, timeout: const Duration(seconds: 2));
+      socket.destroy();
+      debugPrint('[StrmReachable] $host:$port reachable');
+      _hostReachableCache[host] = _ReachableEntry(true);
+      return true;
+    } catch (e) {
+      debugPrint('[StrmReachable] unreachable: $e');
+      try { _hostReachableCache[Uri.parse(url).host] = _ReachableEntry(false); } catch (_) {}
+      return false;
+    }
+  }
+
+  /// 清除可达性缓存（切换网络时调用）
+  static void clearReachableCache() => _hostReachableCache.clear();
+
   /// 判断给定路径是否指向 .strm 文件
   static bool isStrmFile(String path) {
     final ext = path.split('.').last.toLowerCase();
@@ -430,4 +493,11 @@ class _CacheEntry {
   final String url;
   final DateTime timestamp;
   _CacheEntry(this.url) : timestamp = DateTime.now();
+}
+
+class _ReachableEntry {
+  final bool reachable;
+  final DateTime timestamp;
+  _ReachableEntry(this.reachable) : timestamp = DateTime.now();
+  bool get isExpired => DateTime.now().difference(timestamp) > StrmParser._reachableCacheTTL;
 }

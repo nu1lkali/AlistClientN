@@ -698,6 +698,19 @@ class _StrmPlayerScreenState extends State<StrmPlayerScreen>
       _startTimer();
       _loadStates(idx);
       if (mounted) setState(() {});
+
+      // 预加载阶段跳过了 size 获取，切换到该视频时补上
+      final v = _playList.videos[idx];
+      if ((v.fileSize == null || v.fileSize! <= 0) && v.videoUrl != null) {
+        StreamSizeResolver.resolve(v.videoUrl!).then((size) {
+          if (size != null && size > 0 && mounted && _currentIndex == idx) {
+            v.fileSize = size;
+            _recordViewing(idx);
+            if (mounted) setState(() {});
+          }
+        });
+      }
+
       _schedulePreload(idx);
     } else {
       _disposePreload();
@@ -749,7 +762,8 @@ class _StrmPlayerScreenState extends State<StrmPlayerScreen>
   }
 
   void _toggleOrientation() {
-    if (_isLandscape) {
+    _isLandscape = !_isLandscape;
+    if (!_isLandscape) {
       SystemChrome.setPreferredOrientations(
           [DeviceOrientation.portraitUp]);
       _cancelLandscapeAutoHide();
@@ -762,7 +776,6 @@ class _StrmPlayerScreenState extends State<StrmPlayerScreen>
       _hideUI = false;
       _startLandscapeAutoHide();
     }
-    _isLandscape = !_isLandscape;
     if (mounted) setState(() {});
   }
 
@@ -1050,12 +1063,15 @@ class _StrmPlayerScreenState extends State<StrmPlayerScreen>
             child: RepaintBoundary(
                 key: _repaintKey, child: _buildVideoView())),
         _buildPauseIcon(),
-        _buildTopBar(),
+        if (!(_hideUI && _isLandscape)) _buildTopBar(),
         if (!_hideUI) _buildToolBar(),
         _buildProgress(),
         if (!_hideUI && !_isLandscape) _buildBottomInfo(),
         if (!_hideUI && _playList.videos.length > 1 && !_isLandscape)
           _buildFloatingSwitchButton(),
+        if (!_hideUI && _playList.videos.length > 1 && _isLandscape)
+          _buildLandscapeFloatingSwitchButton(),
+        if (!_hideUI && _isLandscape) _buildLandscapeCenterControls(),
         if (_isSeeking) _buildSeekPreview(),
         if (_showBrightnessIndicator && _isVerticalDragging)
           Positioned(left: 20, top: 0, bottom: 0,
@@ -1100,7 +1116,7 @@ class _StrmPlayerScreenState extends State<StrmPlayerScreen>
   }
 
   Widget _buildPauseIcon() {
-    if (_isPlaying) return const SizedBox.shrink();
+    if (_isPlaying || _isLandscape) return const SizedBox.shrink();
     return GestureDetector(
       onTap: _togglePlayPause,
       child: Center(
@@ -1467,6 +1483,136 @@ class _StrmPlayerScreenState extends State<StrmPlayerScreen>
           ),
         ),
       ),
+    );
+  }
+
+  Widget _buildLandscapeFloatingSwitchButton() {
+    final sortedIdx = _getCurrentSortedIndex();
+    final bottomPad = MediaQuery.of(context).padding.bottom;
+    return Positioned(
+      left: 16,
+      bottom: bottomPad + 60,
+      child: GestureDetector(
+        onTap: () {},
+        child: Container(
+          width: 110,
+          height: 36,
+          decoration: BoxDecoration(
+            color: Colors.white.withOpacity(0.15),
+            borderRadius: BorderRadius.circular(18),
+            border: Border.all(color: Colors.white.withOpacity(0.2)),
+          ),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(17),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+              children: [
+                GestureDetector(
+                  onTap: sortedIdx > 0
+                      ? () {
+                          final prev = _sortedVideos[sortedIdx - 1];
+                          final origIdx = _playList.videos.indexWhere(
+                              (v) => v.filePath == prev.filePath);
+                          if (origIdx >= 0) _playAt(origIdx);
+                        }
+                      : null,
+                  child: Container(
+                    width: 28,
+                    height: 28,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: Colors.white.withOpacity(0.1),
+                    ),
+                    child: Icon(Icons.skip_previous_rounded,
+                        color: sortedIdx > 0
+                            ? Colors.white
+                            : Colors.white38,
+                        size: 16),
+                  ),
+                ),
+                Text(
+                  '${sortedIdx + 1}/${_sortedVideos.length}',
+                  style: const TextStyle(
+                      color: Colors.white70,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w500),
+                ),
+                GestureDetector(
+                  onTap: sortedIdx < _sortedVideos.length - 1
+                      ? () {
+                          final next = _sortedVideos[sortedIdx + 1];
+                          final origIdx = _playList.videos.indexWhere(
+                              (v) => v.filePath == next.filePath);
+                          if (origIdx >= 0) _playAt(origIdx);
+                        }
+                      : null,
+                  child: Container(
+                    width: 28,
+                    height: 28,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: Colors.white.withOpacity(0.1),
+                    ),
+                    child: Icon(Icons.skip_next_rounded,
+                        color:
+                            sortedIdx < _sortedVideos.length - 1
+                                ? Colors.white
+                                : Colors.white38,
+                        size: 16),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildLandscapeCenterControls() {
+    return Center(
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          _centerCtrlBtn(
+            icon: Icons.replay_10_rounded,
+            onTap: () {
+              final target = _pos - const Duration(seconds: 10);
+              _controller?.seekTo(target < Duration.zero ? Duration.zero : target);
+            },
+          ),
+          const SizedBox(width: 48),
+          GestureDetector(
+            onTap: _togglePlayPause,
+            child: Icon(
+              _isPlaying
+                  ? Icons.pause_rounded
+                  : Icons.play_arrow_rounded,
+              color: Colors.white.withOpacity(0.85),
+              size: 64,
+            ),
+          ),
+          const SizedBox(width: 48),
+          _centerCtrlBtn(
+            icon: Icons.forward_10_rounded,
+            onTap: () {
+              final target = _pos + const Duration(seconds: 10);
+              final max = _dur;
+              _controller?.seekTo(target > max ? max : target);
+            },
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _centerCtrlBtn({
+    required IconData icon,
+    required VoidCallback onTap,
+  }) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Icon(icon, color: Colors.white.withOpacity(0.85), size: 48),
     );
   }
 

@@ -1251,4 +1251,21 @@ class _$StrmUrlCacheDao extends StrmUrlCacheDao {
     return _queryAdapter.query('SELECT COUNT(*) FROM strm_url_cache',
         mapper: (Map<String, Object?> row) => row.values.first as int);
   }
+
+  @override
+  Future<List<StrmUrlCache>> findByServerAndUser(
+    String serverUrl,
+    String userId,
+  ) async {
+    return _queryAdapter.queryList(
+        'SELECT * FROM strm_url_cache WHERE server_url = ?1 AND user_id = ?2',
+        mapper: (Map<String, Object?> row) => StrmUrlCache(
+            id: row['id'] as int?,
+            serverUrl: row['server_url'] as String,
+            userId: row['user_id'] as String,
+            path: row['path'] as String,
+            url: row['url'] as String,
+            createTime: row['create_time'] as int),
+        arguments: [serverUrl, userId]);
+  }
 }

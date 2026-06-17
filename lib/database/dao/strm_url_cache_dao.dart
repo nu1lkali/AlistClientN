@@ -26,4 +26,11 @@ abstract class StrmUrlCacheDao {
 
   @Query("SELECT COUNT(*) FROM strm_url_cache")
   Future<int?> count();
+
+  @Query(
+      "SELECT * FROM strm_url_cache WHERE server_url = :serverUrl AND user_id = :userId")
+  Future<List<StrmUrlCache>> findByServerAndUser(
+    String serverUrl,
+    String userId,
+  );
 }

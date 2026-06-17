@@ -3403,6 +3403,12 @@ class _FileListScreenState extends State<FileListScreen>
     }
     SmartDialog.dismiss();
 
+    // 1.5 检测 STRM 源站可达性，不可达时提示启用主机映射
+    currentUrl = await _checkStrmReachable(currentUrl);
+    if (token?.isCancelled ?? false) return;
+    if (!mounted) return;
+    if (currentUrl == null) return;
+
     // 2. 收集所有同目录 .strm 文件（保持 _files 中的顺序）
     final strmFiles = _files.where((f) =>
       !f.isDir && f.type == FileType.strm
@@ -3457,6 +3463,61 @@ class _FileListScreenState extends State<FileListScreen>
     }
   }
 
+  static bool _showingReachableDialog = false;
+
+  /// 检测 STRM 源站可达性，不可达时弹窗提示启用主机映射
+  /// 返回处理后的 URL，用户取消或跳转设置时返回 null 表示中止播放
+  Future<String?> _checkStrmReachable(String url) async {
+    final reachable = await StrmParser.checkHostReachable(url);
+    debugPrint('[StrmReachable] host reachable=$reachable, url=$url');
+
+    // 可达 → 直接播放，无需弹窗
+    if (reachable) return url;
+
+    if (!mounted) return null;
+    if (_showingReachableDialog) return null;
+    _showingReachableDialog = true;
+
+    final uri = Uri.parse(url);
+    final host = '${uri.host}${uri.hasPort ? ':${uri.port}' : ''}';
+    final from = SpUtil.getString(AlistConstant.strmHostOverrideFrom) ?? '';
+    final to = SpUtil.getString(AlistConstant.strmHostOverrideTo) ?? '';
+    final hasConfig = from.isNotEmpty && to.isNotEmpty;
+
+    // 返回值：null=取消, 'play'=直接播放, 'override'=启用映射
+    final action = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('源站不可达'),
+        content: Text(hasConfig
+            ? '无法连接到 $host\n\n已配置主机映射：$from → $to'
+            : '无法连接到 $host\n\n当前可能不在局域网'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('取消')),
+          TextButton(onPressed: () => Navigator.pop(ctx, 'play'), child: const Text('直接播放')),
+          if (hasConfig)
+            TextButton(onPressed: () => Navigator.pop(ctx, 'override'), child: const Text('启用映射')),
+          if (!hasConfig)
+            TextButton(onPressed: () { Navigator.pop(ctx); Get.toNamed(NamedRouter.settings); }, child: const Text('前往设置')),
+        ],
+      ),
+    );
+
+    _showingReachableDialog = false;
+
+    if (action == 'override' && hasConfig) {
+      SpUtil.putBool(AlistConstant.strmHostOverrideEnabled, true);
+      await StrmParser.batchReplaceHostOverride();
+      final newUrl = StrmParser.applyHostOverride(url);
+      if (newUrl != null && newUrl != url) return newUrl;
+      return url;
+    }
+
+    if (action == 'play') return url;
+
+    return null;
+  }
+
   /// 入口三：.strm 文件 -> 视界流播放
   /// 解析当前 .strm 及同目录所有 .strm 文件，构建 TikTokPlayListModel 并跳转
   void _goTiktokPlayerFromStrm(FileItemVO file) async {
@@ -3500,6 +3561,24 @@ class _FileListScreenState extends State<FileListScreen>
     if (parsedResults.isEmpty) {
       SmartDialog.showToast('无法解析 .strm 文件中的视频流 URL');
       return;
+    }
+
+    // 检测第一个 URL 的源站可达性，不可达时提示启用主机映射
+    final firstUrl = parsedResults.first['url'];
+    if (firstUrl != null && firstUrl.isNotEmpty) {
+      final newUrl = await _checkStrmReachable(firstUrl);
+      if (newUrl != firstUrl) {
+        // 用户启用了主机映射，重新应用到所有已解析的 URL
+        for (final result in parsedResults) {
+          final u = result['url'];
+          if (u != null) {
+            final overridden = StrmParser.applyHostOverride(u);
+            if (overridden != null) result['url'] = overridden;
+          }
+        }
+      }
+      if (token?.isCancelled ?? false) return;
+      if (!mounted) return;
     }
 
     // 构建 TikTokVideoItem 列表

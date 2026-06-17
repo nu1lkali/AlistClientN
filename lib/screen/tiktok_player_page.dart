@@ -15,6 +15,7 @@ import 'package:alist/util/stream_size_resolver.dart';
 import 'package:alist/util/user_controller.dart';
 import 'package:flustars/flustars.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_smart_dialog/flutter_smart_dialog.dart';
@@ -22,6 +23,8 @@ import 'package:get/get.dart';
 import 'package:image_gallery_saver/image_gallery_saver.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:video_player/video_player.dart';
+import 'package:volume_controller/volume_controller.dart';
+import 'package:screen_brightness/screen_brightness.dart';
 import 'package:wakelock/wakelock.dart';
 import 'dart:io';
 
@@ -67,6 +70,34 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
   Timer? _landscapeHideTimer;
   static const _landscapeAutoHide = Duration(seconds: 2);
 
+  // ══════ Gesture state ══════
+  static const _gestureDecideThreshold = 10.0;
+  static const _systemGestureBottomMargin = 40.0;
+  static const _edgeZoneRatio = 0.15; // 左侧15%为亮度区域
+  static const _edgeZoneRatioRight = 0.25; // 右侧25%为音量区域（覆盖控件左侧部分）
+  static const _videoSwitchMinDy = 50.0; // 切换视频最小滑动距离
+  static const _videoSwitchMinVelocity = 300.0; // 切换视频最小速度 (px/s)
+  double _screenWidth = 1;
+  double _screenHeight = 1;
+  bool _ignoreCurrentGesture = false;
+
+  bool _isSeeking = false;
+  double _seekStartX = 0;
+  Duration _seekStartPosition = Duration.zero;
+  Duration _seekTarget = Duration.zero;
+  bool _wasPlayingBeforeSeek = false;
+
+  bool _isVerticalDragging = false;
+  double _verticalStartY = 0;
+  bool? _isLeftSide;
+  double _dragStartBrightness = 0.5;
+  double _dragStartVolume = 0.5;
+  double _currentBrightness = 0.5;
+  double _currentVolume = 0.5;
+  bool _showBrightnessIndicator = false;
+  bool _showVolumeIndicator = false;
+  Timer? _indicatorFadeTimer;
+
   void _startLandscapeAutoHide() {
     _landscapeHideTimer?.cancel();
     if (_isLandscape && _isPlaying && !_hideUI) {
@@ -78,6 +109,97 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
 
   void _cancelLandscapeAutoHide() {
     _landscapeHideTimer?.cancel();
+  }
+
+  // ══════ Gesture handlers (edge zone vertical + horizontal seek) ══════
+  void _initBrightnessAndVolume() async {
+    try {
+      final saved = SpUtil.getDouble(AlistConstant.strmBrightness);
+      if (saved != null && saved >= 0.1 && saved <= 1) {
+        _currentBrightness = saved;
+      } else {
+        try { _currentBrightness = await ScreenBrightness().system; } catch (_) {
+          try { _currentBrightness = await ScreenBrightness().current; } catch (_) {
+            _currentBrightness = 0.7;
+          }
+        }
+        if (_currentBrightness < 0.1) _currentBrightness = 0.7;
+      }
+    } catch (_) { _currentBrightness = 0.7; }
+    try { ScreenBrightness().setScreenBrightness(_currentBrightness); } catch (_) {}
+    try { _currentVolume = await VolumeController().getVolume(); } catch (_) { _currentVolume = 0.5; }
+  }
+
+  // —— 边缘区域垂直滑动：亮度/音量 ——
+  void _onEdgeVerticalDragStart(DragStartDetails details) {
+    final bottomInset = MediaQuery.of(context).viewPadding.bottom;
+    final bottomThreshold = bottomInset > 0 ? bottomInset : _systemGestureBottomMargin;
+    if (details.globalPosition.dy > _screenHeight - bottomThreshold) return;
+    _isLeftSide = details.globalPosition.dx < _screenWidth / 2;
+    if (_isLeftSide!) {
+      _dragStartBrightness = _currentBrightness;
+    } else {
+      _dragStartVolume = _currentVolume;
+    }
+    _verticalStartY = details.globalPosition.dy;
+    _isVerticalDragging = true;
+  }
+
+  void _onEdgeVerticalDragUpdate(DragUpdateDetails details) {
+    if (!_isVerticalDragging) return;
+    final dragDistance = _verticalStartY - details.globalPosition.dy;
+    final ratio = (dragDistance / _screenHeight * 1.5).clamp(-1.0, 1.0);
+    if (_isLeftSide!) {
+      _currentBrightness = (_dragStartBrightness + ratio).clamp(0.0, 1.0);
+      ScreenBrightness().setScreenBrightness(_currentBrightness);
+      SpUtil.putDouble(AlistConstant.strmBrightness, _currentBrightness);
+      setState(() { _showBrightnessIndicator = true; _showVolumeIndicator = false; });
+    } else {
+      _currentVolume = (_dragStartVolume + ratio).clamp(0.0, 1.0);
+      VolumeController().setVolume(_currentVolume, showSystemUI: false);
+      setState(() { _showVolumeIndicator = true; _showBrightnessIndicator = false; });
+    }
+  }
+
+  void _onEdgeVerticalDragEnd(DragEndDetails details) {
+    if (!_isVerticalDragging) return;
+    _isVerticalDragging = false;
+    _indicatorFadeTimer?.cancel();
+    _indicatorFadeTimer = Timer(const Duration(milliseconds: 800), () {
+      if (mounted) setState(() { _showBrightnessIndicator = false; _showVolumeIndicator = false; });
+    });
+  }
+
+  // —— 水平滑动：进度调节 ——
+  void _onHorizontalDragStart(DragStartDetails details) {
+    final bottomInset = MediaQuery.of(context).viewPadding.bottom;
+    final bottomThreshold = bottomInset > 0 ? bottomInset : _systemGestureBottomMargin;
+    if (details.globalPosition.dy > _screenHeight - bottomThreshold) return;
+    _seekStartX = details.globalPosition.dx;
+    _seekStartPosition = _pos;
+    _isSeeking = true;
+    _wasPlayingBeforeSeek = _isPlaying;
+    _controllers[_currentIndex]?.pause();
+    _progressTimer?.cancel();
+  }
+
+  void _onHorizontalDragUpdate(DragUpdateDetails details) {
+    if (!_isSeeking) return;
+    final dx = details.globalPosition.dx - _seekStartX;
+    final totalMs = _dur.inMilliseconds.toDouble();
+    if (totalMs <= 0) return;
+    final sensitivityFactor = (totalMs * 0.08) / _screenWidth;
+    final deltaMs = (dx * sensitivityFactor).round();
+    final targetMs = (_seekStartPosition.inMilliseconds + deltaMs).clamp(0, totalMs.toInt());
+    setState(() => _seekTarget = Duration(milliseconds: targetMs));
+  }
+
+  void _onHorizontalDragEnd(DragEndDetails details) {
+    if (!_isSeeking) return;
+    _controllers[_currentIndex]?.seekTo(_seekTarget);
+    if (_wasPlayingBeforeSeek) _controllers[_currentIndex]?.play();
+    _startTimer();
+    setState(() => _isSeeking = false);
   }
 
   @override
@@ -96,6 +218,7 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
     SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
     Wakelock.enable();
 
+    _initBrightnessAndVolume();
     _safeInitCtrl(_currentIndex);
     _preloadNearby(_currentIndex);
     _loadStates(_currentIndex);
@@ -106,6 +229,7 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
   void dispose() {
     _progressTimer?.cancel();
     _landscapeHideTimer?.cancel();
+    _indicatorFadeTimer?.cancel();
     _flushPending();
     WidgetsBinding.instance.removeObserver(this);
     for (final c in _controllers.values) {
@@ -114,6 +238,7 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
     _controllers.clear();
     _clearImageCache();
     try { _pageController.dispose(); } catch (_) {}
+    try { _indicatorScrollCtrl.dispose(); } catch (_) {}
     SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
     Wakelock.disable();
@@ -396,7 +521,8 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
     if (mounted) setState(() {});
   }
   void _toggleOrientation() {
-    if (_isLandscape) {
+    _isLandscape = !_isLandscape;
+    if (!_isLandscape) {
       SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
       _cancelLandscapeAutoHide();
       _hideUI = false;
@@ -405,7 +531,6 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
       _hideUI = false;
       _startLandscapeAutoHide();
     }
-    _isLandscape = !_isLandscape;
     if (mounted) setState(() {});
   }
 
@@ -531,89 +656,172 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
   // ═══════════════ Build ═══════════════
   @override
   Widget build(BuildContext context) {
+    final screenSize = MediaQuery.of(context).size;
+    _screenWidth = screenSize.width;
+    _screenHeight = screenSize.height;
     return Scaffold(
       backgroundColor: Colors.black,
       body: Stack(children: [
-        Stack(children: [_buildPageView(), _buildPauseIcon()]),
-        _buildTopBar(),
+        _buildGestureLayer(),
+        _buildPauseIcon(),
+        if (!(_hideUI && _isLandscape)) _buildTopBar(),
         if (!_hideUI) _buildToolBar(),
         if (!_hideUI) _buildProgress(),
         if (!_hideUI && !_isLandscape) _buildBottomInfo(),
+        if (!_hideUI && _isLandscape) _buildLandscapeCenterControls(),
+        if (!_hideUI && _isLandscape && _playList.videos.length > 1)
+          _buildLandscapeFloatingSwitchButton(),
+        if (_isSeeking) _buildSeekPreview(),
+        if (_showBrightnessIndicator && _isVerticalDragging)
+          Positioned(left: 20, top: 0, bottom: 0,
+            child: Center(child: _VerticalSliderIndicator(
+                icon: Icons.brightness_high_rounded,
+                value: _currentBrightness,
+                color: Colors.amber))),
+        if (_showVolumeIndicator && _isVerticalDragging)
+          Positioned(right: 20, top: 0, bottom: 0,
+            child: Center(child: _VerticalSliderIndicator(
+                icon: Icons.volume_up_rounded,
+                value: _currentVolume,
+                color: Colors.blue))),
         ..._buildHearts(),
         if (!_hideUI) _buildIndicator(),
       ]),
     );
   }
 
-  Widget _buildPageView() {
-    return GestureDetector(
-      onDoubleTapDown: (details) {
-        // 始终播放动效，在点击位置弹出
-        if (mounted) setState(() => _doubleTapIcons.add(details.globalPosition));
-        final v = _playList.videos[_currentIndex];
-        // 只有未收藏时才设置为收藏，已收藏时不做toggle
-        if (!v.isLiked) {
-          v.isLiked = true;
-          if (v.isDisliked) v.isDisliked = false;
-          _pendingFav[_currentIndex] = true;
-          _pendingDislike[_currentIndex] = false;
-          if (mounted) setState(() {});
-        }
+  // 竖屏中间区域垂直滑动：翻页
+  double _pageSwitchStartY = 0;
+  double _pageSwitchDeltaY = 0;
+
+  void _onPageSwitchStart(DragStartDetails details) {
+    _pageSwitchStartY = details.globalPosition.dy;
+    _pageSwitchDeltaY = 0;
+  }
+
+  void _onPageSwitchUpdate(DragUpdateDetails details) {
+    _pageSwitchDeltaY = details.globalPosition.dy - _pageSwitchStartY;
+  }
+
+  void _onPageSwitchEnd(DragEndDetails details) {
+    final velocity = details.velocity.pixelsPerSecond.dy;
+    final dy = _pageSwitchDeltaY;
+    // 向上滑（负dy）→ 下一个，向下滑（正dy）→ 上一个
+    if (dy.abs() > _videoSwitchMinDy || velocity.abs() > _videoSwitchMinVelocity) {
+      if (dy < 0 && _currentIndex < _playList.videos.length - 1) {
+        _pageController.animateToPage(_currentIndex + 1,
+          duration: const Duration(milliseconds: 300), curve: Curves.easeOut);
+      } else if (dy > 0 && _currentIndex > 0) {
+        _pageController.animateToPage(_currentIndex - 1,
+          duration: const Duration(milliseconds: 300), curve: Curves.easeOut);
+      }
+    }
+  }
+
+  Widget _buildGestureLayer() {
+    final leftEdge = _screenWidth * _edgeZoneRatio;
+    final rightEdge = _screenWidth * (1 - _edgeZoneRatioRight);
+    return RawGestureDetector(
+      gestures: {
+        _EdgeVerticalDragRecognizer: GestureRecognizerFactoryWithHandlers<_EdgeVerticalDragRecognizer>(
+          () => _EdgeVerticalDragRecognizer(
+            isEdgeZone: (pos) => _isLandscape
+                ? true
+                : (pos.dx < leftEdge || pos.dx > rightEdge),
+          ),
+          (r) {
+            r.onStart = _onEdgeVerticalDragStart;
+            r.onUpdate = _onEdgeVerticalDragUpdate;
+            r.onEnd = _onEdgeVerticalDragEnd;
+          },
+        ),
+        _MiddleVerticalDragRecognizer: GestureRecognizerFactoryWithHandlers<_MiddleVerticalDragRecognizer>(
+          () => _MiddleVerticalDragRecognizer(
+            isMiddleZone: (pos) => !_isLandscape &&
+                pos.dx >= leftEdge && pos.dx <= rightEdge,
+          ),
+          (r) {
+            r.onStart = _onPageSwitchStart;
+            r.onUpdate = _onPageSwitchUpdate;
+            r.onEnd = _onPageSwitchEnd;
+          },
+        ),
+        HorizontalDragGestureRecognizer: GestureRecognizerFactoryWithHandlers<HorizontalDragGestureRecognizer>(
+          () => HorizontalDragGestureRecognizer(),
+          (r) {
+            r.onStart = _onHorizontalDragStart;
+            r.onUpdate = _onHorizontalDragUpdate;
+            r.onEnd = _onHorizontalDragEnd;
+          },
+        ),
       },
-      onTap: _onScreenTap,
-      child: PageView.builder(
-        controller: _pageController,
-        scrollDirection: Axis.vertical,
-        physics: _isLandscape ? const NeverScrollableScrollPhysics() : null,
-        itemCount: _playList.videos.length,
-        onPageChanged: (idx) {
-          _flushPending();
-          // 暂停旧视频
-          try { _controllers[_currentIndex]?.pause(); } catch (_) {}
-          _currentIndex = idx;
-          _isPlaying = false;
-          _pos = Duration.zero;
-          _dur = Duration.zero;
-          // 释放超出缓存范围的控制器（保留预加载的）
-          _disposeOutOfRange(idx);
-          if (mounted) setState(() {});
-          // 当前视频已预加载则直接播放，否则初始化
-          final c = _controllers[idx];
-          if (c != null && c.value.isInitialized) {
-            c.play();
-            _isPlaying = true;
-            _recordViewing(idx);
-            if (mounted) setState(() {});
-          } else {
-            _safeInitCtrl(idx);
-          }
-          _preloadNearby(idx);
-          _loadStates(idx);
-        },
-        itemBuilder: (context, idx) {
-          final c = _controllers[idx];
-          if (c != null && c.value.isInitialized) {
-            final video = RepaintBoundary(
-              key: idx == _currentIndex ? _repaintKey : null,
-              child: VideoPlayer(c),
-            );
-            if (_isLandscape) {
-              return SizedBox.expand(
-                child: FittedBox(
-                  fit: BoxFit.contain,
-                  child: SizedBox(
-                    width: c.value.size.width,
-                    height: c.value.size.height,
-                    child: video,
-                  ),
-                ),
-              );
-            }
-            return Center(child: AspectRatio(aspectRatio: c.value.aspectRatio, child: video));
-          }
-          return const Center(child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2));
-        },
+      behavior: HitTestBehavior.opaque,
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: _onScreenTap,
+        child: _buildPageView(),
       ),
+    );
+  }
+
+  void _onPageChanged(int idx) {
+    _flushPending();
+    try { _controllers[_currentIndex]?.pause(); } catch (_) {}
+    _currentIndex = idx;
+    _isPlaying = false;
+    _pos = Duration.zero;
+    _dur = Duration.zero;
+    _disposeOutOfRange(idx);
+    if (mounted) setState(() {});
+    final c = _controllers[idx];
+    if (c != null && c.value.isInitialized) {
+      c.play();
+      _isPlaying = true;
+      _recordViewing(idx);
+      if (mounted) setState(() {});
+      final v = _playList.videos[idx];
+      if ((v.fileSize == null || v.fileSize! <= 0) && v.videoUrl != null) {
+        StreamSizeResolver.resolveAsync(v.videoUrl!, (size) {
+          v.fileSize = size;
+          if (idx == _currentIndex) _recordViewing(idx);
+          if (mounted) setState(() {});
+        });
+      }
+    } else {
+      _safeInitCtrl(idx);
+    }
+    _preloadNearby(idx);
+    _loadStates(idx);
+  }
+
+  Widget _buildVideoItem(BuildContext context, int idx) {
+    final c = _controllers[idx];
+    if (c != null && c.value.isInitialized) {
+      final video = RepaintBoundary(
+        key: idx == _currentIndex ? _repaintKey : null,
+        child: VideoPlayer(c),
+      );
+      if (_isLandscape) {
+        return SizedBox.expand(
+          child: FittedBox(
+            fit: BoxFit.contain,
+            child: SizedBox(width: c.value.size.width, height: c.value.size.height, child: video),
+          ),
+        );
+      }
+      return Center(child: AspectRatio(aspectRatio: c.value.aspectRatio, child: video));
+    }
+    return const Center(child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2));
+  }
+
+  Widget _buildPageView() {
+    return PageView.builder(
+      controller: _pageController,
+      scrollDirection: Axis.vertical,
+      physics: const NeverScrollableScrollPhysics(),
+      itemCount: _playList.videos.length,
+      onPageChanged: _onPageChanged,
+      itemBuilder: _buildVideoItem,
     );
   }
 
@@ -754,8 +962,149 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
     );
   }
 
+  Widget _buildSeekPreview() {
+    final delta = _seekTarget - _seekStartPosition;
+    final deltaSec = delta.inSeconds;
+    final icon = deltaSec >= 0
+        ? Icons.fast_forward_rounded
+        : Icons.fast_rewind_rounded;
+    final sign = deltaSec >= 0 ? '+' : '';
+    return Positioned(
+      top: _screenHeight * 0.3,
+      left: 0, right: 0,
+      child: Center(
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+          decoration: BoxDecoration(
+            color: Colors.black.withOpacity(0.7),
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Row(mainAxisSize: MainAxisSize.min, children: [
+            Icon(icon, color: Colors.white, size: 28),
+            const SizedBox(width: 12),
+            Text('${_fmtDur(_seekTarget)}  ($sign${deltaSec}s)',
+                style: const TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.w600)),
+          ]),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildLandscapeCenterControls() {
+    return Center(
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          _centerCtrlBtn(
+            icon: Icons.replay_10_rounded,
+            onTap: () {
+              final target = _pos - const Duration(seconds: 10);
+              _controllers[_currentIndex]?.seekTo(target < Duration.zero ? Duration.zero : target);
+            },
+          ),
+          const SizedBox(width: 48),
+          GestureDetector(
+            onTap: _togglePlayPause,
+            child: Icon(
+              _isPlaying ? Icons.pause_rounded : Icons.play_arrow_rounded,
+              color: Colors.white.withOpacity(0.85),
+              size: 64,
+            ),
+          ),
+          const SizedBox(width: 48),
+          _centerCtrlBtn(
+            icon: Icons.forward_10_rounded,
+            onTap: () {
+              final target = _pos + const Duration(seconds: 10);
+              final max = _dur;
+              _controllers[_currentIndex]?.seekTo(target > max ? max : target);
+            },
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _centerCtrlBtn({required IconData icon, required VoidCallback onTap}) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Icon(icon, color: Colors.white.withOpacity(0.85), size: 48),
+    );
+  }
+
+  Widget _buildLandscapeFloatingSwitchButton() {
+    final bottomPad = MediaQuery.of(context).padding.bottom;
+    return Positioned(
+      left: 16,
+      bottom: bottomPad + 60,
+      child: GestureDetector(
+        onTap: () {},
+        child: Container(
+          width: 110,
+          height: 36,
+          decoration: BoxDecoration(
+            color: Colors.white.withOpacity(0.15),
+            borderRadius: BorderRadius.circular(18),
+            border: Border.all(color: Colors.white.withOpacity(0.2)),
+          ),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(17),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+              children: [
+                GestureDetector(
+                  onTap: _currentIndex > 0
+                      ? () => _pageController.animateToPage(_currentIndex - 1,
+                          duration: const Duration(milliseconds: 300), curve: Curves.easeOut)
+                      : null,
+                  child: Container(
+                    width: 28,
+                    height: 28,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: Colors.white.withOpacity(0.1),
+                    ),
+                    child: Icon(Icons.skip_previous_rounded,
+                        color: _currentIndex > 0 ? Colors.white : Colors.white38,
+                        size: 16),
+                  ),
+                ),
+                Text(
+                  '${_currentIndex + 1}/${_playList.videos.length}',
+                  style: const TextStyle(
+                      color: Colors.white70,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w500),
+                ),
+                GestureDetector(
+                  onTap: _currentIndex < _playList.videos.length - 1
+                      ? () => _pageController.animateToPage(_currentIndex + 1,
+                          duration: const Duration(milliseconds: 300), curve: Curves.easeOut)
+                      : null,
+                  child: Container(
+                    width: 28,
+                    height: 28,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: Colors.white.withOpacity(0.1),
+                    ),
+                    child: Icon(Icons.skip_next_rounded,
+                        color: _currentIndex < _playList.videos.length - 1
+                            ? Colors.white
+                            : Colors.white38,
+                        size: 16),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _buildPauseIcon() {
-    if (_isPlaying) return const SizedBox.shrink();
+    if (_isPlaying || _isLandscape) return const SizedBox.shrink();
     return GestureDetector(
       onTap: _togglePlayPause,
       child: Center(child: Container(width: 72, height: 72,
@@ -768,24 +1117,53 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
     _HeartAnim(key: Key(p.toString()), position: p, onDone: () => _doubleTapIcons.remove(p))).toList();
 
   // 修复：页码指示器支持任意数量视频，用比例显示
+  final ScrollController _indicatorScrollCtrl = ScrollController();
+
   Widget _buildIndicator() {
     final total = _playList.videos.length;
     if (total <= 1) return const SizedBox.shrink();
-    final maxH = MediaQuery.of(context).size.height * 0.5;
-    final dotH = total <= 20 ? 8.0 : (total <= 50 ? 5.0 : 3.0);
+    final mq = MediaQuery.of(context);
+    final topPad = mq.padding.top;
+    final bottomPad = mq.padding.bottom;
+    final safeH = mq.size.height - topPad - bottomPad;
+    final rightPad = _isLandscape ? 52.0 : 8.0;
+    final dotH = total <= 30 ? 8.0 : (total <= 80 ? 5.0 : 3.0);
     final activeH = dotH * 2;
-    return Positioned(right: 8, top: MediaQuery.of(context).size.height / 2 - maxH / 2,
-      child: SizedBox(height: maxH, child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: List.generate(total, (i) {
-          final active = i == _currentIndex;
-          return Container(width: 3, height: active ? activeH : dotH,
-            margin: EdgeInsets.symmetric(vertical: active ? 1 : 0.5),
-            decoration: BoxDecoration(
-              color: active ? Colors.white : Colors.white30,
-              borderRadius: BorderRadius.circular(2)));
-        }),
-      )),
+    final vMargin = 1.0;
+    final maxH = safeH * 0.7;
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!_indicatorScrollCtrl.hasClients) return;
+      final itemH = dotH + vMargin * 2;
+      final target = (_currentIndex * itemH - maxH / 2 + itemH / 2)
+          .clamp(0.0, _indicatorScrollCtrl.position.maxScrollExtent);
+      _indicatorScrollCtrl.animateTo(target,
+        duration: const Duration(milliseconds: 200), curve: Curves.easeOut);
+    });
+
+    return Positioned(
+      right: rightPad,
+      top: topPad + (safeH - maxH) / 2,
+      child: SizedBox(
+        height: maxH,
+        width: 12,
+        child: ListView.builder(
+          controller: _indicatorScrollCtrl,
+          physics: const NeverScrollableScrollPhysics(),
+          itemCount: total,
+          itemBuilder: (_, i) {
+            final active = i == _currentIndex;
+            return Container(
+              width: 3,
+              height: active ? activeH : dotH,
+              margin: EdgeInsets.symmetric(vertical: vMargin),
+              decoration: BoxDecoration(
+                color: active ? Colors.white : Colors.white30,
+                borderRadius: BorderRadius.circular(2)),
+            );
+          },
+        ),
+      ),
     );
   }
 }
@@ -835,5 +1213,79 @@ class _HeartAnimState extends State<_HeartAnim> with SingleTickerProviderStateMi
             shaderCallback: (b) => const RadialGradient(center: Alignment(0, 0),
               colors: [Color(0xffEF6F6F), Color(0xffF03E3E)]).createShader(b),
             child: const Icon(Icons.favorite, size: sz, color: Colors.white))))));
+  }
+}
+
+class _VerticalSliderIndicator extends StatelessWidget {
+  final IconData icon;
+  final double value;
+  final Color color;
+  const _VerticalSliderIndicator(
+      {required this.icon, required this.value, required this.color});
+  @override
+  Widget build(BuildContext context) => Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+            color: Colors.black.withOpacity(0.7),
+            borderRadius: BorderRadius.circular(16)),
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          Icon(icon, color: color, size: 28),
+          const SizedBox(height: 8),
+          Text('${(value * 100).toInt()}%',
+              style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 14,
+                  fontWeight: FontWeight.bold)),
+          const SizedBox(height: 12),
+          Container(
+            width: 24,
+            height: 120,
+            decoration: BoxDecoration(
+                color: Colors.white.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(12)),
+            child: Stack(alignment: Alignment.bottomCenter, children: [
+              Positioned(
+                  bottom: 6,
+                  child: Container(
+                      width: 8,
+                      height: 100,
+                      decoration: BoxDecoration(
+                          color: Colors.white.withOpacity(0.2),
+                          borderRadius: BorderRadius.circular(4)))),
+              Positioned(
+                  bottom: 6,
+                  child: Container(
+                      width: 8,
+                      height: 100 * value,
+                      decoration: BoxDecoration(
+                          color: color,
+                          borderRadius: BorderRadius.circular(4)))),
+            ]),
+          ),
+        ]),
+      );
+}
+
+/// 边缘区域垂直滑动识别器（左15%/右15% → 亮度/音量）
+class _EdgeVerticalDragRecognizer extends VerticalDragGestureRecognizer {
+  final bool Function(Offset position) isEdgeZone;
+  _EdgeVerticalDragRecognizer({required this.isEdgeZone});
+
+  @override
+  bool isPointerAllowed(PointerEvent event) {
+    if (event is PointerDownEvent && !isEdgeZone(event.position)) return false;
+    return super.isPointerAllowed(event);
+  }
+}
+
+/// 中间区域垂直滑动识别器（中间70% → 翻页）
+class _MiddleVerticalDragRecognizer extends VerticalDragGestureRecognizer {
+  final bool Function(Offset position) isMiddleZone;
+  _MiddleVerticalDragRecognizer({required this.isMiddleZone});
+
+  @override
+  bool isPointerAllowed(PointerEvent event) {
+    if (event is PointerDownEvent && !isMiddleZone(event.position)) return false;
+    return super.isPointerAllowed(event);
   }
 }
