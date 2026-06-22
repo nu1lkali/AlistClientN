@@ -6,6 +6,8 @@ import 'package:alist/util/download/download_manager.dart';
 import 'package:alist/util/download/download_task.dart';
 import 'package:alist/util/download/download_task_status.dart';
 import 'package:alist/util/file_type.dart';
+import 'package:alist/util/file_utils.dart';
+import 'package:alist/util/widget_utils.dart';
 import 'package:alist/widget/alist_scaffold.dart';
 import 'package:flustars/flustars.dart';
 import 'package:flutter/material.dart';
@@ -45,6 +47,8 @@ class _FileReaderContainerState extends State<_FileReaderContainer> {
   DownloadTask? _downloadTask;
   late StreamSubscription _downloadProgressSubscription;
   late StreamSubscription _downloadStatusChangeSubscription;
+  bool _downloadFinished = false;
+  DateTime? _downloadFinishTime;
 
   @override
   void initState() {
@@ -75,59 +79,279 @@ class _FileReaderContainerState extends State<_FileReaderContainer> {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final isDark = WidgetUtils.isDarkMode(context);
+    final item = widget.fileReaderItem;
+
     return Center(
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 20),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            _localPath == null
-                ? const CircularProgressIndicator()
-                : const SizedBox(),
-            fileName != null
-                ? Padding(
-                    padding: const EdgeInsets.only(top: 15),
-                    child: Text(fileName ?? ""),
-                  )
-                : const SizedBox(),
-            Padding(
-              padding: const EdgeInsets.only(top: 15),
-              child: buildOpenFileMessage(),
+        padding: const EdgeInsets.symmetric(horizontal: 32),
+        child: Card(
+          elevation: 0,
+          color: scheme.surface,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+            side: BorderSide(
+              color: scheme.outlineVariant.withOpacity(0.3),
             ),
-          ],
+          ),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 36),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                _buildProgressIndicator(scheme),
+                const SizedBox(height: 24),
+                Text(
+                  item.name,
+                  textAlign: TextAlign.center,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w600,
+                    color: scheme.onSurface,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                _buildStatusText(scheme, isDark),
+                const SizedBox(height: 24),
+                _buildActionArea(scheme),
+              ],
+            ),
+          ),
         ),
       ),
     );
   }
 
-  Widget buildOpenFileMessage() {
+  Widget _buildProgressIndicator(ColorScheme scheme) {
+    final finished = _downloadFinished || failedMessage != null;
+    final progress = _downloadProgress / 100.0;
+
+    return SizedBox(
+      width: 100,
+      height: 100,
+      child: Stack(
+        alignment: Alignment.center,
+        children: [
+          SizedBox(
+            width: 100,
+            height: 100,
+            child: CircularProgressIndicator(
+              value: finished ? 1.0 : progress.clamp(0.01, 1.0),
+              strokeWidth: 6,
+              backgroundColor: scheme.surfaceVariant.withOpacity(0.5),
+              valueColor: AlwaysStoppedAnimation<Color>(
+                failedMessage != null ? scheme.error : scheme.primary,
+              ),
+            ),
+          ),
+          if (failedMessage != null)
+            Icon(Icons.error_outline_rounded, size: 36, color: scheme.error)
+          else if (_downloadFinished)
+            Icon(Icons.check_rounded, size: 36, color: scheme.primary)
+          else
+            Text(
+              '$_downloadProgress%',
+              style: TextStyle(
+                fontSize: 22,
+                fontWeight: FontWeight.bold,
+                color: scheme.primary,
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  String _fileTypeLabel() {
     final fileType = widget.fileReaderItem.fileType;
-    if (failedMessage != null) {
-      return Text(failedMessage ?? "");
-    } else if (_downloadProgress < 100) {
-      return Text("$_downloadProgress%");
-    } else if (!_isOpenSuccessfully &&
-        failedMessage == null &&
-        !(fileType == FileType.apk && Platform.isAndroid)) {
-      return Text("$_downloadProgress%");
-    } else if (_isOpenSuccessfully ||
-        (fileType == FileType.apk && Platform.isAndroid)) {
-      String text;
-      if (fileType == FileType.apk && Platform.isAndroid) {
-        text = Intl.fileReaderScreen_install.tr;
-      } else {
-        text = Intl.fileReaderScreen_openAgain.tr;
-      }
-      return FilledButton(
-          onPressed: () {
-            if (null != _localPath) {
-              _openFile(_localPath);
-            }
-          },
-          child: Text(text));
-    } else {
-      return Text(failedMessage ?? "");
+    switch (fileType) {
+      case FileType.apk:
+        return 'APK 安装包';
+      case FileType.video:
+        return '视频文件';
+      case FileType.audio:
+        return '音频文件';
+      case FileType.image:
+        return '图片文件';
+      case FileType.pdf:
+        return 'PDF 文档';
+      case FileType.txt:
+        return '文本文件';
+      case FileType.word:
+        return 'Word 文档';
+      case FileType.excel:
+        return 'Excel 表格';
+      case FileType.ppt:
+        return 'PPT 演示';
+      case FileType.compress:
+        return '压缩包';
+      case FileType.code:
+        return '代码文件';
+      case FileType.markdown:
+        return 'Markdown 文件';
+      default:
+        return '文件';
     }
+  }
+
+  String _formatTime(DateTime t) {
+    final now = DateTime.now();
+    final hh = t.hour.toString().padLeft(2, '0');
+    final mm = t.minute.toString().padLeft(2, '0');
+    final today = DateTime(now.year, now.month, now.day);
+    final target = DateTime(t.year, t.month, t.day);
+    final diff = today.difference(target).inDays;
+    if (diff == 0) return '今天 $hh:$mm';
+    if (diff == 1) return '昨天 $hh:$mm';
+    if (diff == 2) return '前天 $hh:$mm';
+    if (now.year == t.year) return '${t.month}/${t.day} $hh:$mm';
+    return '${t.year}/${t.month}/${t.day} $hh:$mm';
+  }
+
+  Widget _buildStatusText(ColorScheme scheme, bool isDark) {
+    if (failedMessage != null) {
+      return Column(
+        children: [
+          Text(
+            failedMessage!,
+            style: TextStyle(fontSize: 13, color: scheme.error),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            _fileTypeLabel(),
+            style: TextStyle(fontSize: 12, color: scheme.outlineVariant),
+          ),
+        ],
+      );
+    }
+    if (_downloadFinished) {
+      final task = _downloadTask;
+      final fileType = widget.fileReaderItem.fileType;
+      final isApk = fileType == FileType.apk && Platform.isAndroid;
+      final fileSize = (task?.contentLength != null && task!.contentLength! > 0)
+          ? FileUtils.formatBytes(task.contentLength!)
+          : null;
+      final timeStr = _downloadFinishTime != null
+          ? _formatTime(_downloadFinishTime!)
+          : null;
+      return Column(
+        children: [
+          Text(
+            _downloadFinishedLabel(),
+            style: TextStyle(fontSize: 13, color: scheme.outline),
+          ),
+          const SizedBox(height: 6),
+          Wrap(
+            spacing: 8,
+            runSpacing: 4,
+            alignment: WrapAlignment.center,
+            children: [
+              if (!isApk) _infoChip(scheme, _fileTypeLabel()),
+              if (fileSize != null) _infoChip(scheme, fileSize),
+              if (timeStr != null) _infoChip(scheme, timeStr),
+            ],
+          ),
+        ],
+      );
+    }
+    // 下载中
+    final task = _downloadTask;
+    String sizeInfo = '';
+    if (task != null && task.contentLength != null && task.contentLength! > 0) {
+      final downloaded = FileUtils.formatBytes(task.downloaded);
+      final total = FileUtils.formatBytes(task.contentLength!);
+      sizeInfo = '$downloaded / $total';
+    }
+    return Column(
+      children: [
+        Text(
+          '正在下载…',
+          style: TextStyle(fontSize: 13, color: scheme.outline),
+        ),
+        if (sizeInfo.isNotEmpty) ...[
+          const SizedBox(height: 4),
+          Text(
+            sizeInfo,
+            style: TextStyle(fontSize: 12, color: scheme.outlineVariant),
+          ),
+        ],
+        const SizedBox(height: 4),
+        Text(
+          _fileTypeLabel(),
+          style: TextStyle(fontSize: 12, color: scheme.outlineVariant),
+        ),
+      ],
+    );
+  }
+
+  Widget _infoChip(ColorScheme scheme, String label) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      decoration: BoxDecoration(
+        color: scheme.surfaceVariant.withOpacity(0.5),
+        borderRadius: BorderRadius.circular(6),
+      ),
+      child: Text(
+        label,
+        style: TextStyle(fontSize: 11, color: scheme.outline),
+      ),
+    );
+  }
+
+  String _downloadFinishedLabel() {
+    final fileType = widget.fileReaderItem.fileType;
+    if (fileType == FileType.apk && Platform.isAndroid) {
+      return 'APK 安装包 · 下载完成';
+    }
+    return '下载完成';
+  }
+
+  Widget _buildActionArea(ColorScheme scheme) {
+    if (failedMessage != null) {
+      return FilledButton.tonalIcon(
+        onPressed: () {
+          setState(() {
+            failedMessage = null;
+            _downloadProgress = 0;
+            _downloadFinished = false;
+          });
+          _download(widget.fileReaderItem);
+        },
+        icon: const Icon(Icons.refresh_rounded),
+        label: const Text('重试'),
+      );
+    }
+
+    if (!_downloadFinished && !_isOpenSuccessfully) {
+      // 下载中 - 显示取消按钮
+      return TextButton.icon(
+        onPressed: () {
+          _downloadTask?.cancel();
+          Navigator.of(context).pop();
+        },
+        icon: const Icon(Icons.close_rounded, size: 18),
+        label: const Text('取消'),
+        style: TextButton.styleFrom(foregroundColor: scheme.outline),
+      );
+    }
+
+    // 下载完成
+    final fileType = widget.fileReaderItem.fileType;
+    final isApk = fileType == FileType.apk && Platform.isAndroid;
+
+    if (isApk || _isOpenSuccessfully) {
+      return FilledButton.icon(
+        onPressed: _localPath != null ? () => _openFile(_localPath) : null,
+        icon: Icon(isApk ? Icons.install_mobile_rounded : Icons.open_in_new_rounded),
+        label: Text(isApk ? Intl.fileReaderScreen_install.tr : Intl.fileReaderScreen_openAgain.tr),
+      );
+    }
+
+    return const SizedBox.shrink();
   }
 
   @override
@@ -139,6 +363,7 @@ class _FileReaderContainerState extends State<_FileReaderContainer> {
   }
 
   void _download(FileReaderItem item) async {
+    _downloadFinishTime = null;
     final fileType = widget.fileReaderItem.fileType;
     final requestHeaders = <String, dynamic>{};
     var limitFrequency = 0;
@@ -168,18 +393,14 @@ class _FileReaderContainerState extends State<_FileReaderContainer> {
 
   void _onDownloadFinish(FileType? fileType) {
     LogUtil.d("_onDownloadFinish");
-    if (fileType == FileType.apk && Platform.isAndroid) {
-      var fileName = widget.fileReaderItem.name;
-      setState(() {
-        this.fileName = fileName;
-        _downloadProgress = 100;
-        _localPath = _downloadTask?.record.localPath;
-      });
-    } else {
-      var fileName = widget.fileReaderItem.name;
-      setState(() {
-        this.fileName = fileName;
-      });
+    _downloadFinishTime = DateTime.now();
+    setState(() {
+      _downloadFinished = true;
+      fileName = widget.fileReaderItem.name;
+      _downloadProgress = 100;
+      _localPath = _downloadTask?.record.localPath;
+    });
+    if (!(fileType == FileType.apk && Platform.isAndroid)) {
       _openFile(_downloadTask?.record.localPath);
     }
   }
@@ -222,6 +443,7 @@ class _FileReaderContainerState extends State<_FileReaderContainer> {
       });
       setState(() {
         _downloadProgress = 100;
+        _downloadFinished = true;
         _localPath = filePath;
       });
     }

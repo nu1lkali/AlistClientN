@@ -3997,27 +3997,59 @@ class _FileListView extends StatelessWidget {
             ),
         ],
       ),
-      child: FileListItemView(
-        icon: file.icon,
-        fileName: file.name,
-        thumbnail: file.thumb,
-        time: file.modified,
-        sizeDesc: file.sizeDesc,
-        watchProgress: file.watchProgress,
-        onTap: () => onFileItemClick(context, index),
-        onLongPress: onFileLongPress != null
-            ? () => onFileLongPress!(context, index)
-            : null,
-        showShuffleButton: true,
-        onShufflePlayTap: file.isDir && onFolderShufflePlay != null
-            ? () => onFolderShufflePlay!(file.path)
-            : null,
-        onMoreIconButtonTap: () {
-          if (onFileMoreIconButtonTap != null) {
-            onFileMoreIconButtonTap!(context, index);
-          }
-        },
-      ),
+      child: isMultiSelectMode
+          ? Row(
+              children: [
+                Checkbox(
+                  value: selectedIndices.contains(index),
+                  onChanged: (_) => onFileItemClick(context, index),
+                ),
+                Expanded(
+                  child: FileListItemView(
+                    icon: file.icon,
+                    fileName: file.name,
+                    thumbnail: file.thumb,
+                    time: file.modified,
+                    sizeDesc: file.sizeDesc,
+                    watchProgress: file.watchProgress,
+                    onTap: () => onFileItemClick(context, index),
+                    onLongPress: onFileLongPress != null
+                        ? () => onFileLongPress!(context, index)
+                        : null,
+                    showShuffleButton: true,
+                    onShufflePlayTap: file.isDir && onFolderShufflePlay != null
+                        ? () => onFolderShufflePlay!(file.path)
+                        : null,
+                    onMoreIconButtonTap: () {
+                      if (onFileMoreIconButtonTap != null) {
+                        onFileMoreIconButtonTap!(context, index);
+                      }
+                    },
+                  ),
+                ),
+              ],
+            )
+          : FileListItemView(
+              icon: file.icon,
+              fileName: file.name,
+              thumbnail: file.thumb,
+              time: file.modified,
+              sizeDesc: file.sizeDesc,
+              watchProgress: file.watchProgress,
+              onTap: () => onFileItemClick(context, index),
+              onLongPress: onFileLongPress != null
+                  ? () => onFileLongPress!(context, index)
+                  : null,
+              showShuffleButton: true,
+              onShufflePlayTap: file.isDir && onFolderShufflePlay != null
+                  ? () => onFolderShufflePlay!(file.path)
+                  : null,
+              onMoreIconButtonTap: () {
+                if (onFileMoreIconButtonTap != null) {
+                  onFileMoreIconButtonTap!(context, index);
+                }
+              },
+            ),
     );
   }
 

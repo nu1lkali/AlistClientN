@@ -65,72 +65,151 @@ class FileSearchScreen extends StatelessWidget {
         children: [
           Obx(() => controller.isMultiSelect.value
               ? _buildMultiSelectBar(controller)
-              : Padding(
-                  padding: const EdgeInsets.only(left: 15),
-                  child: Row(
-                    children: [
-                      Expanded(
-                        child: DecoratedBox(
-                          decoration: BoxDecoration(
-                              color: searchBoxBackground,
-                              borderRadius:
-                                  const BorderRadius.all(Radius.circular(4))),
-                          child: Row(
-                            crossAxisAlignment: CrossAxisAlignment.center,
-                            children: [
-                              Padding(
-                                padding: const EdgeInsets.only(left: 10),
-                                child: Icon(
-                                  Icons.search_rounded,
-                                  color: searchIconColor,
-                                ),
+              : SafeArea(
+                  bottom: false,
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(12, 8, 4, 8),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: SizedBox(
+                            height: 40,
+                            child: DecoratedBox(
+                              decoration: BoxDecoration(
+                                  color: searchBoxBackground,
+                                  borderRadius:
+                                      const BorderRadius.all(Radius.circular(20))),
+                              child: Row(
+                                crossAxisAlignment: CrossAxisAlignment.center,
+                                children: [
+                                  const SizedBox(width: 12),
+                                  Icon(
+                                    Icons.search_rounded,
+                                    color: searchIconColor,
+                                    size: 20,
+                                  ),
+                                  Expanded(
+                                      child: TextField(
+                                    focusNode: controller.focusNode,
+                                    controller: controller.textEditingController,
+                                    onChanged: (text) {
+                                      controller.onSearchTextChange(text);
+                                    },
+                                    style: TextStyle(color: searchTextColor, fontSize: 15),
+                                    decoration: InputDecoration(
+                                      border: InputBorder.none,
+                                      hintText: Intl.fileSearchScreen_searchHint.tr,
+                                      hintStyle: TextStyle(color: searchIconColor, fontSize: 15),
+                                      contentPadding: const EdgeInsets.symmetric(
+                                          horizontal: 10, vertical: 10),
+                                      suffixIconConstraints: const BoxConstraints(
+                                        minWidth: 32,
+                                        minHeight: 0,
+                                      ),
+                                      suffixIcon: Obx(() => controller.searchText.value.isNotEmpty
+                                          ? GestureDetector(
+                                              onTap: () {
+                                                controller.textEditingController.clear();
+                                                controller.searchText.value = '';
+                                                controller.list.clear();
+                                              },
+                                              child: Padding(
+                                                padding: const EdgeInsets.only(right: 8),
+                                                child: Icon(Icons.cancel, color: searchIconColor, size: 18),
+                                              ),
+                                            )
+                                          : const SizedBox.shrink()),
+                                    ),
+                                  )),
+                                ],
                               ),
-                              Expanded(
-                                  child: TextField(
-                                focusNode: controller.focusNode,
-                                controller: controller.textEditingController,
-                                onChanged: (text) {
-                                  controller.onSearchTextChange(text);
-                                },
-                                style: TextStyle(color: searchTextColor),
-                                decoration: InputDecoration(
-                                  border: InputBorder.none,
-                                  isCollapsed: true,
-                                  hintText: Intl.fileSearchScreen_searchHint.tr,
-                                  hintStyle: TextStyle(color: searchIconColor),
-                                  contentPadding: const EdgeInsets.symmetric(
-                                      horizontal: 12, vertical: 8),
-                                  suffixIcon: Obx(() => controller.searchText.value.isNotEmpty
-                                      ? IconButton(
-                                          icon: Icon(Icons.clear, color: searchIconColor, size: 20),
-                                          onPressed: () {
-                                            controller.textEditingController.clear();
-                                            controller.searchText.value = '';
-                                            controller.list.clear();
-                                          },
-                                        )
-                                      : const SizedBox.shrink()),
-                                ),
-                              )),
-                            ],
+                            ),
                           ),
                         ),
-                      ),
-                      GestureDetector(
-                        onTap: () => Get.back(),
-                        child: Padding(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 15, vertical: 8),
-                          child: Text(Intl.fileSearchScreen_cancel.tr),
+                        Obx(() {
+                          final hasResults = controller.list.isNotEmpty;
+                          controller._filterVersion.value;
+                          final activeCount = controller.activeFilters.length;
+                          final expanded = controller.filterBarExpanded.value;
+                          if (!hasResults) return const SizedBox.shrink();
+                          return IconButton(
+                            onPressed: () => controller.filterBarExpanded.value = !controller.filterBarExpanded.value,
+                            icon: Icon(
+                              expanded
+                                  ? Icons.keyboard_double_arrow_up_rounded
+                                  : Icons.filter_list_rounded,
+                              size: 22,
+                              color: activeCount > 0
+                                  ? Theme.of(Get.context!).colorScheme.primary
+                                  : searchIconColor,
+                            ),
+                            splashRadius: 20,
+                          );
+                        }),
+                        IconButton(
+                          onPressed: () => Get.back(),
+                          icon: Icon(Icons.close_rounded, color: searchIconColor, size: 22),
+                          splashRadius: 20,
                         ),
-                      )
-                    ],
+                      ],
+                    ),
                   ),
                 )),
+          _buildFilterChips(controller),
           Expanded(child: _buildList(controller)),
         ],
       ),
     );
+  }
+
+  Widget _buildFilterChips(FileSearchController controller) {
+    return Obx(() {
+      if (controller.list.isEmpty || !controller.filterBarExpanded.value) {
+        return const SizedBox.shrink();
+      }
+      controller._filterVersion.value;
+      final filters = controller.activeFilters;
+      final scheme = Theme.of(Get.context!).colorScheme;
+      final isDark = WidgetUtils.isDarkMode(Get.context!);
+
+      return SizedBox(
+        height: 44,
+        child: ListView.separated(
+          scrollDirection: Axis.horizontal,
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+          itemCount: SearchFilterCategory.values.length,
+          separatorBuilder: (_, __) => const SizedBox(width: 8),
+          itemBuilder: (context, index) {
+            final cat = SearchFilterCategory.values[index];
+            final selected = filters.contains(cat);
+            return FilterChip(
+              label: Text(cat.label),
+              avatar: Icon(cat.icon, size: 16,
+                color: selected
+                    ? scheme.onPrimaryContainer
+                    : scheme.onSurfaceVariant,
+              ),
+              selected: selected,
+              showCheckmark: false,
+              selectedColor: scheme.primaryContainer,
+              backgroundColor: isDark
+                  ? const Color(0xff2a2a2a)
+                  : const Color(0xfff0f0f0),
+              labelStyle: TextStyle(
+                fontSize: 13,
+                color: selected
+                    ? scheme.onPrimaryContainer
+                    : scheme.onSurfaceVariant,
+              ),
+              padding: const EdgeInsets.symmetric(horizontal: 4),
+              materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              visualDensity: VisualDensity.compact,
+              onSelected: (_) => controller.toggleFilter(cat),
+            );
+          },
+        ),
+      );
+    });
   }
 
   Widget _buildMultiSelectBar(FileSearchController controller) {
@@ -170,33 +249,76 @@ class FileSearchScreen extends StatelessWidget {
 
   Obx _buildList(FileSearchController controller) {
     return Obx(() {
-      // 显示搜索历史
+      controller._filterVersion.value;
       if (controller.list.isEmpty && controller.textEditingController.text.trim().isEmpty) {
         return _buildSearchHistory(controller);
       }
-      
+
+      if (controller.list.isEmpty) {
+        return Center(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.search_off_rounded, size: 56, color: Theme.of(Get.context!).colorScheme.outlineVariant),
+              const SizedBox(height: 12),
+              Text(
+                '没有找到匹配的文件',
+                style: TextStyle(color: Theme.of(Get.context!).colorScheme.outline, fontSize: 15),
+              ),
+            ],
+          ),
+        );
+      }
+
+      final indices = controller.filteredIndices;
+      if (indices.isEmpty) {
+        return Center(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.filter_list_off_rounded, size: 56, color: Theme.of(Get.context!).colorScheme.outlineVariant),
+              const SizedBox(height: 12),
+              Text(
+                '当前筛选条件下没有文件',
+                style: TextStyle(color: Theme.of(Get.context!).colorScheme.outline, fontSize: 15),
+              ),
+            ],
+          ),
+        );
+      }
+
+      final keyword = controller.textEditingController.text.trim();
       return ListView.separated(
-        itemBuilder: (context, index) {
+        padding: const EdgeInsets.only(top: 4),
+        itemBuilder: (context, i) {
+          final index = indices[i];
           var item = controller.list[index];
           var isDir = item.isDir ?? false;
           var sizeDesc = isDir ? null : FileUtils.formatBytes(item.size ?? 0);
-          final keyword = controller.textEditingController.text.trim();
           return GestureDetector(
             onLongPress: () => controller.enterMultiSelect(index),
             child: Obx(() {
               final isSelected = controller.selectedIndices.contains(index);
               return controller.isMultiSelect.value
-                  ? CheckboxListTile(
-                      value: isSelected,
-                      onChanged: (_) => controller.toggleSelect(index),
-                      title: Text(item.name ?? ""),
-                      subtitle: Text(item.parent ?? ""),
-                      secondary: Image.asset(
-                        FileUtils.getFileIcon(isDir, item.name ?? ""),
-                        width: 36,
-                        height: 36,
-                      ),
-                      controlAffinity: ListTileControlAffinity.leading,
+                  ? Row(
+                      children: [
+                        Checkbox(
+                          value: isSelected,
+                          onChanged: (_) => controller.toggleSelect(index),
+                        ),
+                        Expanded(
+                          child: FileListItemView(
+                            icon: FileUtils.getFileIcon(isDir, item.name ?? ""),
+                            fileName: item.name ?? "",
+                            time: item.parent,
+                            sizeDesc: sizeDesc,
+                            thumbnail: null,
+                            fileNameMaxLines: 100,
+                            highlightKeyword: keyword,
+                            onTap: () => controller.toggleSelect(index),
+                          ),
+                        ),
+                      ],
                     )
                   : FileListItemView(
                       icon: FileUtils.getFileIcon(isDir, item.name ?? ""),
@@ -211,8 +333,11 @@ class FileSearchScreen extends StatelessWidget {
             }),
           );
         },
-        separatorBuilder: (context, index) => const Divider(),
-        itemCount: controller.list.length,
+        separatorBuilder: (context, index) => const Padding(
+          padding: EdgeInsets.symmetric(horizontal: 16),
+          child: Divider(height: 1),
+        ),
+        itemCount: indices.length,
       );
     });
   }
@@ -224,9 +349,16 @@ class FileSearchScreen extends StatelessWidget {
       
       if (controller.searchHistory.isEmpty) {
         return Center(
-          child: Text(
-            '输入关键词开始搜索',
-            style: TextStyle(color: Colors.grey[600]),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.manage_search_rounded, size: 56, color: Theme.of(Get.context!).colorScheme.outlineVariant),
+              const SizedBox(height: 12),
+              Text(
+                '输入关键词开始搜索',
+                style: TextStyle(color: Theme.of(Get.context!).colorScheme.outline, fontSize: 15),
+              ),
+            ],
           ),
         );
       }
@@ -297,6 +429,19 @@ class FileSearchScreen extends StatelessWidget {
   }
 }
 
+enum SearchFilterCategory {
+  folder('文件夹', Icons.folder_rounded),
+  video('视频', Icons.videocam_rounded),
+  image('图片', Icons.image_rounded),
+  audio('音频', Icons.headphones_rounded),
+  document('文档', Icons.description_rounded),
+  other('其他', Icons.insert_drive_file_rounded);
+
+  const SearchFilterCategory(this.label, this.icon);
+  final String label;
+  final IconData icon;
+}
+
 class FileSearchController extends GetxController {
   final String folder;
   final FocusNode focusNode = FocusNode();
@@ -310,6 +455,11 @@ class FileSearchController extends GetxController {
   final searchHistory = <String>[].obs;
   final SearchHistoryManager _historyManager = SearchHistoryManager();
   final searchText = ''.obs;
+
+  // type filter
+  final activeFilters = <SearchFilterCategory>{};
+  final _filterVersion = 0.obs;
+  final filterBarExpanded = false.obs;
 
   // multi-select
   final isMultiSelect = false.obs;
@@ -337,11 +487,60 @@ class FileSearchController extends GetxController {
   }
 
   void selectAll() {
-    if (selectedIndices.length == list.length) {
+    final visible = filteredIndices.toSet();
+    if (visible.difference(selectedIndices).isEmpty) {
       selectedIndices.clear();
     } else {
-      selectedIndices.assignAll(List.generate(list.length, (i) => i));
+      selectedIndices.assignAll(visible);
     }
+  }
+
+  void toggleFilter(SearchFilterCategory category) {
+    if (activeFilters.contains(category)) {
+      activeFilters.remove(category);
+    } else {
+      activeFilters.add(category);
+    }
+    _filterVersion.value++;
+  }
+
+  static SearchFilterCategory _categorize(FileSearchRespContent item) {
+    if (item.isDir == true) return SearchFilterCategory.folder;
+    final type = FileUtils.getFileType(false, item.name ?? "");
+    switch (type) {
+      case FileType.video:
+      case FileType.strm:
+        return SearchFilterCategory.video;
+      case FileType.image:
+        return SearchFilterCategory.image;
+      case FileType.audio:
+        return SearchFilterCategory.audio;
+      case FileType.pdf:
+      case FileType.word:
+      case FileType.excel:
+      case FileType.ppt:
+      case FileType.txt:
+      case FileType.markdown:
+      case FileType.keynote:
+      case FileType.numbers:
+      case FileType.pages:
+        return SearchFilterCategory.document;
+      default:
+        return SearchFilterCategory.other;
+    }
+  }
+
+  List<int> get filteredIndices {
+    if (activeFilters.isEmpty) {
+      return List.generate(list.length, (i) => i);
+    }
+    final indices = <int>[];
+    for (int i = 0; i < list.length; i++) {
+      if (activeFilters.contains(_categorize(list[i]))) {
+        indices.add(i);
+      }
+    }
+    return indices;
   }
 
   void batchDownload() async {
@@ -432,6 +631,7 @@ class FileSearchController extends GetxController {
 
   void onHistoryTap(String keyword) {
     textEditingController.text = keyword;
+    searchText.value = keyword;
     _doSearch(keyword);
     // 点击历史记录时也更新时间戳（LRU）
     _lastSavedKeyword = keyword;
