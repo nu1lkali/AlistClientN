@@ -4130,9 +4130,16 @@ class FileListWrapper extends StatelessWidget {
         currentIndex: 0,
         type: BottomNavigationBarType.fixed,
         onTap: (int idx) {
-          // 先设置目标 tab，再返回 HomeScreen，HomeScreen 监听到后会自动跳转
-          HomeScreen.pendingTabIndex.value = idx;
-          Get.until((route) => route.isFirst);
+          if (idx == 0) {
+            // 已经在文件列表，不需要跳回 HomeScreen
+            // 如果有子文件夹导航，回退到初始文件夹
+            Get.until((route) =>
+                route.settings.name == NamedRouter.fileList);
+          } else {
+            // 切换到其他 tab，先设置目标 tab，再返回 HomeScreen
+            HomeScreen.pendingTabIndex.value = idx;
+            Get.until((route) => route.isFirst);
+          }
         },
       ),
     );
