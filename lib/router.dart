@@ -33,6 +33,7 @@ import 'package:alist/screen/strm_player_screen.dart';
 import 'package:alist/screen/web_screen.dart';
 import 'package:alist/util/constant.dart';
 import 'package:alist/util/named_router.dart';
+import 'package:alist/widget/blur_slide_transition.dart';
 import 'package:flustars/flustars.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get_navigation/src/routes/get_route.dart';
@@ -50,7 +51,12 @@ class AlistRouter {
     GetPage(name: NamedRouter.root, page: () => const SplashScreen()),
     GetPage(name: NamedRouter.login, page: () => LoginScreen()),
     GetPage(name: NamedRouter.home, page: () => const HomeScreen()),
-    GetPage(name: NamedRouter.fileList, page: () => FileListWrapper()),
+    GetPage(
+      name: NamedRouter.fileList,
+      page: () => FileListWrapper(),
+      customTransition: BlurSlideTransition(),
+      transitionDuration: const Duration(milliseconds: 400),
+    ),
     GetPage(name: NamedRouter.settings, page: () => const SettingsScreen()),
     GetPage(
         name: NamedRouter.videoPlayer, page: () => const VideoPlayerScreen()),
