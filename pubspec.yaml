@@ -119,6 +119,10 @@ dependency_overrides:
   sqflite_common: 2.5.0
   sqflite: 2.3.0
   sqflite_common_ffi: 2.3.0+2
+  package_info_plus:
+    path: package_info_plus_local
+  flutter_media_metadata:
+    path: flutter_media_metadata_local
 
 dev_dependencies:
   flutter_test:

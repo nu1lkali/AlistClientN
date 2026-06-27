@@ -490,10 +490,9 @@ packages:
   flutter_media_metadata:
     dependency: "direct main"
     description:
-      name: flutter_media_metadata
-      sha256: "69cfc76ffd6cd5d546dcc4880584b3844c5e879e435aa54f57f1096c15bd04db"
-      url: "https://pub.dev"
-    source: hosted
+      path: flutter_media_metadata_local
+      relative: true
+    source: path
     version: "1.0.0+1"
   flutter_pdfview:
     dependency: "direct main"
@@ -868,10 +867,9 @@ packages:
   package_info_plus:
     dependency: "direct main"
     description:
-      name: package_info_plus
-      sha256: "7e76fad405b3e4016cd39d08f455a4eb5199723cf594cd1b8916d47140d93017"
-      url: "https://pub.dev"
-    source: hosted
+      path: package_info_plus_local
+      relative: true
+    source: path
     version: "4.2.0"
   package_info_plus_platform_interface:
     dependency: transitive

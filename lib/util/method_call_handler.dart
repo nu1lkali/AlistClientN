@@ -274,7 +274,7 @@ class MethodCallHandler {
         return existing != null ? "true" : "false";
 
       case "fallbackToMediaKit":
-        // ExoPlayer 播放失败时，原生层通知 Flutter 使用 MediaKit 重试
+        // IJK 播放失败时，原生层通知 Flutter 使用 MediaKit 重试
         String? videosJson = call.arguments["videos"];
         int index = call.arguments["index"] ?? 0;
         String? headersStr = call.arguments["headers"];

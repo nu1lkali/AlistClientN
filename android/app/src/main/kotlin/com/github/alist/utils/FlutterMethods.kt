@@ -188,7 +188,7 @@ object FlutterMethods {
     }
 
     /**
-     * ExoPlayer 播放失败时，通知 Flutter 使用 MediaKit (libmpv) 重试播放
+     * IJK 播放失败时，通知 Flutter 使用 MediaKit (libmpv) 重试播放
      */
     fun fallbackToMediaKit(videosJson: String, index: Int, headersStr: String?) {
         channel.invokeMethod(

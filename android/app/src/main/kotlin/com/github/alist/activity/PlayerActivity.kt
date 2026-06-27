@@ -48,7 +48,10 @@ import com.shuyu.gsyvideoplayer.utils.OrientationUtils
 import com.shuyu.gsyvideoplayer.utils.GSYVideoType
 import com.shuyu.gsyvideoplayer.video.NormalGSYVideoPlayer
 import com.shuyu.gsyvideoplayer.video.base.GSYVideoView
+import com.shuyu.gsyvideoplayer.model.VideoOptionModel
+import com.shuyu.gsyvideoplayer.player.IjkPlayerManager
 import tv.danmaku.ijk.media.exo2.Exo2PlayerManager
+import tv.danmaku.ijk.media.player.IjkMediaPlayer
 import java.net.URLDecoder
 import kotlin.math.abs
 
@@ -121,7 +124,7 @@ class PlayerActivity : AppCompatActivity(), GSYVideoProgressListener {
     private enum class PlayDirection { NEXT, PREVIOUS }
     private var lastPlayDirection = PlayDirection.NEXT
     
-    // ExoPlayer 播放失败时是否已尝试回退到 MediaKit
+    // IJK 播放失败时是否已尝试回退到 MediaKit
     private var hasTriedMediaKitFallback = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -301,8 +304,47 @@ class PlayerActivity : AppCompatActivity(), GSYVideoProgressListener {
         Debuger.printfLog("headers=$headers")
 
         Debuger.printfError("player = $playerType")
-        PlayerFactory.setPlayManager(Exo2PlayerManager::class.java)
-        
+
+        // 混合内核方案：老格式走 IJK（FFmpeg 软解），其他走 ExoPlayer
+        val ext = videos.getOrNull(index)?.name?.substringAfterLast(".")?.lowercase() ?: ""
+        val ijkFormats = setOf(
+            "wmv", "wm", "asf", "asx", "wmx", "wvx", "wtv", "dvr-ms",
+            "avi", "divx", "xvid", "nsv",
+            "mpg", "mpeg", "mpe", "m1v", "m2v", "mp2", "vcd",
+            "rmvb", "rm", "ra",
+            "vob", "dat",
+            "flv", "f4v", "swf",
+            "3gp", "3g2", "3gpp",
+            "ogv", "ogm",
+        )
+
+        if (ijkFormats.contains(ext)) {
+            // 老格式 → IJK 内核（FFmpeg 软解，兼容性最好）
+            Debuger.printfError("***** 使用 IJK 内核播放: $ext *****")
+            PlayerFactory.setPlayManager(IjkPlayerManager::class.java)
+            val optionList = mutableListOf<VideoOptionModel>()
+            // 强制软解码 —— 老格式对 MediaCodec 兼容性差
+            optionList.add(VideoOptionModel(IjkMediaPlayer.OPT_CATEGORY_PLAYER, "mediacodec", 0))
+            optionList.add(VideoOptionModel(IjkMediaPlayer.OPT_CATEGORY_PLAYER, "mediacodec-auto-rotate", 0))
+            optionList.add(VideoOptionModel(IjkMediaPlayer.OPT_CATEGORY_PLAYER, "mediacodec-handle-resolution-change", 0))
+            // 开启环路过滤，优化画质
+            optionList.add(VideoOptionModel(IjkMediaPlayer.OPT_CATEGORY_CODEC, "skip_loop_filter", 0))
+            // 帧丢弃策略 —— 音画不同步时丢视频帧保音频连续
+            optionList.add(VideoOptionModel(IjkMediaPlayer.OPT_CATEGORY_PLAYER, "framedrop", 5))
+            // 秒开优化
+            optionList.add(VideoOptionModel(IjkMediaPlayer.OPT_CATEGORY_FORMAT, "probesize", 10240))
+            optionList.add(VideoOptionModel(IjkMediaPlayer.OPT_CATEGORY_FORMAT, "analyzeduration", 500000))
+            optionList.add(VideoOptionModel(IjkMediaPlayer.OPT_CATEGORY_PLAYER, "enable-accurate-seek", 1))
+            optionList.add(VideoOptionModel(IjkMediaPlayer.OPT_CATEGORY_FORMAT, "flush_packets", 1))
+            // 应用 IJK 选项
+            val ijkManager = IjkPlayerManager()
+            ijkManager.setOptionModelList(optionList)
+        } else {
+            // 普通格式 → ExoPlayer 内核（硬件加速，兼容性好）
+            Debuger.printfError("***** 使用 ExoPlayer 内核播放: $ext *****")
+            PlayerFactory.setPlayManager(Exo2PlayerManager::class.java)
+        }
+
         // 确保 headers 包含 User-Agent，绕过 115/阿里等网盘的防盗链检测
         if (!headers.containsKey("User-Agent") && !headers.containsKey("user-agent")) {
             headers = headers.toMutableMap().apply {
@@ -475,59 +517,44 @@ class PlayerActivity : AppCompatActivity(), GSYVideoProgressListener {
                 override fun onPlayError(url: String?, vararg objects: Any?) {
                     super.onPlayError(url, *objects)
                     Debuger.printfError("***** onPlayError ****")
-                    
-                    // 检查错误类型，对音频解码错误进行容错处理
-                    // ExoPlayer 会将错误信息放在 objects 中
+
+                    // 检查错误类型
                     var isAudioError = false
-                    var isVideoError = false
                     try {
                         for (obj in objects) {
                             if (obj is Exception) {
                                 val errorMsg = obj.message ?: ""
                                 Debuger.printfError("***** Error message: $errorMsg ****")
-                                // 常见的音频解码错误关键词
-                                if (errorMsg.contains("audio", ignoreCase = true) || 
+                                if (errorMsg.contains("audio", ignoreCase = true) ||
                                     errorMsg.contains("AudioTrack", ignoreCase = true) ||
                                     errorMsg.contains("AudioRenderer", ignoreCase = true) ||
-                                    errorMsg.contains("AudioSink", ignoreCase = true) ||
-                                    errorMsg.contains("decoding", ignoreCase = true) && errorMsg.contains("audio", ignoreCase = true)) {
+                                    errorMsg.contains("AudioSink", ignoreCase = true)) {
                                     isAudioError = true
-                                    Debuger.printfError("***** 检测到音频解码错误，尝试容错处理 ****")
-                                }
-                                // 视频解码错误
-                                if (errorMsg.contains("video", ignoreCase = true) || 
-                                    errorMsg.contains("VideoRenderer", ignoreCase = true) ||
-                                    errorMsg.contains("MediaCodec", ignoreCase = true)) {
-                                    isVideoError = true
-                                    Debuger.printfError("***** 检测到视频解码错误 ****")
                                 }
                             }
                         }
                     } catch (e: Exception) {
                         Debuger.printfError("***** 解析错误信息异常: ${e.message} ****")
                     }
-                    
-                    // 如果是纯音频错误且未尝试过回退，优先尝试回退到 MediaKit
-                    // MediaKit (libmpv) 对音频解码有更好的容错能力
+
+                    // 未尝试过回退时，尝试回退到 MediaKit (libmpv)
                     if (!hasTriedMediaKitFallback) {
                         hasTriedMediaKitFallback = true
-                        Debuger.printfError("***** ExoPlayer 播放失败，尝试回退到 MediaKit (仅当前视频) ****")
-                        SmartToast.show(this@PlayerActivity, if (isAudioError) "音频解码错误，正在切换到 MPV 播放器..." else "ExoPlayer 播放失败，正在切换到 MPV 播放器...")
+                        Debuger.printfError("***** IJK 播放失败，尝试回退到 MediaKit ****")
+                        SmartToast.show(this@PlayerActivity, if (isAudioError) "音频解码错误，正在切换到 MPV 播放器..." else "播放失败，正在切换到 MPV 播放器...")
                         try {
-                            // 只发送当前失败的单个视频给 MediaKit
-                            val singleVideo = listOf(videos[index])
-                            val videosJson = GsonUtils.toJsonString(singleVideo)
+                            // 发送完整播放列表给 MediaKit（而非仅当前视频）
+                            val videosJson = GsonUtils.toJsonString(videos)
                             val headersStr = GsonUtils.toJsonString(headers)
-                            FlutterMethods.fallbackToMediaKit(videosJson, 0, headersStr)
-                            // 关闭当前 ExoPlayer Activity
+                            FlutterMethods.fallbackToMediaKit(videosJson, index, headersStr)
                             finish()
                             return
                         } catch (e: Exception) {
                             Debuger.printfError("***** 回退到 MediaKit 失败: ${e.message} ****")
                         }
                     }
-                    
-                    SmartToast.show(this@PlayerActivity, "ExoPlayer 播放失败，跳过此视频")
+
+                    SmartToast.show(this@PlayerActivity, "播放失败，跳过此视频")
                     // 根据上次播放方向决定跳过方向
                     if (lastPlayDirection == PlayDirection.NEXT) {
                         // 尝试播放下一个
@@ -619,7 +646,7 @@ class PlayerActivity : AppCompatActivity(), GSYVideoProgressListener {
     }
 
     /**
-     * 对已编码的网络 URL 进行解码，防止底层 ExoPlayer/OkHttp 二次编码
+     * 对已编码的网络 URL 进行解码，防止底层 IJK/OkHttp 二次编码
      * 例如 %E4%B8%83 → 七，避免 % → %25 导致签名失效或 404
      */
     private fun decodeNetworkUrl(url: String): String {
@@ -629,7 +656,7 @@ class PlayerActivity : AppCompatActivity(), GSYVideoProgressListener {
             val decoded = URLDecoder.decode(url, "UTF-8")
             // 解码后仍应是合法 URL，否则回退
             if (decoded.startsWith("http://") || decoded.startsWith("https://")) {
-                Debuger.printfLog("URL decoded for ExoPlayer: $url -> $decoded")
+                Debuger.printfLog("URL decoded for IJK: $url -> $decoded")
                 decoded
             } else {
                 url

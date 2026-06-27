@@ -18,9 +18,7 @@ migrate_working_dir/
 *.iws
 .idea/
 
-# The .vscode folder contains launch configuration and tasks you configure in
-# VS Code which you may wish to be included in version control, so this line
-# is commented out by default.
+# VS Code
 #.vscode/
 
 # Flutter/Dart/Pub related
@@ -44,3 +42,49 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+
+# Android native build
+/android/.gradle/
+/android/**/build/
+/android/local.properties
+/android/app/release.keystore
+
+# iOS
+ios/Pods/
+ios/.symlinks/
+ios/Flutter/Flutter.framework
+ios/Flutter/Flutter.podspec
+ios/Flutter/Generated.xcconfig
+ios/Flutter/app.framework
+ios/Flutter/flutter_export_environment.sh
+ios/Runner/GeneratedPluginRegistrant.*
+
+# macOS
+macos/Pods/
+macos/Flutter/GeneratedPluginRegistrant.swift
+macos/Flutter/ephemeral/
+
+# Linux
+linux/flutter/ephemeral/
+
+# Windows
+windows/flutter/ephemeral/
+
+# FVM (Flutter Version Management)
+.fvm/
+
+# Claude Code
+.claude/
+
+# Local plugin overrides (created during build fixes)
+/flutter_media_metadata/
+/flutter_media_metadata_local/
+/image_gallery_saver/
+/package_info_plus_local/
+
+# Keystore files
+*.keystore
+*.jks
+
+# Gradle wrapper (if downloaded locally)
+android/gradle/wrapper/gradle-wrapper.jar
