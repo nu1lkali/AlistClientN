@@ -1,90 +1,123 @@
-# Miscellaneous
-*.class
-*.log
-*.pyc
-*.swp
+# OS and editor files
 .DS_Store
-.atom/
-.build/
-.buildlog/
-.history
-.svn/
-.swiftpm/
-migrate_working_dir/
+Thumbs.db
+Desktop.ini
+*.swp
+*.swo
+*.tmp
+*.temp
+*.bak
+*.orig
+*.log
 
-# IntelliJ related
+# IntelliJ / Android Studio
+.idea/
 *.iml
 *.ipr
 *.iws
-.idea/
 
-# VS Code
-#.vscode/
+# VS Code local workspace settings
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+!.vscode/launch.json
+!.vscode/tasks.json
 
-# Flutter/Dart/Pub related
-**/doc/api/
-**/ios/Flutter/.last_build_id
+# Dart / Flutter / Pub
 .dart_tool/
+.packages
+.pub/
+.pub-cache/
 .flutter-plugins
 .flutter-plugins-dependencies
-.packages
-.pub-cache/
-.pub/
+**/doc/api/
+**/ios/Flutter/.last_build_id
+
+# Flutter build outputs and release artifacts
 /build/
-
-# Symbolication related
+**/build/
 app.*.symbols
-
-# Obfuscation related
 app.*.map.json
+*.apk
+*.aab
+*.ipa
 
-# Android Studio will place build artifacts here
-/android/app/debug
-/android/app/profile
-/android/app/release
+# FVM: keep .fvm/fvm_config.json committed, ignore the SDK symlink/cache
+.fvm/flutter_sdk
 
-# Android native build
-/android/.gradle/
-/android/**/build/
-/android/local.properties
-/android/app/release.keystore
+# Android / Gradle local state
+android/.gradle/
+android/.kotlin/
+android/captures/
+android/local.properties
+android/key.properties
+android/privacy.gradle
+android/app/debug/
+android/app/profile/
+android/app/release/
 
-# iOS
+# Signing keys and local secrets
+*.keystore
+*.jks
+*.p12
+*.pem
+*.key
+*.mobileprovision
+
+# iOS / Xcode
 ios/Pods/
 ios/.symlinks/
+ios/Flutter/App.framework
 ios/Flutter/Flutter.framework
 ios/Flutter/Flutter.podspec
 ios/Flutter/Generated.xcconfig
+ios/Flutter/app.flx
+ios/Flutter/app.zip
 ios/Flutter/app.framework
+ios/Flutter/flutter_assets/
 ios/Flutter/flutter_export_environment.sh
+ios/Flutter/ephemeral/
 ios/Runner/GeneratedPluginRegistrant.*
+ios/Runner.xcodeproj/project.xcworkspace/xcuserdata/
+ios/Runner.xcworkspace/xcuserdata/
+ios/**/xcuserdata/
+ios/**/DerivedData/
+ios/**/.generated/
 
-# macOS
+# macOS / Xcode
 macos/Pods/
-macos/Flutter/GeneratedPluginRegistrant.swift
 macos/Flutter/ephemeral/
+macos/Flutter/GeneratedPluginRegistrant.swift
+macos/Runner.xcodeproj/project.xcworkspace/xcuserdata/
+macos/Runner.xcworkspace/xcuserdata/
+macos/**/xcuserdata/
+macos/**/DerivedData/
 
-# Linux
+# Linux / Windows generated files
 linux/flutter/ephemeral/
-
-# Windows
 windows/flutter/ephemeral/
+windows/**/x64/
+windows/**/x86/
+windows/**/x86_64/
+windows/**/*.suo
+windows/**/*.user
+windows/**/*.userosscache
+windows/**/*.sln.docstates
+windows/**/*.[Cc]ache
+!windows/**/*.[Cc]ache/
 
-# FVM (Flutter Version Management)
-.fvm/
+# Local toolchains and downloaded helper tools
+.android-sdk/
+.tools/
 
-# Claude Code
-.claude/
-
-# Local plugin overrides (created during build fixes)
+# Local plugin overrides used during development
 /flutter_media_metadata/
 /flutter_media_metadata_local/
 /image_gallery_saver/
 /package_info_plus_local/
 
-# Keystore files
-*.keystore
-*.jks
-
-# Gradle wrapper (if downloaded locally)
-android/gradle/wrapper/gradle-wrapper.jar
+# Other local metadata
+.claude/
+.history/
+.svn/
+.FullName
