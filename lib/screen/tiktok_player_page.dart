@@ -11,6 +11,9 @@ import 'package:alist/entity/tiktok_play_list_model.dart';
 import 'package:alist/util/constant.dart';
 import 'package:alist/util/file_utils.dart';
 import 'package:alist/util/log_utils.dart' as log;
+import 'package:alist/util/subtitle/subtitle.dart';
+import 'package:alist/util/video_player_util.dart';
+import 'package:alist/widget/subtitle_view.dart';
 import 'package:alist/util/stream_size_resolver.dart';
 import 'package:alist/util/user_controller.dart';
 import 'package:flustars/flustars.dart';
@@ -61,6 +64,7 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
 
   Duration _pos = Duration.zero;
   Duration _dur = Duration.zero;
+  late final SubtitleController _subtitleController;
   Timer? _progressTimer;
   final GlobalKey _repaintKey = GlobalKey();
 
@@ -188,8 +192,10 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
     final dx = details.globalPosition.dx - _seekStartX;
     final totalMs = _dur.inMilliseconds.toDouble();
     if (totalMs <= 0) return;
-    final sensitivityFactor = (totalMs * 0.08) / _screenWidth;
-    final deltaMs = (dx * sensitivityFactor).round();
+    // 全屏宽跳转时长随视频总时长自适应（短视频不会一拖到底，长视频不会拖一大段才几秒）
+    final rangeMs =
+        VideoPlayerUtil.seekRangeForDuration(_dur).inMilliseconds.toDouble();
+    final deltaMs = (dx * rangeMs / _screenWidth).round();
     final targetMs = (_seekStartPosition.inMilliseconds + deltaMs).clamp(0, totalMs.toInt());
     setState(() => _seekTarget = Duration(milliseconds: targetMs));
   }
@@ -205,6 +211,7 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
   @override
   void initState() {
     super.initState();
+    _subtitleController = SubtitleController();
     WidgetsBinding.instance.addObserver(this);
     _playList = Get.arguments as TikTokPlayListModel;
     _currentIndex = _playList.initialIndex;
@@ -227,6 +234,7 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
 
   @override
   void dispose() {
+    _subtitleController.clear();
     _progressTimer?.cancel();
     _landscapeHideTimer?.cancel();
     _indicatorFadeTimer?.cancel();
@@ -329,6 +337,7 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
         if (c != null && c.value.isInitialized) {
           // 滑动调整进度期间，不从播放器读取位置，避免覆盖预览进度导致闪烁
             setState(() { _pos = c.value.position; _dur = c.value.duration; });
+            _subtitleController.updatePosition(c.value.position.inMilliseconds);
           if (c.value.duration > Duration.zero &&
               c.value.position >= c.value.duration - const Duration(milliseconds: 500) &&
               !_completing) {
@@ -384,6 +393,13 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
   }
 
   // ═══════════════ Controller Management ═══════════════
+  /// 加载当前视频的同名本地字幕（按视频名在字幕目录匹配 .srt）
+  void _loadSubtitleForCurrent() {
+    if (_currentIndex < 0 || _currentIndex >= _playList.videos.length) return;
+    final v = _playList.videos[_currentIndex];
+    _subtitleController.loadSubtitle(remotePath: v.filePath, sign: v.sign);
+  }
+
   Future<void> _safeInitCtrl(int idx) async {
     if (idx < 0 || idx >= _playList.videos.length) return;
     if (_controllers.containsKey(idx) || _initializingIndexes.contains(idx)) return;
@@ -416,7 +432,7 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
       ctrl.setLooping(_loopSingle);
       _controllers[idx] = ctrl;
       _initializingIndexes.remove(idx);
-      if (idx == _currentIndex) { ctrl.play(); _isPlaying = true; _recordViewing(idx); }
+      if (idx == _currentIndex) { ctrl.play(); _isPlaying = true; _recordViewing(idx); _loadSubtitleForCurrent(); }
       if (mounted) setState(() {});
 
       // 仅当前播放视频获取大小，预加载视频延迟到切换时再获取（减少CDN请求）
@@ -667,6 +683,7 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
         if (!(_hideUI && _isLandscape)) _buildTopBar(),
         if (!_hideUI) _buildToolBar(),
         if (!_hideUI) _buildProgress(),
+        SubtitleView(controller: _subtitleController, bottomOffset: 150),
         if (!_hideUI && !_isLandscape) _buildBottomInfo(),
         if (!_hideUI && _isLandscape) _buildLandscapeCenterControls(),
         if (!_hideUI && _isLandscape && _playList.videos.length > 1)
@@ -771,6 +788,7 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
     _isPlaying = false;
     _pos = Duration.zero;
     _dur = Duration.zero;
+    _loadSubtitleForCurrent();
     _disposeOutOfRange(idx);
     if (mounted) setState(() {});
     final c = _controllers[idx];

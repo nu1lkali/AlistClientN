@@ -105,10 +105,11 @@ class AlistPlugin(private val activity: Activity, private val scope: CoroutineSc
                 val headers = call.argument<String?>("headers")
                 val playerType = call.argument<String>("playerType")
                 val autoPipEnabled = call.argument<Boolean>("autoPipEnabled") ?: true
+                val subtitleDir = call.argument<String?>("subtitleDir")
 
                 // Store large video list in memory to avoid Binder buffer overflow
                 if (!videos.isNullOrEmpty()) {
-                    VideoDataHolder.store(videos, index, headers, playerType, autoPipEnabled)
+                    VideoDataHolder.store(videos, index, headers, playerType, autoPipEnabled, subtitleDir)
                 }
 
                 // Set up PiP callback for Flutter to trigger PiP mode

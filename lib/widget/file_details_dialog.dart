@@ -7,6 +7,8 @@ import 'package:alist/util/file_utils.dart';
 import 'package:alist/util/image_utils.dart';
 import 'package:extended_image/extended_image.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:flutter_smart_dialog/flutter_smart_dialog.dart';
 import 'package:get/get.dart';
 
 class FileDetailsDialog extends StatefulWidget {
@@ -227,12 +229,18 @@ class _FileDetailsDialogState extends State<FileDetailsDialog> {
           ),
         ),
         Expanded(
-          child: Container(
-            padding: const EdgeInsets.only(left: 12, top: 12, bottom: 12),
-            child: Text(
-              text2,
-              style: Get.textTheme.bodyMedium?.copyWith(
-                color: scheme.onSurface,
+          child: GestureDetector(
+            onLongPress: () {
+              Clipboard.setData(ClipboardData(text: text2));
+              SmartDialog.showToast('已复制');
+            },
+            child: Container(
+              padding: const EdgeInsets.only(left: 12, top: 12, bottom: 12),
+              child: Text(
+                text2,
+                style: Get.textTheme.bodyMedium?.copyWith(
+                  color: scheme.onSurface,
+                ),
               ),
             ),
           ),

@@ -84,7 +84,7 @@ class AlistPlugin {
       int index,
       Map<String, String>? headers,
       String? playerType,
-      {bool autoPipEnabled = true}) async {
+      {bool autoPipEnabled = true, String? subtitleDir}) async {
     SecurityLockController.instance.markInternalActivity();
     String? headersStr = headers != null ? jsonEncode(headers) : null;
 
@@ -95,6 +95,7 @@ class AlistPlugin {
       "headers": headersStr,
       "playerType": playerType,
       "autoPipEnabled": autoPipEnabled,
+      "subtitleDir": subtitleDir,
     });
     return result == true;
   }

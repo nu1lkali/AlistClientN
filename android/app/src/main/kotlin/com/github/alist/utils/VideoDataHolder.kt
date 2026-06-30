@@ -12,19 +12,23 @@ object VideoDataHolder {
     private var headers: Map<String, String>? = null
     private var playerType: String? = null
     private var autoPipEnabled: Boolean = true
+    // 外挂字幕本地目录（可选），由 Flutter 侧传入；原生按视频名匹配同名 .srt
+    private var subtitleDir: String? = null
 
     fun store(
         videosJson: String,
         index: Int,
         headersStr: String?,
         playerType: String?,
-        autoPipEnabled: Boolean
+        autoPipEnabled: Boolean,
+        subtitleDir: String? = null
     ) {
         this.videos = GsonUtils.parseList(videosJson)
         this.index = index
         this.headers = if (!headersStr.isNullOrEmpty()) GsonUtils.parseMap(headersStr) else emptyMap()
         this.playerType = playerType
         this.autoPipEnabled = autoPipEnabled
+        this.subtitleDir = subtitleDir
     }
 
     fun getVideos(): List<VideoItem> = videos ?: emptyList()
@@ -32,6 +36,7 @@ object VideoDataHolder {
     fun getHeaders(): Map<String, String> = headers ?: emptyMap()
     fun getPlayerType(): String? = playerType
     fun getAutoPipEnabled(): Boolean = autoPipEnabled
+    fun getSubtitleDir(): String? = subtitleDir
     fun hasData(): Boolean = videos != null
 
     fun clear() {
@@ -40,5 +45,6 @@ object VideoDataHolder {
         headers = null
         playerType = null
         autoPipEnabled = true
+        subtitleDir = null
     }
 }

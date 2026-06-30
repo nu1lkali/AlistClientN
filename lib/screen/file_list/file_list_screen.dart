@@ -899,7 +899,33 @@ class _FileListScreenState extends State<FileListScreen>
   }
 
   void _tiktokPlayCurrentFolder() {
-    _goTiktokPlayerFromFolder(path);
+    final strmFiles = _files.where((f) => !f.isDir && f.type == FileType.strm).toList();
+    final videos = _files.where((f) => !f.isDir && f.type == FileType.video).toList();
+
+    if (strmFiles.isEmpty && videos.isEmpty) {
+      SmartDialog.showToast('当前目录没有视频文件');
+      return;
+    }
+
+    // 全是 strm -> 视界流播放 strm（批量解析同目录 .strm，跳转视界流）
+    if (strmFiles.isNotEmpty && videos.isEmpty) {
+      _goTiktokPlayerFromStrm(strmFiles.first);
+      return;
+    }
+
+    // 全是普通视频 -> 现有目录级视界流
+    if (videos.isNotEmpty && strmFiles.isEmpty) {
+      _goTiktokPlayerFromFolder(path);
+      return;
+    }
+
+    // 普通视频与 strm 混合 -> 弹窗让用户选择
+    _showPlayTypeDialog(
+      strmCount: strmFiles.length,
+      videoCount: videos.length,
+      onStrm: () => _goTiktokPlayerFromStrm(strmFiles.first),
+      onVideo: () => _goTiktokPlayerFromFolder(path),
+    );
   }
 
   void _tiktokPlayNFromFolder(String folderPath) async {
@@ -1069,6 +1095,44 @@ class _FileListScreenState extends State<FileListScreen>
     return reservoir.length > n ? reservoir.sublist(0, n) : reservoir;
   }
 
+  /// 当目录中同时存在 .strm 与普通视频时，弹窗让用户选择播放类型。
+  /// STRM 选项与本地视频选项的具体行为由回调注入，复用于随机播放与视界流入口。
+  void _showPlayTypeDialog({
+    required int strmCount,
+    required int videoCount,
+    required VoidCallback onStrm,
+    required VoidCallback onVideo,
+  }) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Text('选择播放类型'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.stream_rounded),
+              title: Text('STRM 流媒体 ($strmCount个)'),
+              onTap: () {
+                Navigator.pop(ctx);
+                onStrm();
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.video_file_rounded),
+              title: Text('本地视频 ($videoCount个)'),
+              onTap: () {
+                Navigator.pop(ctx);
+                onVideo();
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   void _randomPlayVideo() {
     final strmFiles = _files.where((f) => f.type == FileType.strm).toList();
     final videos = _files.where((f) => f.type == FileType.video).toList();
@@ -1092,34 +1156,14 @@ class _FileListScreenState extends State<FileListScreen>
     }
 
     // 两种都有，弹窗让用户选择
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: const Text('选择播放类型'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            ListTile(
-              leading: const Icon(Icons.stream_rounded),
-              title: Text('STRM 流媒体 (${strmFiles.length}个)'),
-              onTap: () {
-                Navigator.pop(ctx);
-                final random = Random();
-                _goStrmPlayerScreen(context, strmFiles[random.nextInt(strmFiles.length)]);
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.video_file_rounded),
-              title: Text('本地视频 (${videos.length}个)'),
-              onTap: () {
-                Navigator.pop(ctx);
-                _randomPlayRegularVideo(videos);
-              },
-            ),
-          ],
-        ),
-      ),
+    _showPlayTypeDialog(
+      strmCount: strmFiles.length,
+      videoCount: videos.length,
+      onStrm: () {
+        final random = Random();
+        _goStrmPlayerScreen(context, strmFiles[random.nextInt(strmFiles.length)]);
+      },
+      onVideo: () => _randomPlayRegularVideo(videos),
     );
   }
 
@@ -2696,6 +2740,10 @@ class _FileListScreenState extends State<FileListScreen>
                       Navigator.pop(context);
                       _onFileTap(context, index, true);
                     },
+                    onLongPress: () {
+                      Clipboard.setData(ClipboardData(text: file.name));
+                      SmartDialog.showToast('已复制名称');
+                    },
                   ),
                   const Divider(),
                   ListTile(
@@ -4106,9 +4154,13 @@ class FileListWrapper extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      body: FileListScreen(path: path, isRootStack: true),
-      bottomNavigationBar: AlistBottomNavigationBar(
+    // 显式不透明背景 + RepaintBoundary：cupertino 右滑返回时，整页作为单一图层滑出，
+    // 列表/缩略图在动画期间的异步重建不会污染滑动画面，消除残影。
+    return RepaintBoundary(
+      child: Scaffold(
+        backgroundColor: Theme.of(context).colorScheme.surface,
+        body: FileListScreen(path: path, isRootStack: true),
+        bottomNavigationBar: AlistBottomNavigationBar(
         items: <BottomNavigationBarItem>[
           BottomNavigationBarItem(
             icon: const Icon(Icons.folder_rounded),
@@ -4141,6 +4193,7 @@ class FileListWrapper extends StatelessWidget {
             Get.until((route) => route.isFirst);
           }
         },
+      ),
       ),
     );
   }

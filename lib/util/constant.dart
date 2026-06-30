@@ -60,6 +60,10 @@ class AlistConstant {
   static const String strmBrightness = 'strmBrightness'; // strm 播放器亮度记忆
   static const String strmPreloadEnabled = 'strmPreloadEnabled'; // strm 预加载下一个视频
 
+  // 本地字幕相关
+  static const String enableLocalSubtitle = 'enableLocalSubtitle'; // 本地字幕库总开关
+  static const String localSubtitlePath = 'localSubtitlePath'; // 本地字幕目录绝对路径
+
   // 安全锁相关
   static const String securityLockEnabled = 'securityLockEnabled'; // 是否开启安全锁
   static const String securityLockType = 'securityLockType'; // 锁类型: 0=手势, 1=密码

@@ -13,10 +13,13 @@ import 'package:get/get.dart';
 /// 使用方式：放在 Stack 的最顶层，覆盖在视频播放器组件之上
 class SubtitleView extends StatelessWidget {
   final SubtitleController controller;
+  /// 字幕距底部的偏移量，需按各播放器底部控件高度调整，避免与进度条/控制栏重叠
+  final double bottomOffset;
 
   const SubtitleView({
     super.key,
     required this.controller,
+    this.bottomOffset = 60,
   });
 
   @override
@@ -38,7 +41,7 @@ class SubtitleView extends StatelessWidget {
       return Positioned(
         left: 16,
         right: 16,
-        bottom: 60, // 距底部留出进度条/控制栏空间
+        bottom: bottomOffset, // 距底部留出进度条/控制栏空间
         child: IgnorePointer(
           child: Center(
             child: _SubtitleText(

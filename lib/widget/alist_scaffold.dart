@@ -27,9 +27,11 @@ class AlistScaffold extends StatelessWidget {
     bool isDarkMode = WidgetUtils.isDarkMode(context);
     final ModalRoute<dynamic>? parentRoute = ModalRoute.of(context);
     var canPop = null != parentRoute && parentRoute.canPop;
+    // 显式不透明背景：cupertino 右滑返回时，避免页面边角/状态栏区域透出下层造成残影
+    final bgColor = Theme.of(context).colorScheme.surface;
 
     return Scaffold(
-      backgroundColor: null,
+      backgroundColor: bgColor,
       resizeToAvoidBottomInset: resizeToAvoidBottomInset ?? true,
       appBar: !showAppbar
           ? null
@@ -41,7 +43,7 @@ class AlistScaffold extends StatelessWidget {
                     )
                   : null,
               automaticallyImplyLeading: false,
-              backgroundColor: null,
+              backgroundColor: bgColor,
               toolbarHeight: kToolbarHeight + 8,
               title: appbarTitle,
               titleSpacing: canPop ? null : NavigationToolbar.kMiddleSpacing,

@@ -641,7 +641,10 @@ class _MediaKitPlayerScreenState extends State<MediaKitPlayerScreen>
               onHorizontalDragUpdate: (d) {
                 if (_duration == Duration.zero || !_seeking) return;
                 final dx = d.localPosition.dx - _horizontalDragStartX;
-                var t = _position + Duration(milliseconds: (dx / _screenWidth * _duration.inMilliseconds).round());
+                final rangeMs =
+                    VideoPlayerUtil.seekRangeForDuration(_duration).inMilliseconds;
+                var t = _position +
+                    Duration(milliseconds: (dx / _screenWidth * rangeMs).round());
                 if (t.isNegative) t = Duration.zero; if (t > _duration) t = _duration;
                 setState(() { _seekTarget = t; });
               },

@@ -44,6 +44,8 @@ import com.shuyu.gsyvideoplayer.listener.GSYSampleCallBack
 import com.shuyu.gsyvideoplayer.listener.GSYVideoProgressListener
 import com.shuyu.gsyvideoplayer.player.PlayerFactory
 import com.shuyu.gsyvideoplayer.utils.Debuger
+import android.graphics.Color
+import android.widget.FrameLayout
 import com.shuyu.gsyvideoplayer.utils.OrientationUtils
 import com.shuyu.gsyvideoplayer.utils.GSYVideoType
 import com.shuyu.gsyvideoplayer.video.NormalGSYVideoPlayer
@@ -108,6 +110,10 @@ class PlayerActivity : AppCompatActivity(), GSYVideoProgressListener {
     
     // 标记是否正在进入PiP模式（避免在onPause中暂停视频）
     private var isEnteringPip = false
+
+    // 本地字幕叠加层（自定义实现，不依赖 GSY 字幕 API，所有内核均支持）
+    private var subtitleTextView: TextView? = null
+    private var subtitleEntries: List<SubtitleEntry> = emptyList()
     
     // 标记退出PiP后是否应该finish（点击叉叉关闭时=true，点击PiP窗口恢复时=false）
     private var shouldFinishAfterPipExit = false
@@ -485,6 +491,7 @@ class PlayerActivity : AppCompatActivity(), GSYVideoProgressListener {
 
                 override fun onComplete(url: String?, vararg objects: Any?) {
                     super.onComplete(url, *objects)
+                    subtitleTextView?.visibility = View.GONE
                     handler.removeMessages(messageRecordWatchTime)
                     if (totalTime > 0 && abs(totalTime - currentTime) <= 1000) {
                         handler.sendEmptyMessage(messageRecordWatchTime)
@@ -493,6 +500,7 @@ class PlayerActivity : AppCompatActivity(), GSYVideoProgressListener {
 
                 override fun onAutoComplete(url: String?, vararg objects: Any?) {
                     super.onAutoComplete(url, *objects)
+                    subtitleTextView?.visibility = View.GONE
                     val currentSortedIndex = getCurrentSortedIndex()
                     if (!isFinishing && currentSortedIndex < sortedVideos.lastIndex) {
                         FlutterMethods.deleteVideoRecord(videos[index].remotePath)
@@ -516,6 +524,7 @@ class PlayerActivity : AppCompatActivity(), GSYVideoProgressListener {
 
                 override fun onPlayError(url: String?, vararg objects: Any?) {
                     super.onPlayError(url, *objects)
+                    subtitleTextView?.visibility = View.GONE
                     Debuger.printfError("***** onPlayError ****")
 
                     // 检查错误类型
@@ -671,6 +680,8 @@ class PlayerActivity : AppCompatActivity(), GSYVideoProgressListener {
         val rawUrl = if (video.localPath.isNullOrEmpty()) video.url else video.localPath
         val playUrl = decodeNetworkUrl(rawUrl ?: "")
         gsyVideoPlayer.currentPlayer.setUp(playUrl, false, video.name.substringBeforeLast("."))
+        // 本地字幕：按视频名在用户配置目录匹配同名 .srt（Exo/Media3 内核生效，IJK 老格式不支持）
+        applyLocalSubtitle(video.name)
         FlutterMethods.findVideoRecordByPath(video.remotePath) { record ->
             Debuger.printfLog("seekOnStart=${record.videoCurrentPosition}")
             gsyVideoPlayer.currentPlayer.seekOnStart = record.videoCurrentPosition ?: 0L
@@ -701,6 +712,101 @@ class PlayerActivity : AppCompatActivity(), GSYVideoProgressListener {
         
         checkFavoriteStatus()
         checkDislikeStatus()
+    }
+
+    /**
+     * 按视频名在用户配置的本地字幕目录中查找同名 .srt，
+     * 解析后通过自定义 TextView 叠加层渲染字幕。
+     * 不依赖 GSY 的 setSubTitlePath / GSYSubtitleSource，
+     * 所有内核（IJK / System / Exo / Media3）均可使用。
+     */
+    private fun applyLocalSubtitle(videoName: String) {
+        subtitleEntries = emptyList()
+        subtitleTextView?.visibility = View.GONE
+
+        val dir = VideoDataHolder.getSubtitleDir()
+        if (dir.isNullOrEmpty()) return
+        try {
+            val dirFile = java.io.File(dir)
+            if (!dirFile.exists() || !dirFile.isDirectory) return
+            val base = videoName.substringBeforeLast(".", videoName).lowercase()
+            if (base.isEmpty()) return
+            val files = dirFile.listFiles() ?: return
+            for (f in files) {
+                if (!f.isFile || !f.name.lowercase().endsWith(".srt")) continue
+                if (f.name.substringBeforeLast(".", f.name).lowercase() == base) {
+                    val content = f.readText()
+                    subtitleEntries = parseSrt(content)
+                    ensureSubtitleOverlay()
+                    return
+                }
+            }
+        } catch (e: Exception) {
+            Debuger.printfError("applyLocalSubtitle failed: ${e.message}")
+        }
+    }
+
+    /** 确保字幕 TextView 已创建并添加到根 FrameLayout */
+    private fun ensureSubtitleOverlay() {
+        if (subtitleTextView != null) return
+        val tv = TextView(this).apply {
+            textSize = 16f
+            setTextColor(Color.WHITE)
+            setShadowLayer(4f, 2f, 2f, Color.BLACK)
+            gravity = android.view.Gravity.CENTER
+            visibility = View.GONE
+        }
+        subtitleTextView = tv
+        val root = gsyVideoPlayer.parent as? FrameLayout ?: return
+        val lp = FrameLayout.LayoutParams(
+            FrameLayout.LayoutParams.MATCH_PARENT,
+            FrameLayout.LayoutParams.WRAP_CONTENT
+        ).apply {
+            gravity = android.view.Gravity.BOTTOM or android.view.Gravity.CENTER_HORIZONTAL
+            bottomMargin = 160  // 给底部控制栏留空间
+            marginStart = 60
+            marginEnd = 60
+        }
+        root.addView(tv, lp)
+    }
+
+    // —— SRT 解析 ——
+
+    private data class SubtitleEntry(val startMs: Long, val endMs: Long, val text: String)
+
+    /** 解析 SRT 文件内容，返回按开始时间排序的字幕列表 */
+    private fun parseSrt(content: String): List<SubtitleEntry> {
+        val entries = mutableListOf<SubtitleEntry>()
+        val blocks = content.split(Regex("""\r?\n\r?\n"""))
+        for (block in blocks) {
+            val lines = block.lines()
+            // 找到时间戳行（含 "-->"）
+            var timeLineIdx = -1
+            for (i in lines.indices) {
+                if (lines[i].contains("-->")) { timeLineIdx = i; break }
+            }
+            if (timeLineIdx < 0 || timeLineIdx + 1 > lines.lastIndex) continue
+            val range = parseTimeRange(lines[timeLineIdx].trim()) ?: continue
+            val text = lines.subList(timeLineIdx + 1, lines.size)
+                .joinToString("\n") { it.trim() }
+            if (text.isNotEmpty()) {
+                entries.add(SubtitleEntry(range.first, range.second, text))
+            }
+        }
+        return entries.sortedBy { it.startMs }
+    }
+
+    /** 解析 "00:01:20,000 --> 00:01:23,123" 为 (startMs, endMs) */
+    private fun parseTimeRange(line: String): Pair<Long, Long>? {
+        val pattern = Regex("""(\d{1,2}):(\d{2}):(\d{2})[,.](\d{3})\s*-->\s*(\d{1,2}):(\d{2}):(\d{2})[,.](\d{3})""")
+        val m = pattern.find(line) ?: return null
+        val startMs = toMs(m.groupValues[1], m.groupValues[2], m.groupValues[3], m.groupValues[4])
+        val endMs = toMs(m.groupValues[5], m.groupValues[6], m.groupValues[7], m.groupValues[8])
+        return startMs to endMs
+    }
+
+    private fun toMs(h: String, m: String, s: String, ms: String): Long {
+        return h.toLong() * 3600000 + m.toLong() * 60000 + s.toLong() * 1000 + ms.toLong()
     }
 
     override fun onPause() {
@@ -1025,6 +1131,7 @@ class PlayerActivity : AppCompatActivity(), GSYVideoProgressListener {
 
     // Picture-in-Picture mode support
     fun startPictureInPictureMode() {
+        subtitleTextView?.visibility = View.GONE
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             // 使用GSYVideoManager获取渲染后的实际视频宽高（已考虑旋转）
             val videoManager = gsyVideoPlayer.gsyVideoManager
@@ -1215,6 +1322,37 @@ class PlayerActivity : AppCompatActivity(), GSYVideoProgressListener {
 
         this.totalTime = totalTime
         this.currentTime = currentTime
+
+        // 更新本地字幕叠加
+        updateSubtitleOverlay(currentTime)
+    }
+
+    /** 根据当前播放位置匹配并显示字幕 */
+    private fun updateSubtitleOverlay(positionMs: Long) {
+        val tv = subtitleTextView ?: return
+        if (subtitleEntries.isEmpty()) {
+            tv.visibility = View.GONE
+            return
+        }
+        // 二分查找当前时间点的字幕
+        var lo = 0
+        var hi = subtitleEntries.lastIndex
+        var found: SubtitleEntry? = null
+        while (lo <= hi) {
+            val mid = (lo + hi) ushr 1
+            val entry = subtitleEntries[mid]
+            when {
+                positionMs < entry.startMs -> hi = mid - 1
+                positionMs >= entry.endMs -> lo = mid + 1
+                else -> { found = entry; break }
+            }
+        }
+        if (found != null) {
+            tv.text = found.text
+            tv.visibility = View.VISIBLE
+        } else {
+            tv.visibility = View.GONE
+        }
     }
 
     inner class PlayerWrapper(val videoPlayer: AlistClientVideoPlayer) {

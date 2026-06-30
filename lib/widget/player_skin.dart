@@ -8,6 +8,7 @@ import 'package:alist/l10n/intl_keys.dart';
 import 'package:alist/util/alist_plugin.dart';
 import 'package:alist/util/constant.dart';
 import 'package:alist/util/log_utils.dart';
+import 'package:alist/util/video_player_util.dart';
 import 'package:alist/widget/slider.dart';
 import 'package:device_info_plus/device_info_plus.dart';
 import 'package:flutter/material.dart';
@@ -838,8 +839,9 @@ class AlistPlayerSkinState extends State<AlistPlayerSkin> {
             final dragStartX = _horizontalDragStartX;
             final currentY = dragDetails.localPosition.dx;
             final ratio = (currentY - dragStartX) / _screenWidth.toDouble();
-            var durationMilliseconds = _duration.inMilliseconds;
-            durationMilliseconds = min(durationMilliseconds, 1000 * 60 * 30);
+            // 全屏宽跳转时长随视频总时长自适应（短视频不会一拖到底，长视频不会拖一大段才几秒）
+            var durationMilliseconds =
+                VideoPlayerUtil.seekRangeForDuration(_duration).inMilliseconds;
 
             int newPosition = ((ratio * durationMilliseconds) +
                     _dragStartPosition!.inMilliseconds)

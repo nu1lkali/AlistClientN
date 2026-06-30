@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:alist/screen/iptv/model/iptv_channel.dart';
+import 'package:alist/util/video_player_util.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:get/get.dart';
@@ -219,8 +220,10 @@ class _IptvPlayerScreenState extends State<IptvPlayerScreen>
     if (!_seeking) return;
     if (_duration == Duration.zero) return;
     final screenW = MediaQuery.of(context).size.width;
+    final rangeMs =
+        VideoPlayerUtil.seekRangeForDuration(_duration).inMilliseconds;
     var target = _seekStartPos +
-        Duration(milliseconds: (dx / screenW * 90000).round());
+        Duration(milliseconds: (dx / screenW * rangeMs).round());
     if (target.isNegative) target = Duration.zero;
     if (target > _duration) target = _duration;
     setState(() => _seekTarget = target);

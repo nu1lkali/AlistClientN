@@ -20,6 +20,35 @@ import 'package:get/get.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 class VideoPlayerUtil {
+  /// 根据视频总时长，计算"一次全屏宽横向拖动"应当跳转的时长。
+  ///
+  /// 让手势拖动的灵敏度随视频长度自适应，避免两类体验问题：
+  /// - 短视频一拖就跳到结尾（跳跃幅度过大）；
+  /// - 长视频拖一大段才前进几秒（不够灵敏）。
+  ///
+  /// 策略：全屏宽跳转 = clamp(总时长 × 12%, 15s, 10min)。
+  /// 注意：单次手指拖动的有效位移通常只有 0.5~0.7 屏宽（起手点不在屏幕最左
+  /// 边缘），故比例按"整屏宽"标定时需取偏大值，让一次实际拖动能覆盖有意义
+  /// 的跨度：
+  ///   - 30s 短视频：~15s/屏宽（实际一拖 ~9s，不会一拖到底）
+  ///   - 35min 视频：~252s/屏宽（实际一拖 ~2.5 分钟）
+  ///   - 1h 视频：~432s/屏宽（实际一拖 ~4 分钟）
+  ///   - 2h+ 视频：封顶 10min/屏宽
+  ///
+  /// 调用方再把 `dx / screenWidth * seekRange` 换算成实际跳转毫秒数，
+  /// 并对最终位置 clamp 到 [0, duration]。
+  static Duration seekRangeForDuration(Duration duration) {
+    const minRange = Duration(seconds: 15);
+    const maxRange = Duration(minutes: 10);
+    const ratio = 0.12;
+    if (duration <= Duration.zero) return minRange;
+    final scaled =
+        Duration(milliseconds: (duration.inMilliseconds * ratio).round());
+    if (scaled < minRange) return minRange;
+    if (scaled > maxRange) return maxRange;
+    return scaled;
+  }
+
   static void go(List<VideoItem> videos, int index, String? password) async {
     var videoPlayerRouter =
         SpUtil.getString(AlistConstant.videoPlayerRouter) ?? "";
@@ -99,9 +128,13 @@ class VideoPlayerUtil {
         );
       } else {
         final autoPipEnabled = SpUtil.getBool(AlistConstant.autoPipEnabled, defValue: true) ?? true;
+        // 本地字幕目录：开关开启且路径非空时传给原生播放器
+        final localSubEnabled = SpUtil.getBool(AlistConstant.enableLocalSubtitle, defValue: false) ?? false;
+        final localSubDir = localSubEnabled ? (SpUtil.getString(AlistConstant.localSubtitlePath) ?? '') : '';
         AlistPlugin.playVideoWithInternalPlayer(
             videosParams, index, headers, playerType,
-            autoPipEnabled: autoPipEnabled);
+            autoPipEnabled: autoPipEnabled,
+            subtitleDir: localSubDir.isNotEmpty ? localSubDir : null);
       }
     } else {
       Get.toNamed(

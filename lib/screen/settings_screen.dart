@@ -20,6 +20,7 @@ import 'package:flustars/flustars.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:package_info_plus/package_info_plus.dart';
+import 'package:permission_handler/permission_handler.dart';
 
 class SettingsScreen extends StatelessWidget {
   const SettingsScreen({super.key});
@@ -55,6 +56,8 @@ class _SettingsContainerState extends State<_SettingsContainer>
   late final RxBool _showFabButton;
   late final RxBool _groupedRandomSort;
   late final RxBool _autoPipEnabled;
+  late final RxBool _enableLocalSubtitle;
+  late final RxString _localSubtitlePath;
   late double _tiktokUiOpacity;
 
   @override
@@ -75,6 +78,10 @@ class _SettingsContainerState extends State<_SettingsContainer>
         (SpUtil.getBool(AlistConstant.groupedRandomSort, defValue: false) ?? false).obs;
     _autoPipEnabled =
         (SpUtil.getBool(AlistConstant.autoPipEnabled, defValue: true) ?? true).obs;
+    _enableLocalSubtitle =
+        (SpUtil.getBool(AlistConstant.enableLocalSubtitle, defValue: false) ?? false).obs;
+    _localSubtitlePath =
+        (SpUtil.getString(AlistConstant.localSubtitlePath, defValue: '') ?? '').obs;
     _tiktokUiOpacity = SpUtil.getDouble(AlistConstant.tiktokUiOpacity, defValue: 1.0) ?? 1.0;
 
     _serverStreamSubscription =
@@ -190,6 +197,32 @@ class _SettingsContainerState extends State<_SettingsContainer>
                           ? '经典黑胶'
                           : '新风格',
                   onTap: () => _showAudioStyleDialog(context)),
+            ],
+          );
+        }),
+
+        // ===== 本地字幕 =====
+        _SectionHeader(title: '本地字幕', icon: Icons.subtitles_rounded),
+        Obx(() {
+          return _SettingsCard(
+            children: [
+              _switchTile(context, isDark, scheme,
+                  icon: Icons.subtitles_rounded,
+                  title: '启用本地字幕',
+                  subtitle: '播放视频时按文件名自动加载本地 .srt 字幕',
+                  value: _enableLocalSubtitle.value,
+                  onChanged: (v) {
+                    SpUtil.putBool(AlistConstant.enableLocalSubtitle, v);
+                    _enableLocalSubtitle.value = v;
+                  }),
+              _navTile(context, isDark, scheme,
+                  icon: Icons.folder_rounded,
+                  title: '字幕目录',
+                  subtitle: _localSubtitlePath.value.isEmpty
+                      ? '未设置，点击选择'
+                      : _localSubtitlePath.value,
+                  enabled: _enableLocalSubtitle.value,
+                  onTap: () => _pickSubtitleDir(context)),
             ],
           );
         }),
@@ -372,9 +405,11 @@ class _SettingsContainerState extends State<_SettingsContainer>
       required String title,
       String? subtitle,
       String? trailingText,
+      bool enabled = true,
       required VoidCallback onTap}) {
     return ListTile(
       onTap: onTap,
+      enabled: enabled,
       contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
       leading: _leadingIcon(scheme, isDark, icon),
       title: Text(title,
@@ -433,6 +468,80 @@ class _SettingsContainerState extends State<_SettingsContainer>
           : null,
       trailing: Switch(value: value, onChanged: onChanged),
       enabled: enabled,
+    );
+  }
+
+  /// 选择本地字幕目录：先确保"所有文件访问"权限，再弹框输入目录路径
+  Future<void> _pickSubtitleDir(BuildContext context) async {
+    if (Platform.isAndroid) {
+      if (!await Permission.manageExternalStorage.isGranted) {
+        final status = await Permission.manageExternalStorage.request();
+        if (!status.isGranted) {
+          SmartDialog.showToast('需要"所有文件访问"权限才能读取字幕目录');
+          return;
+        }
+      }
+    }
+    _showSubtitlePathDialog(context);
+  }
+
+  /// 输入并校验字幕目录路径，校验通过后持久化
+  void _showSubtitlePathDialog(BuildContext context) {
+    final controller = TextEditingController(
+      text: _localSubtitlePath.value.isNotEmpty
+          ? _localSubtitlePath.value
+          : '/storage/emulated/0/Subtitles',
+    );
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('字幕目录'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          decoration: const InputDecoration(
+            hintText: '/storage/emulated/0/Subtitles',
+            helperText: '字幕文件所在目录的绝对路径',
+          ),
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx), child: const Text('取消')),
+          TextButton(
+            onPressed: () async {
+              final p = controller.text.trim();
+              if (p.isEmpty) {
+                SmartDialog.showToast('路径不能为空');
+                return;
+              }
+              bool ok = false;
+              int srtCount = 0;
+              try {
+                final dir = Directory(p);
+                if (await dir.exists()) {
+                  ok = true;
+                  await for (final e in dir.list()) {
+                    if (e is File && e.path.toLowerCase().endsWith('.srt')) {
+                      srtCount++;
+                    }
+                  }
+                }
+              } catch (e) {
+                debugPrint('字幕目录校验失败: $e');
+              }
+              if (!ok) {
+                SmartDialog.showToast('目录不存在或无访问权限');
+                return;
+              }
+              SpUtil.putString(AlistConstant.localSubtitlePath, p);
+              _localSubtitlePath.value = p;
+              if (ctx.mounted) Navigator.pop(ctx);
+              SmartDialog.showToast('已设置，目录内 $srtCount 个 .srt 文件');
+            },
+            child: const Text('确定'),
+          ),
+        ],
+      ),
     );
   }
 

@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:alist/util/constant.dart';
 import 'package:alist/util/file_utils.dart';
 import 'package:alist/util/subtitle/subtitle_controller.dart';
+import 'package:alist/util/subtitle/subtitle_matcher_util.dart';
 import 'package:dio/dio.dart';
 import 'package:flustars/flustars.dart';
 import 'package:flutter/foundation.dart';
@@ -37,6 +38,23 @@ class SubtitleLoader {
     if (videoPath != null && videoPath.isNotEmpty) {
       final localContent = await _tryLoadLocal(videoPath);
       if (localContent != null) return localContent;
+    }
+    // 用户配置的本地字幕库目录：按视频名匹配同名 .srt
+    final videoName = (remotePath != null && remotePath.isNotEmpty)
+        ? remotePath.split('/').last
+        : (videoPath != null && videoPath.isNotEmpty
+            ? videoPath.split(RegExp(r'[/\\]')).last
+            : '');
+    final libPath = await SubtitleMatcherUtil.findLocalSubtitle(videoName);
+    if (libPath != null) {
+      try {
+        final content = await File(libPath).readAsString();
+        SubtitleController.addLog('使用本地字幕库: $libPath');
+        return content;
+      } catch (e) {
+        debugPrint('SubtitleLoader: 读取本地字幕库失败 -> $e');
+        SubtitleController.addLog('读取本地字幕库失败: $e');
+      }
     }
     if (remotePath != null && remotePath.isNotEmpty) {
       final remoteContent = await _tryLoadRemoteWithCache(remotePath, sign: sign);
