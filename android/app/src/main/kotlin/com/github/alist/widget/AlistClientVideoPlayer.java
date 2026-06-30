@@ -63,14 +63,7 @@ public class AlistClientVideoPlayer extends NormalGSYVideoPlayer {
     private View pipTouchBlocker = null;
     protected View btnDislike;
 
-    // —— 自适应横向拖动 seek ——
-    // 全屏宽跳转 = clamp(总时长 × 12%, 15s, 10min)，与 Flutter 端 VideoPlayerUtil 保持一致。
-    private boolean mCustomSeeking = false;
-    private float mGestureDownX = 0f;
-    private float mGestureDownY = 0f;
-    private long mSeekDownPosition = 0L;
-    private int mGestureDownWidth = 0;
-    private long mLastSeekTimeMs = 0L;
+
 
     public interface OnDeleteClickListener {
         void onDeleteClick();
@@ -278,89 +271,14 @@ public class AlistClientVideoPlayer extends NormalGSYVideoPlayer {
                 ffwdIconAnimator.cancel();
                 setSpeedPlaying(1, true);
             }
-            switch (action) {
-                case MotionEvent.ACTION_DOWN:
-                    mGestureDownX = event.getRawX();
-                    mGestureDownY = event.getRawY();
-                    mCustomSeeking = false;
-                    if (getGSYVideoManager() != null) {
-                        mSeekDownPosition = getGSYVideoManager().getCurrentPosition();
-                    }
-                    mGestureDownWidth = getWidth() > 0
-                            ? getWidth()
-                            : getContext().getResources().getDisplayMetrics().widthPixels;
-                    break;
-                case MotionEvent.ACTION_MOVE: {
-                    if (getGSYVideoManager() != null && getDuration() > 0) {
-                        float dx = event.getRawX() - mGestureDownX;
-                        float dy = event.getRawY() - mGestureDownY;
-                        if (!mCustomSeeking) {
-                            // 横向位移占优且超过阈值 → 接管为自定义 seek
-                            if (Math.abs(dx) >= 12 && Math.abs(dx) > Math.abs(dy)) {
-                                mCustomSeeking = true;
-                            }
-                        }
-                        if (mCustomSeeking) {
-                            seekToAdaptive(dx, false);
-                            gestureDetector.onTouchEvent(event);
-                            // 消费横向 MOVE，阻止 GSY 父类按"1屏=整段时长"的固定比例 seek
-                            return true;
-                        }
-                    }
-                    break;
-                }
-                case MotionEvent.ACTION_UP:
-                case MotionEvent.ACTION_CANCEL:
-                    if (mCustomSeeking) {
-                        seekToAdaptive(event.getRawX() - mGestureDownX, true);
-                        mCustomSeeking = false;
-                        gestureDetector.onTouchEvent(event);
-                        // 消费 UP，避免父类把这次拖动误判为点击而切换控制栏
-                        return true;
-                    }
-                    mCustomSeeking = false;
-                    break;
-                default:
-                    break;
-            }
             gestureDetector.onTouchEvent(event);
         }
+        // 横屏手势（左右滑动 seek、上下滑动音量/亮度）全部交给 GSY 父类处理，
+        // 与竖屏逻辑完全一致，GSY 会自动显示进度指示器。
         return super.onTouch(v, event);
     }
 
-    /**
-     * 自管横向拖动 seek：根据位移与屏幕宽，按自适应跳转范围换算目标位置并 seek。
-     * 短视频不会一拖到底，长视频不会拖一大段才几秒。
-     */
-    private void seekToAdaptive(float dx, boolean force) {
-        long duration = getDuration();
-        if (duration <= 0 || getGSYVideoManager() == null) return;
-        long rangeMs = computeSeekRangeMs(duration);
-        float screenW = mGestureDownWidth > 0 ? mGestureDownWidth : 1f;
-        long delta = (long) (dx / screenW * rangeMs);
-        long target = mSeekDownPosition + delta;
-        if (target < 0) target = 0;
-        if (target > duration) target = duration;
-        long now = System.currentTimeMillis();
-        // MOVE 阶段节流，避免高频 seek 造成卡顿；UP 时强制落点
-        if (force || now - mLastSeekTimeMs > 60) {
-            try {
-                getGSYVideoManager().seekTo(target);
-            } catch (Exception e) {
-                // ignore seek failure
-            }
-            mLastSeekTimeMs = now;
-        }
-    }
 
-    /** 全屏宽拖动对应的跳转毫秒数：clamp(总时长 × 12%, 15s, 10min)。 */
-    private long computeSeekRangeMs(long durationMs) {
-        if (durationMs <= 0) return 15_000L;
-        long scaled = (long) (durationMs * 0.12);
-        if (scaled < 15_000L) return 15_000L;
-        if (scaled > 600_000L) return 600_000L;
-        return scaled;
-    }
 
     /**
      * 修复4K等高分辨率视频在ExoPlayer中缩放过小的问题。

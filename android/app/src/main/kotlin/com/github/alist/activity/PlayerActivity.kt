@@ -19,6 +19,7 @@ import android.os.Looper
 import android.os.Message
 import android.util.Rational
 import android.view.View
+import android.view.ViewGroup
 import android.view.ViewGroup.MarginLayoutParams
 import android.widget.EditText
 import android.widget.ImageView
@@ -45,6 +46,7 @@ import com.shuyu.gsyvideoplayer.listener.GSYVideoProgressListener
 import com.shuyu.gsyvideoplayer.player.PlayerFactory
 import com.shuyu.gsyvideoplayer.utils.Debuger
 import android.graphics.Color
+import android.graphics.drawable.GradientDrawable
 import android.widget.FrameLayout
 import com.shuyu.gsyvideoplayer.utils.OrientationUtils
 import com.shuyu.gsyvideoplayer.utils.GSYVideoType
@@ -113,6 +115,7 @@ class PlayerActivity : AppCompatActivity(), GSYVideoProgressListener {
 
     // 本地字幕叠加层（自定义实现，不依赖 GSY 字幕 API，所有内核均支持）
     private var subtitleTextView: TextView? = null
+    private var fullscreenSubtitleTextView: TextView? = null
     private var subtitleEntries: List<SubtitleEntry> = emptyList()
     
     // 标记退出PiP后是否应该finish（点击叉叉关闭时=true，点击PiP窗口恢复时=false）
@@ -492,6 +495,7 @@ class PlayerActivity : AppCompatActivity(), GSYVideoProgressListener {
                 override fun onComplete(url: String?, vararg objects: Any?) {
                     super.onComplete(url, *objects)
                     subtitleTextView?.visibility = View.GONE
+                    fullscreenSubtitleTextView?.visibility = View.GONE
                     handler.removeMessages(messageRecordWatchTime)
                     if (totalTime > 0 && abs(totalTime - currentTime) <= 1000) {
                         handler.sendEmptyMessage(messageRecordWatchTime)
@@ -501,6 +505,7 @@ class PlayerActivity : AppCompatActivity(), GSYVideoProgressListener {
                 override fun onAutoComplete(url: String?, vararg objects: Any?) {
                     super.onAutoComplete(url, *objects)
                     subtitleTextView?.visibility = View.GONE
+                    fullscreenSubtitleTextView?.visibility = View.GONE
                     val currentSortedIndex = getCurrentSortedIndex()
                     if (!isFinishing && currentSortedIndex < sortedVideos.lastIndex) {
                         FlutterMethods.deleteVideoRecord(videos[index].remotePath)
@@ -511,10 +516,14 @@ class PlayerActivity : AppCompatActivity(), GSYVideoProgressListener {
 
                 override fun onEnterFullscreen(url: String?, vararg objects: Any?) {
                     super.onEnterFullscreen(url, *objects)
+                    // 全屏时重建字幕 overlay，使其显示在全屏播放器上
+                    gsyVideoPlayer.post { setupFullscreenSubtitleOverlay() }
                 }
 
                 override fun onQuitFullscreen(url: String, vararg objects: Any) {
                     super.onQuitFullscreen(url, *objects)
+                    // 退出全屏时移除全屏字幕 overlay
+                    removeFullscreenSubtitleOverlay()
                     orientationUtils.backToProtVideo()
                     gsyVideoPlayer.post {
                         windowInsetsControllerCompat.show(WindowInsetsCompat.Type.statusBars())
@@ -525,6 +534,7 @@ class PlayerActivity : AppCompatActivity(), GSYVideoProgressListener {
                 override fun onPlayError(url: String?, vararg objects: Any?) {
                     super.onPlayError(url, *objects)
                     subtitleTextView?.visibility = View.GONE
+                    fullscreenSubtitleTextView?.visibility = View.GONE
                     Debuger.printfError("***** onPlayError ****")
 
                     // 检查错误类型
@@ -723,6 +733,7 @@ class PlayerActivity : AppCompatActivity(), GSYVideoProgressListener {
     private fun applyLocalSubtitle(videoName: String) {
         subtitleEntries = emptyList()
         subtitleTextView?.visibility = View.GONE
+                    fullscreenSubtitleTextView?.visibility = View.GONE
 
         val dir = VideoDataHolder.getSubtitleDir()
         if (dir.isNullOrEmpty()) return
@@ -749,25 +760,106 @@ class PlayerActivity : AppCompatActivity(), GSYVideoProgressListener {
     /** 确保字幕 TextView 已创建并添加到根 FrameLayout */
     private fun ensureSubtitleOverlay() {
         if (subtitleTextView != null) return
+        val density = resources.displayMetrics.density
         val tv = TextView(this).apply {
             textSize = 16f
             setTextColor(Color.WHITE)
             setShadowLayer(4f, 2f, 2f, Color.BLACK)
             gravity = android.view.Gravity.CENTER
             visibility = View.GONE
+            // 参考strm播放器字幕样式：半透明暗色背景框 + 圆角
+            background = GradientDrawable().apply {
+                setColor(0x80000000.toInt()) // 50%透明度黑色背景
+                cornerRadius = 6 * density // 6dp圆角
+            }
+            setPadding(
+                (12 * density).toInt(), (6 * density).toInt(),
+                (12 * density).toInt(), (6 * density).toInt()
+            )
         }
         subtitleTextView = tv
         val root = gsyVideoPlayer.parent as? FrameLayout ?: return
         val lp = FrameLayout.LayoutParams(
-            FrameLayout.LayoutParams.MATCH_PARENT,
+            FrameLayout.LayoutParams.WRAP_CONTENT,
             FrameLayout.LayoutParams.WRAP_CONTENT
         ).apply {
             gravity = android.view.Gravity.BOTTOM or android.view.Gravity.CENTER_HORIZONTAL
-            bottomMargin = 160  // 给底部控制栏留空间
-            marginStart = 60
-            marginEnd = 60
+            // 130dp：确保在底部控制栏(40dp)和悬浮快捷按钮(52dp marginBottom + 44dp高度 = 96dp)之上
+            bottomMargin = (130 * density).toInt()
+            marginStart = (16 * density).toInt()
+            marginEnd = (16 * density).toInt()
         }
         root.addView(tv, lp)
+    }
+
+    /** 全屏时在全屏播放器上重建字幕 overlay */
+    private fun setupFullscreenSubtitleOverlay() {
+        if (subtitleEntries.isEmpty()) return
+        // 先移除旧的全屏字幕（避免重复添加）
+        removeFullscreenSubtitleOverlay()
+        // 在 window decor view 中查找全屏播放器实例
+        val fullscreenPlayer = findFullscreenPlayer() ?: return
+        val fullscreenRoot = fullscreenPlayer.parent as? FrameLayout ?: return
+        val density = resources.displayMetrics.density
+        val tv = TextView(this).apply {
+            textSize = 18f
+            setTextColor(Color.WHITE)
+            setShadowLayer(4f, 2f, 2f, Color.BLACK)
+            gravity = android.view.Gravity.CENTER
+            visibility = View.GONE
+            // 参考strm播放器字幕样式：半透明暗色背景框 + 圆角
+            background = GradientDrawable().apply {
+                setColor(0x80000000.toInt()) // 50%透明度黑色背景
+                cornerRadius = 6 * density // 6dp圆角
+            }
+            setPadding(
+                (12 * density).toInt(), (6 * density).toInt(),
+                (12 * density).toInt(), (6 * density).toInt()
+            )
+        }
+        fullscreenSubtitleTextView = tv
+        val lp = FrameLayout.LayoutParams(
+            FrameLayout.LayoutParams.WRAP_CONTENT,
+            FrameLayout.LayoutParams.WRAP_CONTENT
+        ).apply {
+            gravity = android.view.Gravity.BOTTOM or android.view.Gravity.CENTER_HORIZONTAL
+            // 60dp：参考strm播放器横屏bottomOffset=60，全屏时底部控制栏较矮
+            bottomMargin = (60 * density).toInt()
+            marginStart = (24 * density).toInt()
+            marginEnd = (24 * density).toInt()
+        }
+        fullscreenRoot.addView(tv, lp)
+        // 隐藏竖屏字幕（在全屏窗口后面不可见，但避免冗余更新）
+        subtitleTextView?.visibility = View.GONE
+        fullscreenSubtitleTextView?.visibility = View.GONE
+    }
+
+    /** 退出全屏时移除全屏字幕 overlay */
+    private fun removeFullscreenSubtitleOverlay() {
+        fullscreenSubtitleTextView?.let { tv ->
+            (tv.parent as? ViewGroup)?.removeView(tv)
+        }
+        fullscreenSubtitleTextView = null
+    }
+
+    /** 在 window 视图树中查找全屏播放器实例（与原始 gsyVideoPlayer 不同的 AlistClientVideoPlayer） */
+    private fun findFullscreenPlayer(): AlistClientVideoPlayer? {
+        val decorView = window.decorView as? ViewGroup ?: return null
+        return findAlistClientVideoPlayer(decorView)
+    }
+
+    private fun findAlistClientVideoPlayer(root: ViewGroup): AlistClientVideoPlayer? {
+        for (i in 0 until root.childCount) {
+            val child = root.getChildAt(i)
+            if (child is AlistClientVideoPlayer && child !== gsyVideoPlayer) {
+                return child
+            }
+            if (child is ViewGroup) {
+                val found = findAlistClientVideoPlayer(child)
+                if (found != null) return found
+            }
+        }
+        return null
     }
 
     // —— SRT 解析 ——
@@ -1132,6 +1224,7 @@ class PlayerActivity : AppCompatActivity(), GSYVideoProgressListener {
     // Picture-in-Picture mode support
     fun startPictureInPictureMode() {
         subtitleTextView?.visibility = View.GONE
+                    fullscreenSubtitleTextView?.visibility = View.GONE
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             // 使用GSYVideoManager获取渲染后的实际视频宽高（已考虑旋转）
             val videoManager = gsyVideoPlayer.gsyVideoManager
@@ -1329,7 +1422,13 @@ class PlayerActivity : AppCompatActivity(), GSYVideoProgressListener {
 
     /** 根据当前播放位置匹配并显示字幕 */
     private fun updateSubtitleOverlay(positionMs: Long) {
-        val tv = subtitleTextView ?: return
+        updateSubtitleTextView(subtitleTextView, positionMs)
+        updateSubtitleTextView(fullscreenSubtitleTextView, positionMs)
+    }
+
+    /** 更新单个字幕 TextView 的显示 */
+    private fun updateSubtitleTextView(tv: TextView?, positionMs: Long) {
+        if (tv == null) return
         if (subtitleEntries.isEmpty()) {
             tv.visibility = View.GONE
             return
