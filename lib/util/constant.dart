@@ -50,6 +50,8 @@ class AlistConstant {
   static const String extensionFilter = 'extensionFilter'; // 扩展名过滤
   static const String randomPlayCount = 'randomPlayCount'; // 随机播放数量
   static const String showFabButton = 'showFabButton'; // 文件列表FAB按钮显示
+  static const String showTiktokPageIndicator = 'showTiktokPageIndicator'; // 视界流右侧页码指示器
+  static const String showFileListShuffleButton = 'showFileListShuffleButton'; // 文件列表随机播放按钮
   static const String menuSortExpanded = 'menuSortExpanded'; // 排序方式展开
   static const String menuPlayExpanded = 'menuPlayExpanded'; // 播放选项展开
   static const String menuToolsExpanded = 'menuToolsExpanded'; // 整理工具展开

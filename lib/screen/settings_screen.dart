@@ -55,6 +55,8 @@ class _SettingsContainerState extends State<_SettingsContainer>
   late final RxBool _subtitleEnabled;
   late final RxBool _showFabButton;
   late final RxBool _groupedRandomSort;
+  late final RxBool _showTiktokPageIndicator;
+  late final RxBool _showFileListShuffleButton;
   late final RxBool _autoPipEnabled;
   late final RxBool _enableLocalSubtitle;
   late final RxString _localSubtitlePath;
@@ -77,6 +79,10 @@ class _SettingsContainerState extends State<_SettingsContainer>
         (SpUtil.getBool(AlistConstant.showFabButton, defValue: true) ?? true).obs;
     _groupedRandomSort =
         (SpUtil.getBool(AlistConstant.groupedRandomSort, defValue: false) ?? false).obs;
+    _showTiktokPageIndicator =
+        (SpUtil.getBool(AlistConstant.showTiktokPageIndicator, defValue: true) ?? true).obs;
+    _showFileListShuffleButton =
+        (SpUtil.getBool(AlistConstant.showFileListShuffleButton, defValue: true) ?? true).obs;
     _autoPipEnabled =
         (SpUtil.getBool(AlistConstant.autoPipEnabled, defValue: true) ?? true).obs;
     _enableLocalSubtitle =
@@ -265,6 +271,24 @@ class _SettingsContainerState extends State<_SettingsContainer>
                   onChanged: (v) {
                     SpUtil.putBool(AlistConstant.groupedRandomSort, v);
                     _groupedRandomSort.value = v;
+                  }),
+              _switchTile(context, isDark, scheme,
+                  icon: Icons.format_list_numbered_rounded,
+                  title: '视界流页码指示器',
+                  subtitle: '播放器右侧的播放列表页码',
+                  value: _showTiktokPageIndicator.value,
+                  onChanged: (v) {
+                    SpUtil.putBool(AlistConstant.showTiktokPageIndicator, v);
+                    _showTiktokPageIndicator.value = v;
+                  }),
+              _switchTile(context, isDark, scheme,
+                  icon: Icons.shuffle_on_rounded,
+                  title: '文件列表随机播放按钮',
+                  subtitle: '文件项右侧的快捷随机播放入口',
+                  value: _showFileListShuffleButton.value,
+                  onChanged: (v) {
+                    SpUtil.putBool(AlistConstant.showFileListShuffleButton, v);
+                    _showFileListShuffleButton.value = v;
                   }),
               _navTile(context, isDark, scheme,
                   icon: Icons.palette_rounded,

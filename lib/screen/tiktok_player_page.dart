@@ -702,7 +702,7 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
                 value: _currentVolume,
                 color: Colors.blue))),
         ..._buildHearts(),
-        if (!_hideUI) _buildIndicator(),
+        if (!_hideUI && (SpUtil.getBool(AlistConstant.showTiktokPageIndicator) ?? true)) _buildIndicator(),
       ]),
     );
   }

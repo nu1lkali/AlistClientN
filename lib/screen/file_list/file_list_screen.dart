@@ -3919,7 +3919,7 @@ class _FileListView extends StatelessWidget {
                       onLongPress: onFileLongPress != null
                           ? () => onFileLongPress!(context, index)
                           : null,
-                      showShuffleButton: true,
+                      showShuffleButton: SpUtil.getBool(AlistConstant.showFileListShuffleButton) ?? true,
                       onShufflePlayTap: file.isDir && onFolderShufflePlay != null
                           ? () => onFolderShufflePlay!(file.path)
                           : null,
