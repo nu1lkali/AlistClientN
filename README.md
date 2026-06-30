@@ -1,7 +1,19 @@
 # AlistClient N
 
-基于 [AlistClient](https://github.com/BFWXKJGS/AlistClient) 的增强版 Android 客户端，感谢原作者 [BFWXKJGS](https://github.com/BFWXKJGS) 的开源贡献。
+基于 [AlistClient](https://github.com/BFWXKJGS/AlistClient) 的增强版 Android 客户端，用于连接和管理 [Alist](https://github.com/alist-org/alist) 文件列表服务。感谢原作者 [BFWXKJGS](https://github.com/BFWXKJGS) 的开源贡献。
 
+## 特性概览
+
+- 📁 文件浏览与管理（列表/网格视图、多选、排序、批量操作）
+- 🎬 多种视频播放模式（标准播放器、TikTok 短视频、STRM 流媒体、MediaKit/libmpv）
+- 📺 IPTV 直播（M3U/M3U8/TXT 播放列表）
+- 🖼️ 图片画廊（EXIF 信息、幻灯片、HEIC 支持）
+- 📖 文档阅读（TXT/Markdown/PDF/Office）
+- 🔒 安全锁（手势锁/密码锁）
+- ⭐ 收藏夹与最近访问
+- 📥 下载管理器（并发下载、断点续传）
+- 🌐 多服务器/多账户管理
+- 💬 外挂字幕支持
 
 ## 下载
 
@@ -11,6 +23,25 @@ https://github.com/nu1lkali/AlistClientN/releases
 **蓝奏云**
 https://wwanb.lanzoum.com/b016kpl6ub
 密码:cwc3
+
+## 系统要求
+
+| 项目 | 要求 |
+|---|---|
+| Android 版本 | 8.0（API 26）及以上 |
+| 架构 | arm64-v8a / armeabi-v7a / x86_64 |
+| Alist 服务端 | 需自行部署 [Alist](https://github.com/alist-org/alist) 服务 |
+
+## 应用导航
+
+底部导航栏包含四个主要页面：
+
+| Tab | 名称 | 功能 |
+|---|---|---|
+| 📁 | 文件 | 文件浏览、目录导航、文件操作 |
+| ⏱ | 最近 | 最近浏览的文件记录，快速回访 |
+| ⭐ | 收藏 | 收藏的文件和目录，支持随机播放/查看 |
+| ⚙️ | 设置 | 账户管理、播放器配置、界面个性化等 |
 
 ## 新增功能
 
@@ -56,7 +87,7 @@ https://wwanb.lanzoum.com/b016kpl6ub
 - 随机播放视频：当前目录随机选择视频播放
 - 随机播放N个视频：可配置数量（默认10个）
 - 递归随机播放：使用随机路径探测算法在子目录中查找视频并播放
-  
+
   随机路径探测算法是一种以空间换时间的优化策略，通过牺牲"找到所有视频"的完整性，换取"快速找到一个视频"的效率。配合 LRU 路径惩罚机制（80% 概率跳过最近访问过的目录），避免重复探索同一目录。
 
 - 智能预加载缓存：局域网环境下自动预加载子目录（可在设置中关闭/仅WiFi）
@@ -116,7 +147,6 @@ https://wwanb.lanzoum.com/b016kpl6ub
   - 亮度记忆：下次播放自动恢复上次亮度
   - 收藏/不喜欢联动
 
-
 ### 图片画廊
 - 图片旋转
 - 幻灯片自动播放（间隔时间可配置：1~30秒）
@@ -143,6 +173,30 @@ https://wwanb.lanzoum.com/b016kpl6ub
 - **PDF 阅读器**：基于 flutter_pdfview 的 PDF 在线查看，支持夜间模式和链接跳转
 - **Office 文件阅读**：支持 Word/Excel/PPT 等 Office 文档在线预览
 - **内置网页浏览器**：InAppWebView 内置浏览器，支持混合内容加载
+
+### 最近访问
+- 自动记录浏览过的文件
+- 快速回访最近查看的文件
+- 支持滑动删除记录
+
+### 下载管理
+- 并发下载任务管理（默认最多 5 个同时下载）
+- 下载进度实时显示
+- 支持暂停/恢复/取消下载
+- 下载记录持久化存储
+- 下载完成后可直接打开文件
+
+### 多服务器/多账户管理
+- 支持添加多个 Alist 服务器
+- 快速切换不同服务器和账户
+- 支持编辑和删除已保存的服务器配置
+- 游客模式登录支持
+
+### 外挂字幕
+- 本地字幕库：指定本地字幕目录，自动匹配视频文件
+- 字幕下载直接存入字幕目录
+- 字幕样式可调：字体大小、背景不透明度、描边宽度
+- 全局字幕开关
 
 ### 缓存管理
 - 视频缓存统计与清理
@@ -171,7 +225,7 @@ https://wwanb.lanzoum.com/b016kpl6ub
 - 搜索过滤规则设置
 - 流媒体地址直接播放
 - .strm 主机替换配置（内网→公网地址映射）
-- 外挂字幕开关
+- 外挂字幕开关与配置
 - 设置页分组重构：账户与存储、网络与预加载、播放器配置、界面与个性化、过滤器与高级、关于
 
 ### UI 优化
@@ -191,25 +245,107 @@ https://wwanb.lanzoum.com/b016kpl6ub
 | <img src="https://img.erpweb.eu.org/imgs/2026/04/7f71f3cf43822283.jpg" width="250"> | <img src="https://img.erpweb.eu.org/imgs/2026/04/91ca257bb62f2d09.jpg" width="250"> | <img src="https://img.erpweb.eu.org/imgs/2026/04/c96448889173df98.jpg" width="250"> |
 | <img src="https://img.erpweb.eu.org/imgs/2026/04/64442e665e6bca3b.jpg" width="250"> | | |
 
+## 技术栈
+
+| 类别 | 技术 |
+|---|---|
+| 框架 | Flutter 3.13.8 (Dart) |
+| 状态管理 | GetX |
+| 数据库 | Floor ORM (SQLite) |
+| 网络 | Dio |
+| 视频播放 | video_player / media_kit (libmpv) / flutter_aliplayer |
+| 图片加载 | extended_image |
+| PDF | flutter_pdfview |
+| WebView | flutter_inappwebview |
+| 崩溃上报 | Bugly (仅 Release) |
+| 本地化 | GetX Translations (中文/英文) |
+
+## 项目结构
+
+```
+lib/
+├── main.dart              # 应用入口
+├── router.dart            # 路由配置
+├── database/              # Floor ORM 数据库层
+│   ├── dao/               # 数据访问对象
+│   └── table/             # 数据表定义
+├── entity/                # API 响应实体
+├── generated/             # 生成代码（颜色方案、图片引用等）
+├── l10n/                  # 国际化（中文/英文）
+├── net/                   # HTTP 网络层（Dio 封装）
+├── screen/                # 页面/屏幕（30+ 页面）
+│   ├── file_list/         # 文件列表相关
+│   ├── iptv/              # IPTV 直播
+│   └── security/          # 安全锁
+├── util/                  # 工具类和控制器
+└── widget/                # 可复用组件
+```
 
 ## 构建
 
-需要 Flutter 3.13.8：
+### 环境要求
+
+- **Flutter 3.13.8**（推荐使用 [FVM](https://fvm.app/) 管理）
+- **Java 11** 及以上
+- **Android SDK**：compileSdk 36, minSdk 26, NDK 26.1.10909125
+
+### 使用 FVM（推荐）
+
+```bash
+fvm install 3.13.8
+fvm use 3.13.8
+fvm flutter pub get
+fvm dart run build_runner build    # 重新生成 Floor 数据库代码（修改数据库表/DAO 后必须执行）
+fvm flutter build apk --release --no-tree-shake-icons
+```
+
+### 使用全局 Flutter
 
 ```bash
 flutter pub get
+dart run build_runner build       # 重新生成 Floor 数据库代码（修改数据库表/DAO 后必须执行）
 flutter build apk --release --no-tree-shake-icons
 ```
 
+> ⚠️ **重要**：修改 `lib/database/` 下的 `@Entity` 表或 `@Dao` 类后，必须运行 `dart run build_runner build` 重新生成 `lib/database/alist_database.g.dart`，否则构建会失败。
+
+### 构建产物
+
 构建产物位于 `build/app/outputs/flutter-apk/` 目录，包含以下 APK：
-- `app-arm64-v8a-release.apk` (ARM 64位，推荐大多数手机)
-- `app-armeabi-v7a-release.apk` (ARM 32位)
-- `app-x86_64-release.apk` (x86 64位，适用于模拟器)
-- `app-release.apk` (通用包，包含所有架构)
+
+| 文件 | 架构 | 说明 |
+|---|---|---|
+| `app-arm64-v8a-release.apk` | ARM 64位 | 推荐大多数手机 |
+| `app-armeabi-v7a-release.apk` | ARM 32位 | 旧设备 |
+| `app-x86_64-release.apk` | x86 64位 | 适用于模拟器 |
+| `app-release.apk` | 通用 | 包含所有架构，体积最大 |
+
+### 签名配置
+
+在 `android/local.properties` 中配置签名信息：
+
+```properties
+keyAlias=your_key_alias
+keyPassword=your_key_password
+storeFile=/path/to/your/keystore.jks
+storePassword=your_store_password
+```
+
+## 开发注意事项
+
+- `flutter_aliplayer` 来自 Git 仓库（`GeekTR/flutter_aliplayer`，分支 `feature/5.5.6.0`），非 pub.dev
+- `dependency_overrides` 中固定了 `win32`、`sqflite_common`、`sqflite`、`sqflite_common_ffi` 的版本，请勿随意移除
+- `flutter_aliplayer` 和 `media_kit` 都包含原生 `.so` 文件，`packagingOptions` 使用 `pickFirst` 解决冲突
+- Bugly 崩溃上报仅在 Release 模式下初始化
+- 数据库当前版本为 8，包含 8 个实体表，Schema 变更时必须在 `alist_database.dart` 中添加 Migration
 
 ## 致谢
 
 本项目基于 [AlistClient](https://github.com/BFWXKJGS/AlistClient) 开发，感谢原作者的开源贡献。
+
+## 开源许可证
+
+本项目采用 [GNU Affero General Public License v3.0](LICENSE) 开源许可证。
 
 ---
 
