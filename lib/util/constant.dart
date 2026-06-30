@@ -63,6 +63,7 @@ class AlistConstant {
   // 本地字幕相关
   static const String enableLocalSubtitle = 'enableLocalSubtitle'; // 本地字幕库总开关
   static const String localSubtitlePath = 'localSubtitlePath'; // 本地字幕目录绝对路径
+  static const String subtitleDownloadToSubtitleDir = 'subtitleDownloadToSubtitleDir'; // 字幕下载直接存入字幕目录
 
   // 安全锁相关
   static const String securityLockEnabled = 'securityLockEnabled'; // 是否开启安全锁

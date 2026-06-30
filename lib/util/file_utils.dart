@@ -19,6 +19,14 @@ final dateFormatThatYear = DateFormat("yyyy/MM/dd HH:mm");
 final now = DateTime.now();
 
 class FileUtils {
+  /// 是否为字幕文件（.srt/.vtt/.ass/.ssa/.sub）
+  static bool isSubtitle(String name) {
+    final dot = name.lastIndexOf('.');
+    if (dot <= 0 || dot == name.length - 1) return false;
+    return const {'srt', 'vtt', 'ass', 'ssa', 'sub'}
+        .contains(name.substring(dot + 1).toLowerCase());
+  }
+
   static FileType getFileType(bool isDir, String name) {
     if (isDir) {
       return FileType.folder;

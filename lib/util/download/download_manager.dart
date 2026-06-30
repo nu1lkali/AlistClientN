@@ -7,6 +7,7 @@ import 'package:alist/database/alist_database_controller.dart';
 import 'package:alist/database/table/file_download_record.dart';
 import 'package:alist/l10n/intl_keys.dart';
 import 'package:alist/util/alist_plugin.dart';
+import 'package:alist/util/constant.dart';
 import 'package:alist/util/download/download_http_client.dart';
 import 'package:alist/util/download/download_task.dart';
 import 'package:alist/util/download/download_task_status.dart';
@@ -160,6 +161,15 @@ class DownloadManager {
       limitFrequency = 1;
     }
 
+    // 字幕文件 + 开关开启 + 字幕目录已配 → 下载到字幕目录（保留原文件名）
+    String? subtitleDir;
+    final subToSubtitleDir =
+        SpUtil.getBool(AlistConstant.subtitleDownloadToSubtitleDir) ?? false;
+    if (subToSubtitleDir && FileUtils.isSubtitle(file.name)) {
+      final dir = SpUtil.getString(AlistConstant.localSubtitlePath) ?? '';
+      if (dir.isNotEmpty) subtitleDir = dir;
+    }
+
     return enqueue(
         name: file.name,
         remotePath: file.path,
@@ -168,7 +178,8 @@ class DownloadManager {
         requestHeaders: requestHeaders,
         limitFrequency: limitFrequency,
         cancelToken: cancelToken,
-        ignoreDuplicates: ignoreDuplicates);
+        ignoreDuplicates: ignoreDuplicates,
+        subtitleDir: subtitleDir);
   }
 
   Future<DownloadTask?> enqueue(
@@ -179,7 +190,8 @@ class DownloadManager {
       Map<String, dynamic>? requestHeaders,
       int? limitFrequency,
       CancelToken? cancelToken,
-      bool ignoreDuplicates = false}) async {
+      bool ignoreDuplicates = false,
+      String? subtitleDir}) async {
     var fileUrl = await FileUtils.makeFileLink(remotePath, sign);
     if (fileUrl == null) {
       return null;
@@ -226,9 +238,25 @@ class DownloadManager {
     String savedFileName;
     String filePath;
     if (record == null) {
-      var downloadDir = await findDownloadDir("Downloads");
-      savedFileName = _makeDownloadFileName(name);
+      Directory downloadDir;
+      if (subtitleDir != null && subtitleDir.isNotEmpty) {
+        // 字幕文件下载到用户配置的字幕目录，保留原文件名以便按视频名匹配
+        downloadDir = Directory(subtitleDir);
+        savedFileName = name;
+      } else {
+        downloadDir = await findDownloadDir("Downloads");
+        savedFileName = _makeDownloadFileName(name);
+      }
       filePath = p.join(downloadDir.path, savedFileName);
+      // 字幕目录下同名文件直接覆盖（用户重新下载同名字幕）
+      if (subtitleDir != null && subtitleDir.isNotEmpty) {
+        final existing = File(filePath);
+        if (existing.existsSync()) {
+          try {
+            await existing.delete();
+          } catch (_) {}
+        }
+      }
 
       var newRecord = FileDownloadRecord(
         serverUrl: user.serverUrl,

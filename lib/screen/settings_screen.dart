@@ -58,6 +58,7 @@ class _SettingsContainerState extends State<_SettingsContainer>
   late final RxBool _autoPipEnabled;
   late final RxBool _enableLocalSubtitle;
   late final RxString _localSubtitlePath;
+  late final RxBool _subtitleDownloadToSubtitleDir;
   late double _tiktokUiOpacity;
 
   @override
@@ -82,6 +83,8 @@ class _SettingsContainerState extends State<_SettingsContainer>
         (SpUtil.getBool(AlistConstant.enableLocalSubtitle, defValue: false) ?? false).obs;
     _localSubtitlePath =
         (SpUtil.getString(AlistConstant.localSubtitlePath, defValue: '') ?? '').obs;
+    _subtitleDownloadToSubtitleDir =
+        (SpUtil.getBool(AlistConstant.subtitleDownloadToSubtitleDir, defValue: false) ?? false).obs;
     _tiktokUiOpacity = SpUtil.getDouble(AlistConstant.tiktokUiOpacity, defValue: 1.0) ?? 1.0;
 
     _serverStreamSubscription =
@@ -209,7 +212,7 @@ class _SettingsContainerState extends State<_SettingsContainer>
               _switchTile(context, isDark, scheme,
                   icon: Icons.subtitles_rounded,
                   title: '启用本地字幕',
-                  subtitle: '播放视频时按文件名自动加载本地 .srt 字幕',
+                  subtitle: '按视频名自动加载同名字幕',
                   value: _enableLocalSubtitle.value,
                   onChanged: (v) {
                     SpUtil.putBool(AlistConstant.enableLocalSubtitle, v);
@@ -223,6 +226,18 @@ class _SettingsContainerState extends State<_SettingsContainer>
                       : _localSubtitlePath.value,
                   enabled: _enableLocalSubtitle.value,
                   onTap: () => _pickSubtitleDir(context)),
+              _switchTile(context, isDark, scheme,
+                  icon: Icons.download_rounded,
+                  title: '字幕下载到字幕目录',
+                  subtitle: '下载字幕时直接存入字幕目录',
+                  value: _subtitleDownloadToSubtitleDir.value,
+                  enabled: _enableLocalSubtitle.value,
+                  onChanged: _enableLocalSubtitle.value
+                      ? (v) {
+                          SpUtil.putBool(AlistConstant.subtitleDownloadToSubtitleDir, v);
+                          _subtitleDownloadToSubtitleDir.value = v;
+                        }
+                      : null),
             ],
           );
         }),
@@ -464,6 +479,8 @@ class _SettingsContainerState extends State<_SettingsContainer>
               color: enabled ? null : scheme.outline)),
       subtitle: subtitle != null
           ? Text(subtitle,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
               style: TextStyle(fontSize: 11, color: scheme.onSurfaceVariant))
           : null,
       trailing: Switch(value: value, onChanged: onChanged),

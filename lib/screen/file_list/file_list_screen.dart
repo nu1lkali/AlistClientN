@@ -2742,7 +2742,6 @@ class _FileListScreenState extends State<FileListScreen>
                     },
                     onLongPress: () {
                       Clipboard.setData(ClipboardData(text: file.name));
-                      SmartDialog.showToast('已复制名称');
                     },
                   ),
                   const Divider(),
