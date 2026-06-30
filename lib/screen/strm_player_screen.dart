@@ -1075,7 +1075,7 @@ class _StrmPlayerScreenState extends State<StrmPlayerScreen>
         if (!(_hideUI && _isLandscape)) _buildTopBar(),
         if (!_hideUI) _buildToolBar(),
         _buildProgress(),
-        SubtitleView(controller: _subtitleController, bottomOffset: 150),
+        SubtitleView(controller: _subtitleController, bottomOffset: _isLandscape ? 60 : 150),
         if (!_hideUI && !_isLandscape) _buildBottomInfo(),
         if (!_hideUI && _playList.videos.length > 1 && !_isLandscape)
           _buildFloatingSwitchButton(),

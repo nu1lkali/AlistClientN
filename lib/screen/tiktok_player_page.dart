@@ -683,7 +683,7 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
         if (!(_hideUI && _isLandscape)) _buildTopBar(),
         if (!_hideUI) _buildToolBar(),
         if (!_hideUI) _buildProgress(),
-        SubtitleView(controller: _subtitleController, bottomOffset: 150),
+        SubtitleView(controller: _subtitleController, bottomOffset: _isLandscape ? 60 : 150),
         if (!_hideUI && !_isLandscape) _buildBottomInfo(),
         if (!_hideUI && _isLandscape) _buildLandscapeCenterControls(),
         if (!_hideUI && _isLandscape && _playList.videos.length > 1)
