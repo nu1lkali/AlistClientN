@@ -156,6 +156,7 @@ class _FileListScreenState extends State<FileListScreen>
   User? _currentUser;
   StreamSubscription? _userStreamSubscription;
   StreamSubscription? _fileDeletedSubscription;
+  StreamSubscription? _shuffleButtonSubscription;
   final RefreshController _refreshController =
       RefreshController(initialRefresh: false);
 
@@ -188,6 +189,8 @@ class _FileListScreenState extends State<FileListScreen>
     _menuAnchorController.filterMode.value = FilterPersistence.loadFilterMode();
     // sync FAB button visibility from SpUtil
     AlistConstant.showFabButtonRx.value = SpUtil.getBool(AlistConstant.showFabButton, defValue: true) ?? true;
+    // sync shuffle button visibility from SpUtil
+    AlistConstant.showFileListShuffleButtonRx.value = SpUtil.getBool(AlistConstant.showFileListShuffleButton, defValue: true) ?? true;
     
     _updatePageName();
     
@@ -234,6 +237,11 @@ class _FileListScreenState extends State<FileListScreen>
     // refresh when a file is deleted from the video player
     _fileDeletedSubscription = _userController.fileDeletedSignal.stream.listen((_) {
       if (mounted) _refreshController.requestRefresh();
+    });
+
+    // listen for shuffle button visibility changes and rebuild list
+    _shuffleButtonSubscription = AlistConstant.showFileListShuffleButtonRx.listen((_) {
+      if (mounted) setState(() {});
     });
   }
 
@@ -529,6 +537,7 @@ class _FileListScreenState extends State<FileListScreen>
     super.dispose();
     _userStreamSubscription?.cancel();
     _fileDeletedSubscription?.cancel();
+    _shuffleButtonSubscription?.cancel();
     _cancelToken?.cancel();
     _strmCancelToken?.cancel();
     _fabScrollController.dispose();
@@ -3919,7 +3928,7 @@ class _FileListView extends StatelessWidget {
                       onLongPress: onFileLongPress != null
                           ? () => onFileLongPress!(context, index)
                           : null,
-                      showShuffleButton: SpUtil.getBool(AlistConstant.showFileListShuffleButton) ?? true,
+                      showShuffleButton: AlistConstant.showFileListShuffleButtonRx.value,
                       onShufflePlayTap: file.isDir && onFolderShufflePlay != null
                           ? () => onFolderShufflePlay!(file.path)
                           : null,

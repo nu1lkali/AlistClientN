@@ -4,6 +4,8 @@ import 'package:get/get.dart';
 class AlistConstant {
   /// 文件列表浮动按钮显示状态（响应式）
   static final showFabButtonRx = true.obs;
+  /// 文件列表随机播放按钮显示状态（响应式）
+  static final showFileListShuffleButtonRx = true.obs;
   /// App运行在Release环境时，inProduction为true；当App运行在Debug和Profile环境时，inProduction为false
   static const bool inProduction = kReleaseMode;
 

@@ -288,6 +288,7 @@ class _SettingsContainerState extends State<_SettingsContainer>
                   value: _showFileListShuffleButton.value,
                   onChanged: (v) {
                     SpUtil.putBool(AlistConstant.showFileListShuffleButton, v);
+                    AlistConstant.showFileListShuffleButtonRx.value = v;
                     _showFileListShuffleButton.value = v;
                   }),
               _navTile(context, isDark, scheme,
@@ -503,7 +504,7 @@ class _SettingsContainerState extends State<_SettingsContainer>
               color: enabled ? null : scheme.outline)),
       subtitle: subtitle != null
           ? Text(subtitle,
-              maxLines: 1,
+              maxLines: 2,
               overflow: TextOverflow.ellipsis,
               style: TextStyle(fontSize: 11, color: scheme.onSurfaceVariant))
           : null,
