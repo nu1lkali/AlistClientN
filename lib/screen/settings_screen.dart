@@ -205,6 +205,11 @@ class _SettingsContainerState extends State<_SettingsContainer>
                           ? '经典黑胶'
                           : '新风格',
                   onTap: () => _showAudioStyleDialog(context)),
+              // _navTile(context, isDark, scheme,
+              //     icon: Icons.bug_report_outlined,
+              //     title: 'LRC 歌词调试',
+              //     trailingText: '诊断工具',
+              //     onTap: () => Get.toNamed(NamedRouter.lrcDebug)),
             ],
           );
         }),

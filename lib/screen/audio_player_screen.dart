@@ -9,7 +9,10 @@ import 'package:alist/database/table/video_viewing_record.dart';
 import 'package:alist/l10n/intl_keys.dart';
 import 'package:alist/util/file_utils.dart';
 import 'package:alist/util/lock_caching_audio_source.dart';
+import 'package:alist/util/lyrics_controller.dart';
 import 'package:alist/util/user_controller.dart';
+import 'package:alist/widget/streamlined_lyrics_view.dart';
+import 'package:alist/widget/timeline_lyrics_view.dart';
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -40,14 +43,25 @@ class _AudioPlayerScreenState extends State<AudioPlayerScreen>
   final List<AudioItem> _audios = Get.arguments["audios"] ?? [];
   final int _index = Get.arguments["index"] ?? 0;
   late AudioPlayerScreenController _controller;
+  late LyricsController _lyricsController;
+
+  /// 当前是否显示歌词面板（false = 黑胶唱片，true = 歌词）
+  bool _showLyrics = false;
+
+  /// 上次加载歌词时对应的音频 remotePath
+  String? _lastLyricsPath;
+
+  /// ever() 返回的 Worker 引用（需在 dispose 中清理，防止泄漏）
+  final List<Worker> _workers = [];
 
   @override
   void initState() {
     super.initState();
     // 隐藏底部导航小白条（沉浸式）
-    SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
+    SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
     _controller =
         Get.put(AudioPlayerScreenController(audios: _audios, index: _index));
+    _lyricsController = Get.put(LyricsController());
 
     _discController = AnimationController(
       vsync: this,
@@ -66,7 +80,7 @@ class _AudioPlayerScreenState extends State<AudioPlayerScreen>
     _stylusAnimation =
         Tween<double>(begin: -0.03, end: -0.10).animate(_stylusController);
 
-    ever(_controller._playing, (bool playing) {
+    _workers.add(ever(_controller._playing, (bool playing) {
       if (playing) {
         _discController.forward();
         _stylusController.reverse();
@@ -74,12 +88,64 @@ class _AudioPlayerScreenState extends State<AudioPlayerScreen>
         _discController.stop();
         _stylusController.forward();
       }
+    }));
+
+    // ── 歌词集成：仅在切歌时标记脏数据，不做任何耗时操作 ──
+    _workers.add(ever(_controller._name, (_) {
+      _lyricsDirty = true;
+      if (_showLyrics) setState(() => _showLyrics = false);
+    }));
+  }
+
+  Timer? _lyricsTimer;
+  bool _lyricsDirty = true;
+
+  void _startLyricsTracking() {
+    _lyricsTimer?.cancel();
+    if (_lyricsDirty) {
+      _lyricsDirty = false;
+      _fetchLyricsForCurrentSong();
+    }
+    // 每 300ms 更新一次位置（仅在歌词可见时）
+    _lyricsTimer = Timer.periodic(const Duration(milliseconds: 300), (_) {
+      if (!mounted || !_showLyrics) { _lyricsTimer?.cancel(); return; }
+      _lyricsController.updatePosition(_controller._currentPos.value);
     });
+  }
+
+  void _stopLyricsTracking() {
+    _lyricsTimer?.cancel();
+  }
+
+  /// 为当前播放的音频加载歌词
+  void _fetchLyricsForCurrentSong() {
+    LyricsController.addLog('[Classic] _fetchLyricsForCurrentSong 被调用');
+    if (_controller._audios.isEmpty) {
+      LyricsController.addLog('[Classic] _audios 为空，退出');
+      return;
+    }
+    final idx = _controller._index;
+    LyricsController.addLog('[Classic] index=$idx, len=${_controller._audios.length}');
+    if (idx < 0 || idx >= _controller._audios.length) {
+      LyricsController.addLog('[Classic] index 越界');
+      return;
+    }
+    final audio = _controller._audios[idx];
+    LyricsController.addLog('[Classic] name=${audio.name}, path=${audio.remotePath}, sign=${audio.sign ?? "null"}');
+    if (_lastLyricsPath == audio.remotePath) {
+      LyricsController.addLog('[Classic] 路径匹配，跳过');
+      return;
+    }
+    _lastLyricsPath = audio.remotePath;
+    LyricsController.addLog('[Classic] 调用 fetchAndLoadLyrics...');
+    _lyricsController.reset();
+    _lyricsController.fetchAndLoadLyrics(audio.remotePath, audio.sign);
   }
 
   @override
   void dispose() {
-    // 离开页面恢复系统UI
+    _lyricsTimer?.cancel();
+    for (final w in _workers) { w.dispose(); }
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.manual,
         overlays: SystemUiOverlay.values);
     _discController.dispose();
@@ -191,61 +257,30 @@ class _AudioPlayerScreenState extends State<AudioPlayerScreen>
             bottom: 0,
             child: Column(
               children: [
-                // 黑胶唱片区域
+                // 黑胶唱片 / 歌词 切换区域
                 Expanded(
-                  child: Stack(
-                    alignment: Alignment.topCenter,
-                    children: [
-                      // 旋转唱片
-                      Align(
-                        alignment: Alignment.topCenter,
-                        child: Container(
-                          margin: const EdgeInsets.only(top: 40),
-                          child: RotationTransition(
-                            turns: _discController,
-                            child: Stack(
-                              alignment: Alignment.center,
-                              children: [
-                                Image.asset('assets/images/vinyl_disc.png',
-                                    width: 280),
-                                Obx(() {
-                                  final bytes =
-                                      _controller.coverArtBytes.value;
-                                  return ClipRRect(
-                                    borderRadius: BorderRadius.circular(90),
-                                    child: AnimatedSwitcher(
-                                      duration: const Duration(milliseconds: 600),
-                                      child: bytes != null
-                                          ? Image.memory(bytes,
-                                              key: ValueKey(bytes.hashCode),
-                                              width: 180,
-                                              height: 180,
-                                              fit: BoxFit.cover)
-                                          : Image.asset(
-                                              'assets/images/cover.jpg',
-                                              key: const ValueKey('default_disc'),
-                                              width: 180,
-                                              height: 180,
-                                              fit: BoxFit.cover),
-                                    ),
-                                  );
-                                }),
-                              ],
-                            ),
+                  child: AnimatedSwitcher(
+                    duration: const Duration(milliseconds: 500),
+                    switchInCurve: Curves.easeOutCubic,
+                    switchOutCurve: Curves.easeInCubic,
+                    child: _showLyrics
+                        ? StreamlinedLyricsView(
+                            key: const ValueKey('classic_lyrics'),
+                            controller: _lyricsController,
+                            scheme: Theme.of(context).colorScheme,
+                            onTapReturn: () {
+                                _stopLyricsTracking();
+                                setState(() => _showLyrics = false);
+                              },
+                          )
+                        : GestureDetector(
+                            key: const ValueKey('classic_disc'),
+                            onTap: () {
+                              _startLyricsTracking();
+                              setState(() => _showLyrics = true);
+                            },
+                            child: _buildDiscArea(),
                           ),
-                        ),
-                      ),
-                      // 唱针
-                      Align(
-                        alignment: const Alignment(0.25, -1),
-                        child: RotationTransition(
-                          turns: _stylusAnimation,
-                          alignment: const Alignment(-0.7, -0.82),
-                          child: Image.asset('assets/images/vinyl_stylus.png',
-                              width: 100),
-                        ),
-                      ),
-                    ],
                   ),
                 ),
 
@@ -264,6 +299,61 @@ class _AudioPlayerScreenState extends State<AudioPlayerScreen>
           ),
         ],
       ),
+    );
+  }
+
+  /// 构建黑胶唱片 + 唱针区域
+  Widget _buildDiscArea() {
+    return Stack(
+      alignment: Alignment.topCenter,
+      children: [
+        // 旋转唱片
+        Align(
+          alignment: Alignment.topCenter,
+          child: Container(
+            margin: const EdgeInsets.only(top: 40),
+            child: RotationTransition(
+              turns: _discController,
+              child: Stack(
+                alignment: Alignment.center,
+                children: [
+                  Image.asset('assets/images/vinyl_disc.png', width: 280),
+                  Obx(() {
+                    final bytes = _controller.coverArtBytes.value;
+                    return ClipRRect(
+                      borderRadius: BorderRadius.circular(90),
+                      child: AnimatedSwitcher(
+                        duration: const Duration(milliseconds: 600),
+                        child: bytes != null
+                            ? Image.memory(bytes,
+                                key: ValueKey(bytes.hashCode),
+                                width: 180,
+                                height: 180,
+                                fit: BoxFit.cover)
+                            : Image.asset(
+                                'assets/images/cover.jpg',
+                                key: const ValueKey('default_disc'),
+                                width: 180,
+                                height: 180,
+                                fit: BoxFit.cover),
+                      ),
+                    );
+                  }),
+                ],
+              ),
+            ),
+          ),
+        ),
+        // 唱针
+        Align(
+          alignment: const Alignment(0.25, -1),
+          child: RotationTransition(
+            turns: _stylusAnimation,
+            alignment: const Alignment(-0.7, -0.82),
+            child: Image.asset('assets/images/vinyl_stylus.png', width: 100),
+          ),
+        ),
+      ],
     );
   }
 
@@ -882,7 +972,7 @@ class AudioPlayerScreenController extends GetxController {
   void _createPlayListAndPlay() async {
     var sources = <AudioSource>[];
     for (var audio in _audios) {
-      var uri = await FileUtils.makeFileLink(audio.remotePath, audio.sign);
+      var uri = await FileUtils.makeFileLink(audio.remotePath, audio.sign, toastShowTips: false);
       if (uri != null) sources.add(await _audioToUri(uri, audio));
     }
     _playList = ConcatenatingAudioSource(
@@ -948,7 +1038,7 @@ class AudioPlayerScreenController extends GetxController {
       if (audio.localPath != null && audio.localPath!.isNotEmpty) {
         meta = await MetadataRetriever.fromFile(io.File(audio.localPath!));
       } else {
-        final uri = await FileUtils.makeFileLink(audio.remotePath, audio.sign);
+        final uri = await FileUtils.makeFileLink(audio.remotePath, audio.sign, toastShowTips: false);
         if (uri != null) {
           final tmpDir = await getTemporaryDirectory();
           final tmpFile = io.File(
@@ -1047,7 +1137,7 @@ class AudioPlayerScreenController extends GetxController {
     if (audio.localPath != null && audio.localPath!.isNotEmpty) {
       return ProgressiveAudioSource(Uri.file(audio.localPath!), tag: tag);
     }
-    final uri = await FileUtils.makeFileLink(audio.remotePath, audio.sign);
+    final uri = await FileUtils.makeFileLink(audio.remotePath, audio.sign, toastShowTips: false);
     if (uri == null) return AudioSource.uri(Uri.parse(''), tag: tag);
     if (audio.provider == "BaiduNetdisk") {
       return AlistLockCachingAudioSource(Uri.parse(uri),
@@ -1322,7 +1412,7 @@ class AudioPlayerScreenController extends GetxController {
     stashed.sort((a, b) => a.originalIndex.compareTo(b.originalIndex));
     for (final item in stashed) {
       final audio = item.audio;
-      final uri = await FileUtils.makeFileLink(audio.remotePath, audio.sign);
+      final uri = await FileUtils.makeFileLink(audio.remotePath, audio.sign, toastShowTips: false);
       if (uri == null) continue;
       final source = await _audioToUri(uri, audio);
       final insertAt = item.originalIndex.clamp(0, _audios.length);
@@ -1400,17 +1490,82 @@ class _AudioPlayerScreenV2State extends State<AudioPlayerScreenV2> {
   final List<AudioItem> _audios = Get.arguments["audios"] ?? [];
   final int _index = Get.arguments["index"] ?? 0;
   late AudioPlayerScreenController _controller;
+  late LyricsController _lyricsController;
+
+  /// 当前是否显示歌词面板（false = 封面，true = 歌词）
+  bool _showLyrics = false;
+
+  /// 上次加载歌词时对应的音频 remotePath（防止切歌时重复加载）
+  String? _lastLyricsPath;
+
+  final List<Worker> _workers = [];
+  Timer? _lyricsTimer;
 
   @override
   void initState() {
     super.initState();
+    // 确保系统覆盖层（音量指示器）可显示
+    SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
     _controller =
         Get.put(AudioPlayerScreenController(audios: _audios, index: _index));
+    _lyricsController = Get.put(LyricsController());
+
+    // ── 歌词集成：切歌时仅标记，不做耗时操作 ──
+    _workers.add(ever(_controller._name, (_) {
+      _lyricsDirty = true;
+      if (_showLyrics) setState(() => _showLyrics = false);
+    }));
   }
 
   @override
   void dispose() {
+    _lyricsTimer?.cancel();
+    for (final w in _workers) { w.dispose(); }
+    SystemChrome.setEnabledSystemUIMode(SystemUiMode.manual, overlays: SystemUiOverlay.values);
     super.dispose();
+  }
+
+  bool _lyricsDirty = true;
+
+  void _startLyricsTracking() {
+    _lyricsTimer?.cancel();
+    if (_lyricsDirty) {
+      _lyricsDirty = false;
+      _fetchLyricsForCurrentSong();
+    }
+    _lyricsTimer = Timer.periodic(const Duration(milliseconds: 300), (_) {
+      if (!mounted || !_showLyrics) { _lyricsTimer?.cancel(); return; }
+      _lyricsController.updatePosition(_controller._currentPos.value);
+    });
+  }
+
+  void _stopLyricsTracking() {
+    _lyricsTimer?.cancel();
+  }
+
+  /// 为当前播放的音频加载歌词
+  void _fetchLyricsForCurrentSong() {
+    LyricsController.addLog('[V2] _fetchLyricsForCurrentSong 被调用');
+    if (_controller._audios.isEmpty) {
+      LyricsController.addLog('[V2] _audios 为空，退出');
+      return;
+    }
+    final idx = _controller._index;
+    LyricsController.addLog('[V2] index=$idx, len=${_controller._audios.length}');
+    if (idx < 0 || idx >= _controller._audios.length) {
+      LyricsController.addLog('[V2] index 越界');
+      return;
+    }
+    final audio = _controller._audios[idx];
+    LyricsController.addLog('[V2] name=${audio.name}, path=${audio.remotePath}, sign=${audio.sign ?? "null"}');
+    if (_lastLyricsPath == audio.remotePath) {
+      LyricsController.addLog('[V2] 路径匹配，跳过');
+      return;
+    }
+    _lastLyricsPath = audio.remotePath;
+    LyricsController.addLog('[V2] 调用 fetchAndLoadLyrics...');
+    _lyricsController.reset();
+    _lyricsController.fetchAndLoadLyrics(audio.remotePath, audio.sign);
   }
 
   // ── 主体布局 ──────────────────────────────────────────────────────────────
@@ -1426,7 +1581,7 @@ class _AudioPlayerScreenV2State extends State<AudioPlayerScreenV2> {
           children: [
             _buildTopBar(context),
             const SizedBox(height: 32),
-            Center(child: _buildCoverArea(coverSize)),
+            Center(child: _buildVisualArea(coverSize, scheme)),
             const SizedBox(height: 16),
             _buildTitleArea(scheme),
             const Spacer(),
@@ -1436,6 +1591,47 @@ class _AudioPlayerScreenV2State extends State<AudioPlayerScreenV2> {
             const SizedBox(height: 16),
           ],
         ),
+      ),
+    );
+  }
+
+  // ── 视觉区域：封面 ↔ 歌词 切换 ────────────────────────────────────────────
+
+  Widget _buildVisualArea(double size, ColorScheme scheme) {
+    return SizedBox(
+      width: 280,
+      height: 280,
+      child: AnimatedSwitcher(
+        duration: const Duration(milliseconds: 400),
+        switchInCurve: Curves.easeOutCubic,
+        switchOutCurve: Curves.easeInCubic,
+        layoutBuilder: (currentChild, previousChildren) {
+          return Stack(
+            alignment: Alignment.center,
+            children: <Widget>[
+              ...previousChildren,
+              if (currentChild != null) currentChild,
+            ],
+          );
+        },
+        child: _showLyrics
+            ? StreamlinedLyricsView(
+                key: const ValueKey('lyrics_view'),
+                controller: _lyricsController,
+                scheme: scheme,
+                onTapReturn: () {
+                  _stopLyricsTracking();
+                  setState(() => _showLyrics = false);
+                },
+              )
+            : GestureDetector(
+                key: const ValueKey('cover_view'),
+                onTap: () {
+                  _startLyricsTracking();
+                  setState(() => _showLyrics = true);
+                },
+                child: _buildCoverArea(size),
+              ),
       ),
     );
   }

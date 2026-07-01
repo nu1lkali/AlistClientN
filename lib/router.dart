@@ -13,6 +13,7 @@ import 'package:alist/screen/home_screen.dart';
 import 'package:alist/screen/iptv/iptv_player_screen.dart';
 import 'package:alist/screen/iptv/iptv_screen.dart';
 import 'package:alist/screen/login_screen.dart';
+import 'package:alist/screen/lrc_debug_screen.dart';
 import 'package:alist/screen/media_kit_player_screen.dart';
 import 'package:alist/screen/markdown_reader_screen.dart';
 import 'package:alist/screen/office_reader_screen.dart';
@@ -116,6 +117,11 @@ class AlistRouter {
     GetPage(
       name: NamedRouter.subtitleSettings,
       page: () => const SubtitleSettingsScreen(),
+    ),
+    // LRC 歌词调试
+    GetPage(
+      name: NamedRouter.lrcDebug,
+      page: () => const LrcDebugScreen(),
     ),
     // 视界流短视频播放器
     GetPage(
