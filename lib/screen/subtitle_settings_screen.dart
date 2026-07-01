@@ -183,29 +183,30 @@ class _SubtitleSettingsBody extends StatelessWidget {
                     ),
                   );
                 }
-                return ListView.builder(
-                  shrinkWrap: true,
-                  physics: const NeverScrollableScrollPhysics(),
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                  itemCount: logs.length,
-                  itemBuilder: (_, i) {
-                    final log = logs[logs.length - 1 - i]; // 最新的在最上面
-                    return Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 2),
-                      child: Text(
-                        log,
-                        style: TextStyle(
-                          fontSize: 11,
-                          fontFamily: 'monospace',
-                          color: log.contains('成功') || log.contains('找到')
-                              ? Colors.green.shade300
-                              : log.contains('异常') || log.contains('失败') || log.contains('未找到')
-                                  ? Colors.red.shade300
-                                  : scheme.onSurfaceVariant,
+                return SizedBox(
+                  height: 220,
+                  child: ListView.builder(
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    itemCount: logs.length,
+                    itemBuilder: (_, i) {
+                      final log = logs[logs.length - 1 - i]; // 最新的在最上面
+                      return Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 2),
+                        child: Text(
+                          log,
+                          style: TextStyle(
+                            fontSize: 11,
+                            fontFamily: 'monospace',
+                            color: log.contains('成功') || log.contains('找到')
+                                ? Colors.green.shade300
+                                : log.contains('异常') || log.contains('失败') || log.contains('未找到')
+                                    ? Colors.red.shade300
+                                    : scheme.onSurfaceVariant,
+                          ),
                         ),
-                      ),
-                    );
-                  },
+                      );
+                    },
+                  ),
                 );
               }),
               const SizedBox(height: 8),
