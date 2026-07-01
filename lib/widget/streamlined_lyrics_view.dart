@@ -60,13 +60,12 @@ class _StreamlinedLyricsViewState extends State<StreamlinedLyricsView> {
   }
 
   /// 根据当前滚动偏移量计算视口中央对应的歌词行索引
+  /// padding 已经是 VH/2 - H/2，所以视口中心对应的行 = scrollOffset / H
   int _centeredLineIndex(double scrollOffset) {
-    if (_viewportHeight <= 0 || widget.itemExtent <= 0) return 0;
-    final center = scrollOffset + _viewportHeight / 2;
-    return (center / widget.itemExtent).floor().clamp(
-          0,
-          widget.controller.lyrics.length - 1,
-        );
+    if (widget.itemExtent <= 0) return 0;
+    return (scrollOffset / widget.itemExtent)
+        .round()
+        .clamp(0, widget.controller.lyrics.length - 1);
   }
 
   @override

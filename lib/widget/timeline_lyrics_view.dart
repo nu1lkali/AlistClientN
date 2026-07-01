@@ -64,10 +64,9 @@ class _TimelineLyricsViewState extends State<TimelineLyricsView> {
 
   /// 根据滚动偏移量计算视口中央对应的歌词行索引
   int _centeredLineIndex(double scrollOffset) {
-    if (_viewportHeight <= 0 || widget.itemExtent <= 0) return 0;
-    final center = scrollOffset + _viewportHeight / 2;
-    return (center / widget.itemExtent)
-        .floor()
+    if (widget.itemExtent <= 0) return 0;
+    return (scrollOffset / widget.itemExtent)
+        .round()
         .clamp(0, widget.controller.lyrics.length - 1);
   }
 

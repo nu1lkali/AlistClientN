@@ -13,6 +13,7 @@ import 'package:alist/util/lyrics_controller.dart';
 import 'package:alist/util/user_controller.dart';
 import 'package:alist/widget/streamlined_lyrics_view.dart';
 import 'package:alist/widget/timeline_lyrics_view.dart';
+import 'package:alist/widget/volume_indicator.dart';
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -295,6 +296,17 @@ class _AudioPlayerScreenState extends State<AudioPlayerScreen>
 
                 const SizedBox(height: 20),
               ],
+            ),
+          ),
+
+          // 第5层：自定义音量指示器
+          const Positioned(
+            top: 60,
+            left: 0,
+            right: 0,
+            child: VolumeIndicator(
+              activeColor: Colors.white,
+              backgroundColor: Color(0x55000000),
             ),
           ),
         ],
@@ -1575,22 +1587,32 @@ class _AudioPlayerScreenV2State extends State<AudioPlayerScreenV2> {
     final scheme = Theme.of(context).colorScheme;
     final coverSize = MediaQuery.of(context).size.width - 48.0;
     return Scaffold(
-      body: SafeArea(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.center,
-          children: [
-            _buildTopBar(context),
-            const SizedBox(height: 32),
-            Center(child: _buildVisualArea(coverSize, scheme)),
-            const SizedBox(height: 16),
-            _buildTitleArea(scheme),
-            const Spacer(),
-            _buildProgressSection(scheme),
-            const SizedBox(height: 4),
-            _buildControls(scheme),
-            const SizedBox(height: 16),
-          ],
-        ),
+      body: Stack(
+        children: [
+          SafeArea(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                _buildTopBar(context),
+                const SizedBox(height: 32),
+                Center(child: _buildVisualArea(coverSize, scheme)),
+                const SizedBox(height: 16),
+                _buildTitleArea(scheme),
+                const Spacer(),
+                _buildProgressSection(scheme),
+                const SizedBox(height: 4),
+                _buildControls(scheme),
+                const SizedBox(height: 16),
+              ],
+            ),
+          ),
+          const Positioned(
+            top: 60,
+            left: 0,
+            right: 0,
+            child: VolumeIndicator(),
+          ),
+        ],
       ),
     );
   }
