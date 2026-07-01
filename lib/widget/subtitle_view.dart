@@ -27,7 +27,7 @@ class SubtitleView extends StatelessWidget {
     final settings = SubtitleSettings.instance;
 
     return Obx(() {
-      // 字幕未启用或未加载或当前无字幕文本 → 不渲染任何内容
+      // 字幕功能未启用或未加载或当前无字幕文本 → 不渲染任何内容
       if (!settings.isSubtitleEnabled.value) return const SizedBox.shrink();
       if (!controller.isLoaded.value) return const SizedBox.shrink();
 

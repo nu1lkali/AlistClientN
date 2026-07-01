@@ -1,4 +1,5 @@
 import 'package:alist/util/subtitle/subtitle_controller.dart';
+import 'package:alist/util/subtitle/subtitle_matcher.dart';
 import 'package:alist/util/subtitle/subtitle_settings.dart';
 import 'package:alist/widget/alist_scaffold.dart';
 import 'package:flutter/material.dart';
@@ -30,7 +31,7 @@ class _SubtitleSettingsBody extends StatelessWidget {
     return ListView(
       padding: const EdgeInsets.symmetric(vertical: 12),
       children: [
-        // 开关卡片
+        // 匹配模式卡片
         Card(
           margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
           elevation: isDark ? 0 : 1,
@@ -38,30 +39,55 @@ class _SubtitleSettingsBody extends StatelessWidget {
           color: isDark
               ? scheme.surfaceVariant.withOpacity(0.3)
               : scheme.surface,
-          child: Obx(() => SwitchListTile(
-            contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-            secondary: Container(
-              width: 40, height: 40,
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  colors: [
-                    scheme.primaryContainer.withOpacity(0.8),
-                    scheme.primaryContainer.withOpacity(0.5),
+          child: Column(
+            children: [
+              Obx(() {
+                final mode = settings.subtitleMatchMode.value;
+                return ListTile(
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                  leading: Container(
+                    width: 40, height: 40,
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        colors: [
+                          scheme.secondaryContainer.withOpacity(0.8),
+                          scheme.secondaryContainer.withOpacity(0.5),
+                        ],
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                      ),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Icon(Icons.search_rounded, size: 20,
+                        color: isDark ? Colors.white.withOpacity(0.9) : scheme.secondary),
+                  ),
+                  title: const Text('字幕查找模式', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w500)),
+                  subtitle: Text(_modeDescription(mode), style: const TextStyle(fontSize: 11)),
+                  trailing: _buildModeChip(mode, settings, scheme, isDark),
+                );
+              }),
+              const Divider(height: 1, indent: 16, endIndent: 16),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('示例', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600,
+                        color: scheme.primary)),
+                    const SizedBox(height: 4),
+                    Text(
+                      '视频: www.98T.la@HEYZO-0806_iris2.mp4\n'
+                      '字幕: HEYZO-0806.srt\n'
+                      '→ 精确查找: ✗ 不匹配\n'
+                      '→ 模糊查找: ✓ 提取番号 HEYZO-0806 匹配',
+                      style: TextStyle(fontSize: 10, color: scheme.onSurfaceVariant,
+                          fontFamily: 'monospace', height: 1.5),
+                    ),
                   ],
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
                 ),
-                borderRadius: BorderRadius.circular(10),
               ),
-              child: Icon(Icons.subtitles_rounded, size: 20,
-                  color: isDark ? Colors.white.withOpacity(0.9) : scheme.primary),
-            ),
-            title: const Text('启用外挂字幕', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w500)),
-            subtitle: const Text('自动加载同名 SRT 字幕文件（支持本地和远程）',
-                style: TextStyle(fontSize: 11)),
-            value: settings.isSubtitleEnabled.value,
-            onChanged: (v) => settings.setSubtitleEnabled(v),
-          )),
+            ],
+          ),
         ),
 
         const SizedBox(height: 8),
@@ -125,11 +151,18 @@ class _SubtitleSettingsBody extends StatelessWidget {
                           fontSize: 13, fontWeight: FontWeight.w600,
                           color: scheme.primary)),
                     ),
-                    Obx(() => Text('${SubtitleController.logs.length} 条',
-                        style: TextStyle(fontSize: 11, color: scheme.outline))),
+                    Obx(() {
+                      // 同时读取 logVersion 确保 Obx 在日志变化时重建
+                      final _ = SubtitleController.logVersion.value;
+                      return Text('${SubtitleController.logs.length} 条',
+                          style: TextStyle(fontSize: 11, color: scheme.outline));
+                    }),
                     IconButton(
                       icon: const Icon(Icons.delete_outline, size: 18),
-                      onPressed: () => SubtitleController.logs.clear(),
+                      onPressed: () {
+                        SubtitleController.logs.clear();
+                        SubtitleController.logVersion.value++;
+                      },
                       tooltip: '清空日志',
                     ),
                   ],
@@ -137,6 +170,8 @@ class _SubtitleSettingsBody extends StatelessWidget {
               ),
               const Divider(height: 1, indent: 16, endIndent: 16),
               Obx(() {
+                // 同时读取 logVersion 确保 Obx 在日志变化时重建
+                final _ = SubtitleController.logVersion.value;
                 final logs = SubtitleController.logs;
                 if (logs.isEmpty) {
                   return Padding(
@@ -178,6 +213,38 @@ class _SubtitleSettingsBody extends StatelessWidget {
           ),
         ),
       ],
+    );
+  }
+
+  /// 模式描述文本
+  static String _modeDescription(SubtitleMatchMode mode) {
+    switch (mode) {
+      case SubtitleMatchMode.exact:
+        return '文件名完全一致才匹配（去掉后缀，忽略大小写）';
+      case SubtitleMatchMode.fuzzy:
+        return '提取番号核心ID，字幕名包含该ID即匹配';
+      case SubtitleMatchMode.dual:
+        return '先精确查找，未命中再模糊查找（推荐）';
+    }
+  }
+
+  /// 构建模式选择弹出菜单
+  static Widget _buildModeChip(SubtitleMatchMode mode, SubtitleSettings settings,
+      ColorScheme scheme, bool isDark) {
+    final labels = {SubtitleMatchMode.exact: '精确', SubtitleMatchMode.fuzzy: '模糊', SubtitleMatchMode.dual: '双模式'};
+    return ActionChip(
+      label: Text(labels[mode]!, style: TextStyle(fontSize: 12,
+          color: isDark ? Colors.white.withOpacity(0.9) : scheme.onSecondaryContainer)),
+      backgroundColor: isDark
+          ? scheme.secondaryContainer.withOpacity(0.5)
+          : scheme.secondaryContainer.withOpacity(0.7),
+      side: BorderSide.none,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+      onPressed: () {
+        // 循环切换模式
+        final nextIndex = (mode.index + 1) % SubtitleMatchMode.values.length;
+        settings.setSubtitleMatchMode(SubtitleMatchMode.values[nextIndex]);
+      },
     );
   }
 }

@@ -65,6 +65,73 @@ class PlayerActivity : AppCompatActivity(), GSYVideoProgressListener {
         const val PIP_ACTION_PLAY_PAUSE = 1001
         const val PIP_ACTION_PREVIOUS = 1002
         const val PIP_ACTION_NEXT = 1003
+
+        // ======== 字幕匹配工具常量与正则 ========
+
+        /** 支持的字幕扩展名 */
+        val SUBTITLE_EXTS = setOf("srt", "ass", "vtt", "ssa", "sub")
+
+        /** 已知扩展名和语言标记（与 Flutter 端 _stripExtensions 对齐） */
+        val KNOWN_EXTS = setOf(
+            "mp4", "mkv", "avi", "wmv", "flv", "mov", "webm", "rmvb", "ts", "m4v",
+            "srt", "ass", "vtt", "ssa", "sub",
+            "chs", "cht", "chi", "gb", "big5", "chinese", "cthd", "csht",
+            "eng", "en", "jpn", "ja", "kor", "ko", "utf8",
+            "zh", "zh-cn", "zh-tw", "zh-hk", "zh-sg", "zh-mo",
+            "fr", "fre", "de", "ger", "es", "spa", "pt", "por",
+            "it", "ita", "ru", "rus", "ar", "ara", "hi", "hin",
+            "th", "tha", "vi", "vie", "id", "ind", "ms", "may",
+            "nl", "nld", "pl", "pol", "sv", "swe", "da", "dan",
+            "fi", "fin", "no", "nor", "hu", "hun", "cs", "ces",
+            "ro", "ron", "bg", "bul", "hr", "hrv", "sk", "slk",
+            "uk", "ukr", "he", "heb", "el", "ell", "tr", "tur",
+            "ca", "cat", "en-us", "en-gb", "en-au", "en-ca",
+            "tc", "sc"
+        )
+
+        /** 连字符语言标记正则（如 -zh-CN, -en, -ja） */
+        val HYPHEN_LANG_TAG = Regex("-[a-zA-Z]{1,4}(-[a-zA-Z0-9]{2,4})?$")
+
+        /** 点号复合语言标记正则（如 .zh-CN, .en-US），限制2-3字母避免误匹配 */
+        val DOT_LANG_TAG = Regex("\\.([a-zA-Z]{2,3}(-[a-zA-Z0-9]{2,4})?)$")
+
+        /** 标准番号正则：字母2-10位 + 可选分隔符 + 数字2-8位 */
+        val REG_STANDARD = Regex("([a-zA-Z]{2,10})[-_\\s]?(\\d{2,8})")
+        /** FC2 番号 */
+        val REG_FC2 = Regex("FC2[-_\\s]?(?:PPV[-_\\s]?)?(\\d{5,7})", RegexOption.IGNORE_CASE)
+        /** IBW 带 z 后缀 */
+        val REG_IBWZ = Regex("(IBW)[-_\\s]?(\\d{2,5}z)", RegexOption.IGNORE_CASE)
+        /** 短前缀番号 */
+        val REG_SHORT = Regex("([a-zA-Z])(\\d+)-(\\d+)")
+        /** 纯数字番号 */
+        val REG_NUMERIC = Regex("(\\d{4,8})-(\\d{2,4})")
+        /** 东热 N/K 系列 */
+        val REG_TOKYO = Regex("(?:^|[-_\\s])([NK]\\d{4})(?:\$|[-_\\s])", RegexOption.IGNORE_CASE)
+        /** 单字母番号 */
+        val REG_SINGLE = Regex("([a-zA-Z])(\\d{3,8})")
+
+        /** 污染标签正则 */
+        val REG_BRACKETS = Regex("\\[[^\\]]*\\]")
+        val REG_PARENS = Regex("\\([^\\)]*\\)")
+        val REG_WEB_PREFIX = Regex("(?:www\\.)?[a-zA-Z0-9._-]+@")
+        val REG_CHINESE_POLLUTION = Regex(
+            "(?:中文字幕|繁体字幕|简体字幕|中英双字|双语字幕|中日字幕|中文字幕组|字幕组|字幕|中出|无码|有码|无修正|破解|破解版|高清|全集|完整版|精选|合集|番号|封面|" +
+            "测试|样本|预览|试看|抢先|先行|泄漏|流出|限定|特典|初回|通常|独占|配信|" +
+            "無碼|無修正|破解版|中文|繁体|简体|英文|日文|韩文|" +
+            "自压|转载|整理|合成|压制|修复|增强)"
+        )
+        val REG_RESOLUTION = Regex(
+            "(?:^|[-_\\s.])(?:4K|UHD|FHD|HD|SD|1080[pi]|720[pi]|480[pi]|2160[pi])(?:\$|[-_\\s.])",
+            RegexOption.IGNORE_CASE
+        )
+        val REG_CODEC = Regex(
+            "(?:^|[-_\\s.])(?:x264|h\\.?264|x265|h\\.?265|hevc|avc|av1|vp9|mpeg4?|mpeg2?)(?:\$|[-_\\s.])",
+            RegexOption.IGNORE_CASE
+        )
+        val REG_SOURCE = Regex(
+            "(?:^|[-_\\s.])(?:WEB[-._]?DL|BluRay|BDRip|BRRip|HDTV|WEBRip|HDRip|DVDRip|REMUX|DVD|NF|AMZN|DSNP|HMAX|Disney|Netflix|Amazon)(?:\$|[-_\\s.])",
+            RegexOption.IGNORE_CASE
+        )
     }
     
     private lateinit var playerWrapper: PlayerWrapper
@@ -729,6 +796,10 @@ class PlayerActivity : AppCompatActivity(), GSYVideoProgressListener {
      * 解析后通过自定义 TextView 叠加层渲染字幕。
      * 不依赖 GSY 的 setSubTitlePath / GSYSubtitleSource，
      * 所有内核（IJK / System / Exo / Media3）均可使用。
+     *
+     * 匹配策略（与 Flutter 端 SubtitleMatcher 对齐）：
+     * 1. 精确匹配：双方剥离扩展名+语言标记后完全一致
+     * 2. 模糊匹配（降级）：提取番号核心ID进行比对
      */
     private fun applyLocalSubtitle(videoName: String) {
         subtitleEntries = emptyList()
@@ -736,25 +807,209 @@ class PlayerActivity : AppCompatActivity(), GSYVideoProgressListener {
                     fullscreenSubtitleTextView?.visibility = View.GONE
 
         val dir = VideoDataHolder.getSubtitleDir()
-        if (dir.isNullOrEmpty()) return
+        if (dir.isNullOrEmpty()) {
+            FlutterMethods.subtitleLog("字幕目录未配置")
+            return
+        }
         try {
             val dirFile = java.io.File(dir)
-            if (!dirFile.exists() || !dirFile.isDirectory) return
-            val base = videoName.substringBeforeLast(".", videoName).lowercase()
-            if (base.isEmpty()) return
+            if (!dirFile.exists() || !dirFile.isDirectory) {
+                FlutterMethods.subtitleLog("字幕目录不存在: $dir")
+                return
+            }
+
+            FlutterMethods.subtitleLog("开始搜索字幕...")
+            FlutterMethods.subtitleLog("视频: $videoName")
+
+            // 视频名清洗：剥离扩展名和多层污染
+            val videoBase = cleanFileName(videoName)
+            if (videoBase.isEmpty()) return
+            val videoId = extractVideoId(videoName)
+            FlutterMethods.subtitleLog("视频清洗: $videoBase (ID: ${videoId.ifEmpty { "(无)" }})")
+
             val files = dirFile.listFiles() ?: return
+
+            // 收集所有字幕文件及其清洗名
+            val candidates = mutableListOf<Pair<java.io.File, String>>()
             for (f in files) {
-                if (!f.isFile || !f.name.lowercase().endsWith(".srt")) continue
-                if (f.name.substringBeforeLast(".", f.name).lowercase() == base) {
-                    val content = f.readText()
-                    subtitleEntries = parseSrt(content)
-                    ensureSubtitleOverlay()
+                if (!f.isFile) continue
+                val ext = f.extension.lowercase()
+                if (ext !in SUBTITLE_EXTS) continue
+                val clean = cleanFileName(f.name)
+                if (clean.isNotEmpty()) {
+                    candidates.add(Pair(f, clean))
+                }
+            }
+
+            if (candidates.isEmpty()) {
+                FlutterMethods.subtitleLog("字幕目录无字幕文件 ($dir)")
+                return
+            }
+            FlutterMethods.subtitleLog("字幕池: ${candidates.size} 个文件")
+
+            // 第一步：精确匹配（清洗后完全一致）
+            for ((file, cleanName) in candidates) {
+                if (cleanName == videoBase) {
+                    FlutterMethods.subtitleLog("精确匹配: ${file.name}")
+                    loadSubtitleFile(file)
                     return
                 }
             }
+
+            // 第二步：模糊匹配（提取番号ID比对）
+            if (videoId.isNotEmpty()) {
+                val scored = candidates.map { (file, cleanName) ->
+                    val score = fuzzyScore(videoId, cleanName, file.name)
+                    Triple(file, cleanName, score)
+                }.filter { it.third >= 80 }.sortedByDescending { it.third }
+                if (scored.isNotEmpty()) {
+                    val best = scored.first()
+                    FlutterMethods.subtitleLog("模糊匹配: ${best.first.name} (分数: ${best.third})")
+                    loadSubtitleFile(best.first)
+                    return
+                }
+            }
+
+            FlutterMethods.subtitleLog("未匹配到字幕 (视频ID: ${videoId.ifEmpty { "(无)" }})")
         } catch (e: Exception) {
             Debuger.printfError("applyLocalSubtitle failed: ${e.message}")
+            FlutterMethods.subtitleLog("字幕查找异常: ${e.message}")
         }
+    }
+
+    /** 加载字幕文件：读取内容并解析 */
+    private fun loadSubtitleFile(file: java.io.File) {
+        try {
+            val content = file.readText()
+            subtitleEntries = parseSrt(content)
+            ensureSubtitleOverlay()
+            FlutterMethods.subtitleLog("字幕加载成功: ${file.name} (${subtitleEntries.size} 条)")
+        } catch (e: Exception) {
+            Debuger.printfError("loadSubtitleFile failed: ${e.message}")
+            FlutterMethods.subtitleLog("字幕读取失败: ${e.message}")
+        }
+    }
+
+    // ---- 字幕匹配工具方法 ----
+    // (正则和常量定义在类的 companion object 中)
+
+    /**
+     * 清洗文件名：剥离扩展名、语言标记和常见污染标签。
+     * 与 Flutter 端 SubtitleMatcher._nameWithoutExt + _deepClean 对齐。
+     * 例如: "neob-017.ja.srt" → "neob-017"
+     *       "[Thz.la]neob-017中文字幕.mp4" → "neob-017"
+     */
+    private fun cleanFileName(fileName: String): String {
+        // 1. 取文件名最后一段（去除路径）
+        var name = fileName.substringAfterLast('/').substringAfterLast('\\')
+
+        // 2. 阶段1：迭代剥离点号分隔的已知扩展名和语言标记
+        var lastLen = name.length
+        while (true) {
+            val dotIdx = name.lastIndexOf('.')
+            if (dotIdx <= 0) break
+            val ext = name.substring(dotIdx).lowercase()
+            if (ext in KNOWN_EXTS || DOT_LANG_TAG.matches(ext)) {
+                name = name.substring(0, dotIdx)
+                if (name.length >= lastLen) break
+                lastLen = name.length
+            } else {
+                break
+            }
+        }
+
+        // 3. 阶段2：剥离连字符分隔的语言标记（最多3层）
+        for (i in 0 until 3) {
+            val match = HYPHEN_LANG_TAG.find(name) ?: break
+            val tag = match.value.lowercase()
+            // 确认是语言标记而非番号数字部分
+            val content = tag.substring(1)
+            if (content.firstOrNull()?.isLetter() == true) {
+                name = name.substring(0, name.length - tag.length)
+            } else {
+                break
+            }
+        }
+
+        // 4. 污染清洗（与 Flutter _deepClean 对齐）
+        name = name.replace(REG_BRACKETS, "")
+        name = name.replace(REG_PARENS, "")
+        name = name.replace(REG_WEB_PREFIX, "")
+        name = name.replace(REG_CHINESE_POLLUTION, "")
+        name = name.replace(REG_RESOLUTION, "_")
+        name = name.replace(REG_CODEC, "_")
+        name = name.replace(REG_SOURCE, "_")
+
+        // 5. 清理残余符号
+        name = name.replace(Regex("[-_\\s]{2,}"), "_")
+        name = name.trim('_', '-', ' ', '.')
+        return name.lowercase()
+    }
+
+    /**
+     * 从文件名中提取视频番号核心ID。
+     * 与 Flutter 端 SubtitleMatcher.extractId 对齐。
+     */
+    private fun extractVideoId(fileName: String): String {
+        var name = cleanFileName(fileName)
+        if (name.isEmpty()) return ""
+
+        // FC2
+        REG_FC2.find(name)?.let {
+            return "FC2-${it.groupValues[1]}"
+        }
+        // IBW-z
+        REG_IBWZ.find(name)?.let {
+            return "${it.groupValues[1].uppercase()}-${it.groupValues[2]}"
+        }
+        // 标准番号
+        REG_STANDARD.find(name)?.let {
+            return "${it.groupValues[1].uppercase()}-${it.groupValues[2]}"
+        }
+        // 短前缀
+        REG_SHORT.find(name)?.let {
+            return "${it.groupValues[1].uppercase()}${it.groupValues[2]}-${it.groupValues[3]}"
+        }
+        // 纯数字
+        REG_NUMERIC.find(name)?.let {
+            return "${it.groupValues[1]}-${it.groupValues[2]}"
+        }
+        // 东热
+        REG_TOKYO.find(name)?.let {
+            return it.groupValues[1].uppercase()
+        }
+        // 单字母
+        REG_SINGLE.find(name)?.let {
+            if (it.groupValues[1].lowercase() != "x" && it.groupValues[1].lowercase() != "h") {
+                return "${it.groupValues[1].uppercase()}${it.groupValues[2]}"
+            }
+        }
+
+        return name
+    }
+
+    /**
+     * 计算模糊匹配分数（简化版，与 Flutter 端对齐）。
+     * 返回 0-100，>= 80 视为匹配。
+     */
+    private fun fuzzyScore(videoId: String, subCleanName: String, subFileName: String): Int {
+        val subId = extractVideoId(subFileName)
+        val flatten = { s: String -> s.replace(Regex("[-_\\s]"), "").uppercase() }
+
+        // ID 完全一致 → 强匹配
+        if (videoId.isNotEmpty() && subId.isNotEmpty() &&
+            flatten(videoId) == flatten(subId)) {
+            return 100
+        }
+        // 一方 ID 被另一方清洗名包含
+        if (videoId.isNotEmpty() && subCleanName.uppercase().contains(flatten(videoId))) {
+            return 80
+        }
+        if (subId.isNotEmpty() && flatten(subId).let { sid ->
+            videoId.isNotEmpty() && flatten(videoId).contains(sid) }) {
+            return 80
+        }
+        return 0
     }
 
     /** 确保字幕 TextView 已创建并添加到根 FrameLayout */

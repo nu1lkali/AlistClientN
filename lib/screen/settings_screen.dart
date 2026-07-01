@@ -9,6 +9,7 @@ import 'package:alist/screen/iptv/model/iptv_channel.dart';
 import 'package:alist/util/constant.dart';
 import 'package:alist/util/global.dart';
 import 'package:alist/util/security_lock_controller.dart';
+import 'package:alist/util/subtitle/subtitle_matcher.dart';
 import 'package:alist/util/subtitle/subtitle_settings.dart';
 import 'package:alist/util/log_utils.dart';
 import 'package:alist/util/named_router.dart';
@@ -52,7 +53,6 @@ class _SettingsContainerState extends State<_SettingsContainer>
   late final RxBool _aggressiveCacheEnabled;
   late final RxBool _wifiOnlyPreloadEnabled;
   late final RxBool _enableMediaKitPlayer;
-  late final RxBool _subtitleEnabled;
   late final RxBool _showFabButton;
   late final RxBool _groupedRandomSort;
   late final RxBool _showTiktokPageIndicator;
@@ -74,7 +74,6 @@ class _SettingsContainerState extends State<_SettingsContainer>
         (SpUtil.getBool(AlistConstant.wifiOnlyPreload, defValue: true) ?? true).obs;
     _enableMediaKitPlayer =
         (SpUtil.getBool(AlistConstant.enableMediaKitPlayer, defValue: false) ?? false).obs;
-    _subtitleEnabled = SubtitleSettings.instance.isSubtitleEnabled;
     _showFabButton =
         (SpUtil.getBool(AlistConstant.showFabButton, defValue: true) ?? true).obs;
     _groupedRandomSort =
@@ -217,12 +216,14 @@ class _SettingsContainerState extends State<_SettingsContainer>
             children: [
               _switchTile(context, isDark, scheme,
                   icon: Icons.subtitles_rounded,
-                  title: '启用本地字幕',
-                  subtitle: '按视频名自动加载同名字幕',
+                  title: '启用字幕',
+                  subtitle: '按视频名自动加载同名字幕（本地和远程）',
                   value: _enableLocalSubtitle.value,
                   onChanged: (v) {
                     SpUtil.putBool(AlistConstant.enableLocalSubtitle, v);
                     _enableLocalSubtitle.value = v;
+                    // 同步更新 SubtitleSettings 的响应式状态
+                    SubtitleSettings.instance.isSubtitleEnabled.value = v;
                   }),
               _navTile(context, isDark, scheme,
                   icon: Icons.folder_rounded,
@@ -232,6 +233,12 @@ class _SettingsContainerState extends State<_SettingsContainer>
                       : _localSubtitlePath.value,
                   enabled: _enableLocalSubtitle.value,
                   onTap: () => _pickSubtitleDir(context)),
+              _navTile(context, isDark, scheme,
+                  icon: Icons.search_rounded,
+                  title: '字幕查找模式',
+                  subtitle: _matchModeLabel(),
+                  enabled: _enableLocalSubtitle.value,
+                  onTap: () => Get.toNamed(NamedRouter.subtitleSettings)),
               _switchTile(context, isDark, scheme,
                   icon: Icons.download_rounded,
                   title: '字幕下载到字幕目录',
@@ -511,6 +518,20 @@ class _SettingsContainerState extends State<_SettingsContainer>
       trailing: Switch(value: value, onChanged: onChanged),
       enabled: enabled,
     );
+  }
+
+  /// 字幕查找模式标签（响应式，跟随 SubtitleSettings 实时更新）
+  String _matchModeLabel() {
+    // 读取 SubtitleSettings 的响应式值，确保 Obx 能感知变化
+    final mode = SubtitleSettings.instance.subtitleMatchMode.value;
+    switch (mode) {
+      case SubtitleMatchMode.exact:
+        return '精确查找';
+      case SubtitleMatchMode.fuzzy:
+        return '模糊查找';
+      case SubtitleMatchMode.dual:
+        return '双模式（推荐）';
+    }
   }
 
   /// 选择本地字幕目录：先确保"所有文件访问"权限，再弹框输入目录路径

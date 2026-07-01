@@ -188,6 +188,16 @@ object FlutterMethods {
     }
 
     /**
+     * 字幕加载日志：原生端匹配过程回传 Flutter 以显示在设置页
+     */
+    fun subtitleLog(msg: String) {
+        channel.invokeMethod(
+            "subtitleLog",
+            mutableMapOf("msg" to msg)
+        )
+    }
+
+    /**
      * IJK 播放失败时，通知 Flutter 使用 MediaKit (libmpv) 重试播放
      */
     fun fallbackToMediaKit(videosJson: String, index: Int, headersStr: String?) {

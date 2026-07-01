@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:alist/util/constant.dart';
 import 'package:alist/util/file_utils.dart';
 import 'package:alist/util/subtitle/subtitle_controller.dart';
+import 'package:alist/util/subtitle/subtitle_matcher.dart';
 import 'package:alist/util/subtitle/subtitle_matcher_util.dart';
 import 'package:dio/dio.dart';
 import 'package:flustars/flustars.dart';
@@ -73,25 +74,74 @@ class SubtitleLoader {
       final nameWithoutExt = _getNameWithoutExtension(videoFile.uri.pathSegments.last);
       if (nameWithoutExt.isEmpty) return null;
 
-      final candidates = [
+      // 1. 精确同名：neob-017.srt
+      final exactCandidates = [
         '$dir${Platform.pathSeparator}$nameWithoutExt.srt',
         '$dir${Platform.pathSeparator}$nameWithoutExt.SRT',
       ];
-
-      for (final candidate in candidates) {
+      for (final candidate in exactCandidates) {
         final file = File(candidate);
         if (await file.exists()) {
-          debugPrint('SubtitleLoader: 找到本地字幕 -> $candidate');
-          SubtitleController.addLog('找到本地字幕: $candidate');
+          debugPrint('SubtitleLoader: 找到本地字幕(精确) -> $candidate');
+          SubtitleController.addLog('找到本地字幕(精确): $candidate');
           return await file.readAsString();
         }
       }
+
+      // 2. 语言标签变体：扫描目录，匹配 neob-017.*.srt / neob-017.*.SRT 等
+      //    例如 neob-017.ja.srt, neob-017.chs.srt, neob-017.zh-CN.srt
+      final videoDir = Directory(dir);
+      if (await videoDir.exists()) {
+        final prefix = nameWithoutExt.toLowerCase();
+        const srtExts = ['.srt', '.ass', '.vtt', '.ssa', '.sub'];
+        final matchedFiles = <File>[];
+        await for (final entity in videoDir.list()) {
+          if (entity is File) {
+            final fileName = _baseName(entity.path).toLowerCase();
+            final ext = _getExtension(entity.path).toLowerCase();
+            // 文件名以 "视频名." 开头（如 neob-017.ja.srt → neob-017. 开头）
+            // 且扩展名是字幕格式
+            if (fileName.startsWith('$prefix.') && srtExts.contains(ext)) {
+              matchedFiles.add(entity);
+            }
+          }
+        }
+        if (matchedFiles.isNotEmpty) {
+          // 优先选择 .srt，其次按文件名长度升序（越短越接近原始名）
+          matchedFiles.sort((a, b) {
+            final extA = _getExtension(a.path).toLowerCase();
+            final extB = _getExtension(b.path).toLowerCase();
+            if (extA == '.srt' && extB != '.srt') return -1;
+            if (extA != '.srt' && extB == '.srt') return 1;
+            return _baseName(a.path).length.compareTo(_baseName(b.path).length);
+          });
+          final best = matchedFiles.first;
+          debugPrint('SubtitleLoader: 找到本地字幕(语言标签) -> ${best.path}');
+          SubtitleController.addLog('找到本地字幕(语言标签): ${best.path}');
+          return await best.readAsString();
+        }
+      }
+
       SubtitleController.addLog('本地未找到同名 .srt');
     } catch (e) {
       debugPrint('SubtitleLoader: 本地字幕查找异常 -> $e');
       SubtitleController.addLog('本地查找异常: $e');
     }
     return null;
+  }
+
+  /// 取路径最后一段文件名
+  static String _baseName(String path) {
+    final norm = path.replaceAll('\\', '/');
+    final idx = norm.lastIndexOf('/');
+    return idx >= 0 ? norm.substring(idx + 1) : norm;
+  }
+
+  /// 获取文件扩展名（含点号，如 .srt）
+  static String _getExtension(String path) {
+    final base = _baseName(path);
+    final idx = base.lastIndexOf('.');
+    return idx >= 0 ? base.substring(idx) : '';
   }
 
   static Future<String?> _tryLoadRemoteWithCache(String remotePath, {String? sign}) async {
@@ -102,7 +152,41 @@ class SubtitleLoader {
         return null;
       }
 
-      final srtRemotePath = '${remotePath.substring(0, lastDot)}.srt';
+      final baseWithoutExt = remotePath.substring(0, lastDot);
+
+      // 构建候选远程路径列表：先精确同名，再语言标签变体
+      // neob-017.mp4 → neob-017.srt, neob-017.ja.srt, neob-017.chs.srt, ...
+      final candidates = <String>[
+        '$baseWithoutExt.srt',
+      ];
+      // 常见语言标签变体（优先级从高到低）
+      const langTags = [
+        '.chs.srt', '.cht.srt',   // 中文简繁
+        '.zh.srt', '.zh-CN.srt', '.zh-TW.srt', // 中文标准标签
+        '.ja.srt', '.jpn.srt',   // 日文
+        '.en.srt', '.eng.srt',   // 英文
+        '.ko.srt', '.kor.srt',   // 韩文
+      ];
+      for (final tag in langTags) {
+        candidates.add('$baseWithoutExt$tag');
+      }
+
+      for (final srtRemotePath in candidates) {
+        final result = await _tryDownloadRemoteSrt(srtRemotePath, sign: sign);
+        if (result != null) return result;
+      }
+
+      return null;
+    } catch (e) {
+      debugPrint('SubtitleLoader: 异常 -> $e');
+      SubtitleController.addLog('下载异常: $e');
+      return null;
+    }
+  }
+
+  /// 尝试下载单个远程字幕文件（带缓存）
+  static Future<String?> _tryDownloadRemoteSrt(String srtRemotePath, {String? sign}) async {
+    try {
       debugPrint('SubtitleLoader: 尝试远程字幕 -> $srtRemotePath');
       SubtitleController.addLog('尝试远程字幕: $srtRemotePath');
 
@@ -181,12 +265,11 @@ class SubtitleLoader {
       return null;
     } on DioException catch (e) {
       if (e.response?.statusCode == 404) {
-        debugPrint('SubtitleLoader: 远程无同名字幕 (404)');
-        SubtitleController.addLog('远程无同名字幕 (404)');
-      } else {
-        debugPrint('SubtitleLoader: 异常 -> ${e.message}');
-        SubtitleController.addLog('下载异常: ${e.message} (${e.response?.statusCode})');
+        // 404 是正常的（该语言标签变体不存在），不打印错误，静默跳过
+        return null;
       }
+      debugPrint('SubtitleLoader: 异常 -> ${e.message}');
+      SubtitleController.addLog('下载异常: ${e.message} (${e.response?.statusCode})');
       return null;
     } catch (e) {
       debugPrint('SubtitleLoader: 异常 -> $e');
@@ -195,7 +278,17 @@ class SubtitleLoader {
     }
   }
 
+  /// 安全剥离文件多重后缀和语言标记（与 SubtitleMatcher._nameWithoutExt 对齐）
+  ///
+  /// 例如:
+  /// - neob-017.mp4 → neob-017
+  /// - neob-017.1080p.mp4 → neob-017 (剥离分辨率标签)
+  /// - neob-017.ja.srt → neob-017
   static String _getNameWithoutExtension(String fileName) {
+    // 使用 SubtitleMatcher 的公开方法进行深度清洗
+    final cleaned = SubtitleMatcher.cleanName(fileName);
+    if (cleaned.isNotEmpty) return cleaned;
+    // 兜底：如果深度清洗后为空，回退到简单剥离
     final lastDot = fileName.lastIndexOf('.');
     if (lastDot <= 0) return fileName;
     return fileName.substring(0, lastDot);

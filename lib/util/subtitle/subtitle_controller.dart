@@ -3,7 +3,8 @@ import 'dart:async';
 import 'package:alist/util/subtitle/srt_parser.dart';
 import 'package:alist/util/subtitle/subtitle_loader.dart';
 import 'package:alist/util/subtitle/subtitle_model.dart';
-import 'package:alist/util/subtitle/subtitle_settings.dart';
+import 'package:alist/util/constant.dart';
+import 'package:flustars/flustars.dart';
 import 'package:flutter/foundation.dart' show compute, debugPrint;
 import 'package:get/get.dart';
 
@@ -29,9 +30,6 @@ class SubtitleController extends GetxController {
   /// 上次查找的字幕索引缓存，用于优化二分查找
   int _lastFoundIndex = -1;
 
-  /// 全局设置引用
-  final SubtitleSettings _settings = SubtitleSettings.instance;
-
   /// 加载字幕文件并解析
   ///
   /// [videoPath] 视频文件的本地路径（可能为 null，远程视频没有本地路径）
@@ -46,10 +44,11 @@ class SubtitleController extends GetxController {
     _reset();
 
     // 始终记录调用（用于排查）
-    addLog('loadSubtitle 被调用, enabled=${_settings.isSubtitleEnabled.value}');
+    addLog('loadSubtitle 被调用');
 
-    // 如果字幕功能未启用，直接返回
-    if (!_settings.isSubtitleEnabled.value) {
+    // 检查字幕功能是否启用（统一使用 enableLocalSubtitle 作为主开关）
+    final subtitleEnabled = SpUtil.getBool(AlistConstant.enableLocalSubtitle) ?? false;
+    if (!subtitleEnabled) {
       debugPrint('SubtitleController: 字幕功能未启用，跳过加载');
       addLog('字幕功能已关闭，跳过加载');
       return;
@@ -216,17 +215,24 @@ class SubtitleController extends GetxController {
   /// 字幕日志（供设置页面查看）
   static final RxList<String> logs = <String>[].obs;
 
+  /// 日志版本号，每次 addLog 递增，确保 Obx 能感知变化
+  static final RxInt logVersion = 0.obs;
+
   /// 添加一条日志（public，供 SubtitleLoader 调用）
   static void addLog(String msg) {
     final time = DateTime.now();
     final ts = '${time.hour.toString().padLeft(2, '0')}:'
         '${time.minute.toString().padLeft(2, '0')}:'
         '${time.second.toString().padLeft(2, '0')}';
-    logs.add('[$ts] $msg');
+    final entry = '[$ts] $msg';
+    debugPrint('[SubtitleLog] $entry');
+    logs.add(entry);
     // 保留最近 200 条
-    if (logs.length > 200) {
-      logs.removeRange(0, logs.length - 200);
+    while (logs.length > 200) {
+      logs.removeAt(0);
     }
+    // 递增版本号，强制 Obx 重建
+    logVersion.value++;
   }
 
   /// 完全清理（退出播放器时调用）

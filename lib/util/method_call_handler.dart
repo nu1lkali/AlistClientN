@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:alist/database/alist_database_controller.dart';
+import 'package:alist/util/subtitle/subtitle_controller.dart';
 import 'package:alist/screen/disliked_videos_screen.dart';
 import 'package:alist/database/table/disliked_video.dart';
 import 'package:alist/database/table/favorite.dart';
@@ -278,15 +279,15 @@ class MethodCallHandler {
         String? videosJson = call.arguments["videos"];
         int index = call.arguments["index"] ?? 0;
         String? headersStr = call.arguments["headers"];
-        
+
         if (videosJson != null && videosJson.isNotEmpty) {
           try {
             final videosList = jsonDecode(videosJson) as List;
             final videos = videosList.map((v) => Map<String, String?>.from(v as Map)).toList();
-            final headers = headersStr != null && headersStr.isNotEmpty 
-                ? Map<String, String>.from(jsonDecode(headersStr)) 
+            final headers = headersStr != null && headersStr.isNotEmpty
+                ? Map<String, String>.from(jsonDecode(headersStr))
                 : <String, String>{};
-            
+
             // 使用 Future.delayed 确保当前 Activity 已关闭
             Future.delayed(const Duration(milliseconds: 300), () {
               Get.toNamed(
@@ -301,6 +302,14 @@ class MethodCallHandler {
           } catch (e) {
             // 解析失败静默处理
           }
+        }
+        return "";
+
+      case "subtitleLog":
+        // 原生播放器回传字幕匹配日志到 Flutter 端 SubtitleController
+        final String? msg = call.arguments["msg"];
+        if (msg != null && msg.isNotEmpty) {
+          SubtitleController.addLog('[原生] $msg');
         }
         return "";
 
