@@ -584,7 +584,6 @@ class _SettingsContainerState extends State<_SettingsContainer>
           children: [
             TextField(
               controller: controller,
-              autofocus: true,
               decoration: const InputDecoration(
                 hintText: '/storage/emulated/0/Subtitles',
                 helperText: '字幕文件所在目录的绝对路径',
