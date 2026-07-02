@@ -763,7 +763,7 @@ class _SettingsContainerState extends State<_SettingsContainer>
           mainAxisSize: MainAxisSize.min,
           children: [
             RadioListTile<int>(
-                title: const Text('经典黑胶风格'),
+                title: const Text('经典黑胶风格\n（停止维护）'),
                 value: 0,
                 groupValue: current,
                 onChanged: (v) {

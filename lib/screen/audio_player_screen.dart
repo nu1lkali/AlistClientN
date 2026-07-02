@@ -58,8 +58,6 @@ class _AudioPlayerScreenState extends State<AudioPlayerScreen>
   @override
   void initState() {
     super.initState();
-    // 隐藏底部导航小白条（沉浸式）
-    SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
     _controller =
         Get.put(AudioPlayerScreenController(audios: _audios, index: _index));
     _lyricsController = Get.put(LyricsController());
@@ -265,14 +263,24 @@ class _AudioPlayerScreenState extends State<AudioPlayerScreen>
                     switchInCurve: Curves.easeOutCubic,
                     switchOutCurve: Curves.easeInCubic,
                     child: _showLyrics
-                        ? StreamlinedLyricsView(
-                            key: const ValueKey('classic_lyrics'),
-                            controller: _lyricsController,
-                            scheme: Theme.of(context).colorScheme,
-                            onTapReturn: () {
+                        ? Container(
+                            margin: const EdgeInsets.symmetric(horizontal: 12),
+                            decoration: BoxDecoration(
+                              color: Colors.black.withOpacity(0.3),
+                              borderRadius: BorderRadius.circular(16),
+                            ),
+                            child: StreamlinedLyricsView(
+                              key: const ValueKey('classic_lyrics'),
+                              controller: _lyricsController,
+                              scheme: Theme.of(context).colorScheme.copyWith(
+                                primary: Colors.white,
+                                onSurfaceVariant: Colors.white,
+                              ),
+                              onTapReturn: () {
                                 _stopLyricsTracking();
                                 setState(() => _showLyrics = false);
                               },
+                            ),
                           )
                         : GestureDetector(
                             key: const ValueKey('classic_disc'),
@@ -299,9 +307,9 @@ class _AudioPlayerScreenState extends State<AudioPlayerScreen>
             ),
           ),
 
-          // 第5层：自定义音量指示器
+          // 第5层：自定义音量指示器（唱片下方空白区域）
           const Positioned(
-            top: 60,
+            top: 470,
             left: 0,
             right: 0,
             child: VolumeIndicator(
@@ -913,9 +921,8 @@ class AudioPlayerScreenController extends GetxController {
   void onInit() {
     super.onInit();
     if (_index < 0 || _index >= _audios.length) _index = 0;
-    // Android 13+ 需要运行时申请通知权限，才能显示媒体通知栏
     Permission.notification.request();
-    _createPlayListAndPlay();
+    _initBasePathAndPlay();
 
     streamSubscriptions.add(_audioPlayer.durationStream.listen((event) {
       if (event != null) _duration.value = event;
@@ -941,13 +948,11 @@ class AudioPlayerScreenController extends GetxController {
           _saveProgress(prevIndex);
           _index = newIndex;
           _name.value = _audios[_index].name;
-          // 先查缓存，有缓存直接显示，不闪烁默认封面
           final cached = _coverCache[_audios[_index].remotePath];
           if (cached != null) {
             coverArtBytes.value = cached.isNotEmpty ? cached : null;
             _artist.value = _artistCache[_audios[_index].remotePath] ?? '';
           } else {
-            // 没缓存才清空，触发加载
             _artist.value = '';
             coverArtBytes.value = null;
             _fetchCoverArt(_index);
@@ -967,10 +972,8 @@ class AudioPlayerScreenController extends GetxController {
       } else {
         _playing.value = false;
       }
-      // 曲目播完（processingState == completed 是切歌前的最后时机）
       if (state.processingState == ProcessingState.completed) {
-        if (_playMode.value == PlayMode.single) return; // 单曲循环交给 LoopMode.one
-        // sleepAfterTrack 勾选时列表只剩当前一首，completed 后不会切歌，直接 pause 即可
+        if (_playMode.value == PlayMode.single) return;
         if (sleepAfterTrack.value || _pendingPauseAfterTrack) {
           _pendingPauseAfterTrack = false;
           _audioPlayer.pause();
@@ -979,6 +982,16 @@ class AudioPlayerScreenController extends GetxController {
         _playNext();
       }
     }));
+  }
+
+  Future<void> _initBasePathAndPlay() async {
+    // 预先加载 basePath，避免 makeFileLink 失败导致音频源静默跳过
+    final userController = Get.find<UserController>();
+    final user = userController.user.value;
+    if (user.basePath == null || user.basePath!.isEmpty) {
+      await userController.requestBasePath(user);
+    }
+    _createPlayListAndPlay();
   }
 
   void _createPlayListAndPlay() async {
@@ -995,6 +1008,7 @@ class AudioPlayerScreenController extends GetxController {
     await _audioPlayer.setAudioSource(_playList, initialIndex: _index);
     await _audioPlayer.setLoopMode(LoopMode.all);
     await _restoreProgress(_index);
+    await _audioPlayer.play(); // 确保自动播放（处理 just_audio 不自动播放的边界情况）
     final firstAudio = _audios[_index];
     if (_coverCache.containsKey(firstAudio.remotePath)) {
       final cached = _coverCache[firstAudio.remotePath]!;
@@ -1516,8 +1530,6 @@ class _AudioPlayerScreenV2State extends State<AudioPlayerScreenV2> {
   @override
   void initState() {
     super.initState();
-    // 确保系统覆盖层（音量指示器）可显示
-    SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
     _controller =
         Get.put(AudioPlayerScreenController(audios: _audios, index: _index));
     _lyricsController = Get.put(LyricsController());
@@ -1594,11 +1606,33 @@ class _AudioPlayerScreenV2State extends State<AudioPlayerScreenV2> {
               crossAxisAlignment: CrossAxisAlignment.center,
               children: [
                 _buildTopBar(context),
-                const SizedBox(height: 32),
-                Center(child: _buildVisualArea(coverSize, scheme)),
                 const SizedBox(height: 16),
-                _buildTitleArea(scheme),
-                const Spacer(),
+                // 封面/歌词切换：歌词全屏展开
+                if (_showLyrics)
+                  Expanded(
+                    child: StreamlinedLyricsView(
+                      key: const ValueKey('v2_lyrics'),
+                      controller: _lyricsController,
+                      scheme: scheme,
+                      onTapReturn: () {
+                        _stopLyricsTracking();
+                        setState(() => _showLyrics = false);
+                      },
+                    ),
+                  )
+                else ...[
+                  const SizedBox(height: 16),
+                  GestureDetector(
+                    onTap: () {
+                      _startLyricsTracking();
+                      setState(() => _showLyrics = true);
+                    },
+                    child: Center(child: _buildCoverArea(coverSize)),
+                  ),
+                  const SizedBox(height: 16),
+                  _buildTitleArea(scheme),
+                  const Spacer(),
+                ],
                 _buildProgressSection(scheme),
                 const SizedBox(height: 4),
                 _buildControls(scheme),

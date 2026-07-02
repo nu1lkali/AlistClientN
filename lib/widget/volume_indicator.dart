@@ -27,6 +27,7 @@ class _VolumeIndicatorState extends State<VolumeIndicator>
     with SingleTickerProviderStateMixin {
   double _volume = 0.5;
   bool _visible = false;
+  bool _suppressing = false; // 防止 setVolume 触发 listener 死循环
   StreamSubscription<double>? _sub;
   Timer? _hideTimer;
   late AnimationController _fadeCtrl;
@@ -39,11 +40,16 @@ class _VolumeIndicatorState extends State<VolumeIndicator>
         vsync: this, duration: const Duration(milliseconds: 200));
     _fadeAnim = CurvedAnimation(parent: _fadeCtrl, curve: Curves.easeOutCubic);
     _sub = VolumeController().listener((v) {
-      if (!mounted) return;
+      if (!mounted || _suppressing) return;
       _volume = v;
       _show();
+      // 立即用 showSystemUI:false 重设同值音量，把系统 HUD 顶掉
+      _suppressing = true;
+      VolumeController().setVolume(v, showSystemUI: false);
+      Future.delayed(const Duration(milliseconds: 150), () {
+        _suppressing = false;
+      });
     });
-    // 获取初始音量
     VolumeController().getVolume().then((v) {
       if (mounted) setState(() => _volume = v);
     }).catchError((_) {});
