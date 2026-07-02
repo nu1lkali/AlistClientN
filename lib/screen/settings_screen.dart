@@ -16,6 +16,7 @@ import 'package:alist/util/named_router.dart';
 import 'package:alist/util/user_controller.dart';
 import 'package:alist/util/widget_utils.dart';
 import 'package:alist/widget/alist_scaffold.dart';
+import 'package:filesystem_picker/filesystem_picker.dart';
 import 'package:flutter_smart_dialog/flutter_smart_dialog.dart';
 import 'package:flustars/flustars.dart';
 import 'package:flutter/material.dart';
@@ -553,7 +554,7 @@ class _SettingsContainerState extends State<_SettingsContainer>
     }
   }
 
-  /// 选择本地字幕目录：先确保"所有文件访问"权限，再弹框输入目录路径
+  /// 选择本地字幕目录：先确保"所有文件访问"权限，再弹框选择/输入目录路径
   Future<void> _pickSubtitleDir(BuildContext context) async {
     if (Platform.isAndroid) {
       if (!await Permission.manageExternalStorage.isGranted) {
@@ -567,7 +568,7 @@ class _SettingsContainerState extends State<_SettingsContainer>
     _showSubtitlePathDialog(context);
   }
 
-  /// 输入并校验字幕目录路径，校验通过后持久化
+  /// 输入或浏览选择字幕目录路径，校验通过后持久化
   void _showSubtitlePathDialog(BuildContext context) {
     final controller = TextEditingController(
       text: _localSubtitlePath.value.isNotEmpty
@@ -578,13 +579,54 @@ class _SettingsContainerState extends State<_SettingsContainer>
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('字幕目录'),
-        content: TextField(
-          controller: controller,
-          autofocus: true,
-          decoration: const InputDecoration(
-            hintText: '/storage/emulated/0/Subtitles',
-            helperText: '字幕文件所在目录的绝对路径',
-          ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: controller,
+              autofocus: true,
+              decoration: const InputDecoration(
+                hintText: '/storage/emulated/0/Subtitles',
+                helperText: '字幕文件所在目录的绝对路径',
+              ),
+            ),
+            const SizedBox(height: 12),
+            OutlinedButton.icon(
+              icon: const Icon(Icons.folder_open, size: 20),
+              label: const Text('浏览选择目录'),
+              onPressed: () async {
+                // 使用 filesystem_picker 让用户浏览选择目录
+                final String? picked = await FilesystemPicker.openDialog(
+                  context: ctx,
+                  fsType: FilesystemType.folder,
+                  title: '选择字幕目录',
+                  pickText: '选择此目录',
+                  rootDirectory: Directory('/storage/emulated/0'),
+                  directory: controller.text.trim().isNotEmpty
+                      ? Directory(controller.text.trim())
+                      : null,
+                  constraints: const BoxConstraints(
+                    maxWidth: 480,
+                    maxHeight: 420,
+                  ),
+                  theme: FilesystemPickerTheme(
+                    topBar: FilesystemPickerTopBarThemeData(
+                      titleTextStyle: const TextStyle(fontSize: 16),
+                      iconTheme: const IconThemeData(size: 20),
+                    ),
+                    fileList: FilesystemPickerFileListThemeData(
+                      textScaleFactor: 0.9,
+                      iconSize: 24,
+                      folderTextStyle: const TextStyle(fontSize: 14),
+                    ),
+                  ),
+                );
+                if (picked != null && picked.isNotEmpty) {
+                  controller.text = picked;
+                }
+              },
+            ),
+          ],
         ),
         actions: [
           TextButton(

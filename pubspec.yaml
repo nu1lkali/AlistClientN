@@ -110,6 +110,8 @@ dependencies:
   native_exif: ^0.5.0
   # charset decoder
   charset: ^2.0.1
+  # file system picker (directory picker for subtitle path etc.)
+  filesystem_picker: ^4.0.0
   # audio metadata (cover art)
   flutter_media_metadata: ^1.0.0+1
   # audio metadata (cover art, title, etc.)
