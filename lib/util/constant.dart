@@ -45,6 +45,7 @@ class AlistConstant {
   static const String wifiOnlyPreload = 'wifiOnlyPreload'; // 仅WiFi预加载
   static const String slideshowIntervalSeconds = 'slideshowIntervalSeconds'; // gallery slideshow interval
   static const String audioPlayerUiStyle = 'audioPlayerUiStyle'; // 0=classic, 1=bujuan
+  static const String lyricsStyle = 'lyricsStyle'; // 歌词视图风格: 0=流线型(默认), 1=时间轴
   static const String groupedRandomSort = 'groupedRandomSort'; // 随机排序时按类型分组
   static const String enableMediaKitPlayer = 'enableMediaKitPlayer'; // 使用 libmpv 播放器
   static const String videoBrightness = 'videoBrightness'; // 视频播放亮度记忆

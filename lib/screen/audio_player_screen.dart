@@ -10,10 +10,12 @@ import 'package:alist/l10n/intl_keys.dart';
 import 'package:alist/util/file_utils.dart';
 import 'package:alist/util/lock_caching_audio_source.dart';
 import 'package:alist/util/lyrics_controller.dart';
+import 'package:alist/util/constant.dart';
 import 'package:alist/util/user_controller.dart';
 import 'package:alist/widget/streamlined_lyrics_view.dart';
 import 'package:alist/widget/timeline_lyrics_view.dart';
 import 'package:alist/widget/volume_indicator.dart';
+import 'package:flustars/flustars.dart';
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -28,6 +30,33 @@ import 'package:path_provider/path_provider.dart';
 import 'package:scroll_to_index/scroll_to_index.dart';
 import 'dart:io' as io;
 
+/// 根据 [AlistConstant.lyricsStyle] 设置构建对应的歌词视图
+Widget buildLyricsView({
+  required Key key,
+  required LyricsController controller,
+  required ColorScheme scheme,
+  VoidCallback? onTapReturn,
+  double itemExtent = 64.0,
+}) {
+  final style = SpUtil.getInt(AlistConstant.lyricsStyle, defValue: 0) ?? 0;
+  if (style == 1) {
+    return TimelineLyricsView(
+      key: key,
+      controller: controller,
+      scheme: scheme,
+      onTapReturn: onTapReturn,
+      itemExtent: 52.0,
+    );
+  }
+  return StreamlinedLyricsView(
+    key: key,
+    controller: controller,
+    scheme: scheme,
+    onTapReturn: onTapReturn,
+    itemExtent: itemExtent,
+  );
+}
+
 class AudioPlayerScreen extends StatefulWidget {
   AudioPlayerScreen({Key? key}) : super(key: key);
 
@@ -36,7 +65,7 @@ class AudioPlayerScreen extends StatefulWidget {
 }
 
 class _AudioPlayerScreenState extends State<AudioPlayerScreen>
-    with TickerProviderStateMixin {
+    with TickerProviderStateMixin, WidgetsBindingObserver {
   late AnimationController _discController;
   late AnimationController _stylusController;
   late Animation<double> _stylusAnimation;
@@ -49,6 +78,9 @@ class _AudioPlayerScreenState extends State<AudioPlayerScreen>
   /// 当前是否显示歌词面板（false = 黑胶唱片，true = 歌词）
   bool _showLyrics = false;
 
+  /// App 是否处于后台暂停状态
+  bool _appPaused = false;
+
   /// 上次加载歌词时对应的音频 remotePath
   String? _lastLyricsPath;
 
@@ -58,6 +90,7 @@ class _AudioPlayerScreenState extends State<AudioPlayerScreen>
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _controller =
         Get.put(AudioPlayerScreenController(audios: _audios, index: _index));
     _lyricsController = Get.put(LyricsController());
@@ -66,6 +99,7 @@ class _AudioPlayerScreenState extends State<AudioPlayerScreen>
       vsync: this,
       duration: const Duration(seconds: 20),
     )..addStatusListener((status) {
+        if (_appPaused) return;
         if (status == AnimationStatus.completed) {
           _discController.reset();
           _discController.forward();
@@ -80,6 +114,7 @@ class _AudioPlayerScreenState extends State<AudioPlayerScreen>
         Tween<double>(begin: -0.03, end: -0.10).animate(_stylusController);
 
     _workers.add(ever(_controller._playing, (bool playing) {
+      if (_appPaused) return;
       if (playing) {
         _discController.forward();
         _stylusController.reverse();
@@ -107,7 +142,7 @@ class _AudioPlayerScreenState extends State<AudioPlayerScreen>
     }
     // 每 300ms 更新一次位置（仅在歌词可见时）
     _lyricsTimer = Timer.periodic(const Duration(milliseconds: 300), (_) {
-      if (!mounted || !_showLyrics) { _lyricsTimer?.cancel(); return; }
+      if (!mounted || _appPaused || !_showLyrics) { _lyricsTimer?.cancel(); return; }
       _lyricsController.updatePosition(_controller._currentPos.value);
     });
   }
@@ -143,6 +178,7 @@ class _AudioPlayerScreenState extends State<AudioPlayerScreen>
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _lyricsTimer?.cancel();
     for (final w in _workers) { w.dispose(); }
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.manual,
@@ -150,6 +186,22 @@ class _AudioPlayerScreenState extends State<AudioPlayerScreen>
     _discController.dispose();
     _stylusController.dispose();
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.paused) {
+      _appPaused = true;
+      _controller.appPaused = true;
+      _lyricsTimer?.cancel();
+      _discController.stop();
+    } else if (state == AppLifecycleState.resumed) {
+      _appPaused = false;
+      _controller.appPaused = false;
+      if (_controller._playing.value) {
+        _discController.forward();
+      }
+    }
   }
 
   Widget _buildCoverImage() {
@@ -179,9 +231,10 @@ class _AudioPlayerScreenState extends State<AudioPlayerScreen>
   @override
   Widget build(BuildContext context) {
     final statusBarHeight = MediaQuery.of(context).padding.top;
-    return Scaffold(
-      extendBody: true,
-      body: Stack(
+    return PopScope(
+      canPop: true,
+      child: Scaffold(
+        body: Stack(
         children: [
           // 第1层：背景封面图（全屏）
           _buildCoverImage(),
@@ -269,7 +322,7 @@ class _AudioPlayerScreenState extends State<AudioPlayerScreen>
                               color: Colors.black.withOpacity(0.3),
                               borderRadius: BorderRadius.circular(16),
                             ),
-                            child: StreamlinedLyricsView(
+                            child: buildLyricsView(
                               key: const ValueKey('classic_lyrics'),
                               controller: _lyricsController,
                               scheme: Theme.of(context).colorScheme.copyWith(
@@ -318,6 +371,7 @@ class _AudioPlayerScreenState extends State<AudioPlayerScreen>
             ),
           ),
         ],
+      ),
       ),
     );
   }
@@ -906,13 +960,26 @@ class AudioPlayerScreenController extends GetxController {
   Timer? _sleepTimer;
   bool _pendingPauseAfterTrack = false; // 倒计时到0且勾了播完停止，等曲目结束
 
+  /// App 后台标志，由 Widget 层 didChangeAppLifecycleState 设置
+  bool appPaused = false;
+
   // 播完停止：暂存被移除的其他曲目（index -> AudioItem），key 为原始位置
   List<_StashedItem>? _stashedItems;
 
-  // 静态封面缓存，跨页面实例保留，key = remotePath
+  // 静态封面缓存，跨页面实例保留，key = remotePath（最多 12 条，防止内存无限增长）
   static final Map<String, Uint8List> _coverCache = {};
-  // 静态艺术家缓存，与封面缓存同步
   static final Map<String, String> _artistCache = {};
+  static const int _maxCoverCacheSize = 12;
+
+  static void _addToCoverCache(String key, Uint8List value) {
+    if (_coverCache.length >= _maxCoverCacheSize) {
+      // 删除最早插入的条目
+      final firstKey = _coverCache.keys.first;
+      _coverCache.remove(firstKey);
+      _artistCache.remove(firstKey);
+    }
+    _coverCache[key] = value;
+  }
 
   List<StreamSubscription> streamSubscriptions = [];
   DateTime _lastSaveTime = DateTime.now();
@@ -933,6 +1000,7 @@ class AudioPlayerScreenController extends GetxController {
       if (_duration.value.inMilliseconds < _currentPos.value.inMilliseconds) {
         _currentPos.value = _duration.value;
       }
+      if (appPaused) return;
       final now = DateTime.now();
       if (now.difference(_lastSaveTime).inSeconds >= 10) {
         _lastSaveTime = now;
@@ -1097,18 +1165,18 @@ class AudioPlayerScreenController extends GetxController {
       _artist.value = artistStr;
       _artistCache[audio.remotePath] = artistStr;
       if (art != null) {
-        _coverCache[audio.remotePath] = art;
+        _addToCoverCache(audio.remotePath, art);
         coverArtBytes.value = art;
         // 把封面写到临时文件，更新通知栏 MediaItem 的 artUri
         _updateNotificationArt(index, art, audio);
       } else {
-        _coverCache[audio.remotePath] = Uint8List(0);
+        _addToCoverCache(audio.remotePath, Uint8List(0));
         coverArtBytes.value = null;
       }
     } catch (_) {
       // 加载失败时才清空，不要在加载中途清空
       if (_coverFetchIndex == index) {
-        _coverCache[audio.remotePath] = Uint8List(0);
+        _addToCoverCache(audio.remotePath, Uint8List(0));
         coverArtBytes.value = null;
       }
     }
@@ -1512,7 +1580,8 @@ class AudioPlayerScreenV2 extends StatefulWidget {
   State<AudioPlayerScreenV2> createState() => _AudioPlayerScreenV2State();
 }
 
-class _AudioPlayerScreenV2State extends State<AudioPlayerScreenV2> {
+class _AudioPlayerScreenV2State extends State<AudioPlayerScreenV2>
+    with WidgetsBindingObserver {
   final List<AudioItem> _audios = Get.arguments["audios"] ?? [];
   final int _index = Get.arguments["index"] ?? 0;
   late AudioPlayerScreenController _controller;
@@ -1520,6 +1589,9 @@ class _AudioPlayerScreenV2State extends State<AudioPlayerScreenV2> {
 
   /// 当前是否显示歌词面板（false = 封面，true = 歌词）
   bool _showLyrics = false;
+
+  /// App 是否处于后台暂停状态
+  bool _appPaused = false;
 
   /// 上次加载歌词时对应的音频 remotePath（防止切歌时重复加载）
   String? _lastLyricsPath;
@@ -1530,6 +1602,7 @@ class _AudioPlayerScreenV2State extends State<AudioPlayerScreenV2> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _controller =
         Get.put(AudioPlayerScreenController(audios: _audios, index: _index));
     _lyricsController = Get.put(LyricsController());
@@ -1543,10 +1616,23 @@ class _AudioPlayerScreenV2State extends State<AudioPlayerScreenV2> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _lyricsTimer?.cancel();
     for (final w in _workers) { w.dispose(); }
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.manual, overlays: SystemUiOverlay.values);
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.paused) {
+      _appPaused = true;
+      _controller.appPaused = true;
+      _lyricsTimer?.cancel();
+    } else if (state == AppLifecycleState.resumed) {
+      _appPaused = false;
+      _controller.appPaused = false;
+    }
   }
 
   bool _lyricsDirty = true;
@@ -1558,7 +1644,7 @@ class _AudioPlayerScreenV2State extends State<AudioPlayerScreenV2> {
       _fetchLyricsForCurrentSong();
     }
     _lyricsTimer = Timer.periodic(const Duration(milliseconds: 300), (_) {
-      if (!mounted || !_showLyrics) { _lyricsTimer?.cancel(); return; }
+      if (!mounted || _appPaused || !_showLyrics) { _lyricsTimer?.cancel(); return; }
       _lyricsController.updatePosition(_controller._currentPos.value);
     });
   }
@@ -1598,23 +1684,25 @@ class _AudioPlayerScreenV2State extends State<AudioPlayerScreenV2> {
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final coverSize = MediaQuery.of(context).size.width - 48.0;
-    return Scaffold(
-      body: Stack(
-        children: [
-          SafeArea(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.center,
-              children: [
-                _buildTopBar(context),
-                const SizedBox(height: 16),
-                // 封面/歌词切换：歌词全屏展开
-                if (_showLyrics)
-                  Expanded(
-                    child: StreamlinedLyricsView(
-                      key: const ValueKey('v2_lyrics'),
-                      controller: _lyricsController,
-                      scheme: scheme,
-                      onTapReturn: () {
+    return PopScope(
+      canPop: true,
+      child: Scaffold(
+        body: Stack(
+          children: [
+            SafeArea(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: [
+                  _buildTopBar(context),
+                  const SizedBox(height: 16),
+                  // 封面/歌词切换：歌词全屏展开
+                  if (_showLyrics)
+                    Expanded(
+                      child: buildLyricsView(
+                        key: const ValueKey('v2_lyrics'),
+                        controller: _lyricsController,
+                        scheme: scheme,
+                        onTapReturn: () {
                         _stopLyricsTracking();
                         setState(() => _showLyrics = false);
                       },
@@ -1648,6 +1736,7 @@ class _AudioPlayerScreenV2State extends State<AudioPlayerScreenV2> {
           ),
         ],
       ),
+      ),
     );
   }
 
@@ -1671,7 +1760,7 @@ class _AudioPlayerScreenV2State extends State<AudioPlayerScreenV2> {
           );
         },
         child: _showLyrics
-            ? StreamlinedLyricsView(
+            ? buildLyricsView(
                 key: const ValueKey('lyrics_view'),
                 controller: _lyricsController,
                 scheme: scheme,

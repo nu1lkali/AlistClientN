@@ -205,6 +205,14 @@ class _SettingsContainerState extends State<_SettingsContainer>
                           ? '经典黑胶'
                           : '新风格',
                   onTap: () => _showAudioStyleDialog(context)),
+              _navTile(context, isDark, scheme,
+                  icon: Icons.lyrics_rounded,
+                  title: '歌词视图风格',
+                  trailingText:
+                      (SpUtil.getInt(AlistConstant.lyricsStyle, defValue: 0) ?? 0) == 0
+                          ? '流线型'
+                          : '时间轴',
+                  onTap: () => _showLyricsStyleDialog(context)),
               // _navTile(context, isDark, scheme,
               //     icon: Icons.bug_report_outlined,
               //     title: 'LRC 歌词调试',
@@ -780,6 +788,52 @@ class _SettingsContainerState extends State<_SettingsContainer>
                 onChanged: (v) {
                   if (v != null) {
                     SpUtil.putInt(AlistConstant.audioPlayerUiStyle, v);
+                    Navigator.pop(ctx);
+                    setState(() {});
+                  }
+                }),
+          ],
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('取消'))
+        ],
+      ),
+    );
+  }
+
+  void _showLyricsStyleDialog(BuildContext context) {
+    final current =
+        SpUtil.getInt(AlistConstant.lyricsStyle, defValue: 0) ?? 0;
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Text('歌词视图风格'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            RadioListTile<int>(
+                title: const Text('流线型'),
+                subtitle: const Text('居中滚动、当前行放大高亮、渐隐边缘'),
+                value: 0,
+                groupValue: current,
+                onChanged: (v) {
+                  if (v != null) {
+                    SpUtil.putInt(AlistConstant.lyricsStyle, v);
+                    Navigator.pop(ctx);
+                    setState(() {});
+                  }
+                }),
+            RadioListTile<int>(
+                title: const Text('时间轴'),
+                subtitle: const Text('左对齐、时间戳列、当前行圆角高亮背景'),
+                value: 1,
+                groupValue: current,
+                onChanged: (v) {
+                  if (v != null) {
+                    SpUtil.putInt(AlistConstant.lyricsStyle, v);
                     Navigator.pop(ctx);
                     setState(() {});
                   }
