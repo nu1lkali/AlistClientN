@@ -231,8 +231,8 @@ class _AudioPlayerScreenState extends State<AudioPlayerScreen>
   @override
   Widget build(BuildContext context) {
     final statusBarHeight = MediaQuery.of(context).padding.top;
-    return PopScope(
-      canPop: true,
+    return WillPopScope(
+      onWillPop: () async => true,
       child: Scaffold(
         body: Stack(
         children: [
@@ -1684,8 +1684,8 @@ class _AudioPlayerScreenV2State extends State<AudioPlayerScreenV2>
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final coverSize = MediaQuery.of(context).size.width - 48.0;
-    return PopScope(
-      canPop: true,
+    return WillPopScope(
+      onWillPop: () async => true,
       child: Scaffold(
         body: Stack(
           children: [
