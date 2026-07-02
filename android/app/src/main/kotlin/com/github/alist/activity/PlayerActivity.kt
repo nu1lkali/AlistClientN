@@ -45,6 +45,7 @@ import com.shuyu.gsyvideoplayer.listener.GSYSampleCallBack
 import com.shuyu.gsyvideoplayer.listener.GSYVideoProgressListener
 import com.shuyu.gsyvideoplayer.player.PlayerFactory
 import com.shuyu.gsyvideoplayer.utils.Debuger
+import android.content.SharedPreferences
 import android.graphics.Color
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
@@ -62,6 +63,9 @@ import kotlin.math.abs
 
 class PlayerActivity : AppCompatActivity(), GSYVideoProgressListener {
     companion object {
+        /** Flutter shared_preferences 存储 double 值的前缀（与 SharedPreferencesPlugin.java 一致） */
+        private const val DOUBLE_PREFIX = "VGhpcyBpcyB0aGUgcHJlZml4IGZvciBEb3VibGUu"
+
         const val ACTION_PIP = "com.github.alist.PIP_ACTION"
         const val PIP_ACTION_PLAY_PAUSE = 1001
         const val PIP_ACTION_PREVIOUS = 1002
@@ -1013,26 +1017,46 @@ class PlayerActivity : AppCompatActivity(), GSYVideoProgressListener {
         return 0
     }
 
+    /** 从 FlutterSharedPreferences 读取 double 值（Flutter 以 DOUBLE_PREFIX+String 格式存储） */
+    private fun getFlutterDouble(prefs: SharedPreferences, key: String, defValue: Double): Double {
+        val raw = prefs.getString(key, null) ?: return defValue
+        return if (raw.startsWith(DOUBLE_PREFIX)) {
+            raw.substring(DOUBLE_PREFIX.length).toDoubleOrNull() ?: defValue
+        } else {
+            // 兼容旧格式：直接存 float（极少见）
+            defValue
+        }
+    }
+
+    /** 从 FlutterSharedPreferences 读取 long 值（Flutter setInt 以 putLong 格式存储） */
+    private fun getFlutterLong(prefs: SharedPreferences, key: String, defValue: Long): Long {
+        return try {
+            prefs.getLong(key, defValue)
+        } catch (e: Exception) {
+            defValue
+        }
+    }
+
     /** 从 FlutterSharedPreferences 读取字幕样式并应用到 TextView */
     private fun applySubtitleStyle(tv: TextView) {
         val density = resources.displayMetrics.density
         try {
             val prefs = getSharedPreferences("FlutterSharedPreferences", MODE_PRIVATE)
 
-            // 字号 × 缩放
-            val fontSize = prefs.getFloat("flutter.subtitleFontSize", 16f)
-            val scale = prefs.getFloat("flutter.subtitleScale", 1.0f)
-            tv.textSize = fontSize * scale
+            // 字号 × 缩放 (Double → 存为 String)
+            val fontSize = getFlutterDouble(prefs, "flutter.subtitleFontSize", 16.0)
+            val scale = getFlutterDouble(prefs, "flutter.subtitleScale", 1.0)
+            tv.textSize = (fontSize * scale).toFloat()
 
             // 文字颜色 + 不透明度
-            val textColorArgb = prefs.getLong("flutter.subtitleTextColor", 0xFFFFFFFF).toInt()
-            val textOpacity = prefs.getFloat("flutter.subtitleTextOpacity", 1.0f)
+            val textColorArgb = getFlutterLong(prefs, "flutter.subtitleTextColor", 0xFFFFFFFF).toInt()
+            val textOpacity = getFlutterDouble(prefs, "flutter.subtitleTextOpacity", 1.0)
             val alpha = (Color.alpha(textColorArgb) * textOpacity).toInt().coerceIn(0, 255)
             tv.setTextColor(Color.argb(alpha,
                 Color.red(textColorArgb), Color.green(textColorArgb), Color.blue(textColorArgb)))
 
             // 字重 (API 28+ 支持精细字重)
-            val fontWeightIndex = prefs.getLong("flutter.subtitleFontWeightIndex", 2).toInt()
+            val fontWeightIndex = getFlutterLong(prefs, "flutter.subtitleFontWeightIndex", 2).toInt()
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
                 val weight = when (fontWeightIndex) {
                     0 -> 400; 1 -> 500; 2 -> 600; 3 -> 700; 4 -> 800; 5 -> 900
@@ -1044,14 +1068,14 @@ class PlayerActivity : AppCompatActivity(), GSYVideoProgressListener {
             }
 
             // 描边 (通过 shadowLayer 模拟)
-            val strokeWidth = prefs.getFloat("flutter.subtitleStrokeWidth", 1.5f)
-            val strokeColorArgb = prefs.getLong("flutter.subtitleStrokeColor", 0xFF000000).toInt()
-            val shadowRadius = (strokeWidth * density * 1.2f).coerceAtLeast(1f)
+            val strokeWidth = getFlutterDouble(prefs, "flutter.subtitleStrokeWidth", 1.5)
+            val strokeColorArgb = getFlutterLong(prefs, "flutter.subtitleStrokeColor", 0xFF000000).toInt()
+            val shadowRadius = (strokeWidth * density * 1.2f).toFloat().coerceAtLeast(1f)
             tv.setShadowLayer(shadowRadius, 0f, 0f, strokeColorArgb)
 
             // 背景颜色 + 不透明度
-            val bgColorArgb = prefs.getLong("flutter.subtitleBgColor", 0xFF000000).toInt()
-            val bgOpacity = prefs.getFloat("flutter.subtitleBgOpacity", 0.5f)
+            val bgColorArgb = getFlutterLong(prefs, "flutter.subtitleBgColor", 0xFF000000).toInt()
+            val bgOpacity = getFlutterDouble(prefs, "flutter.subtitleBgOpacity", 0.5)
             val bgAlpha = (Color.alpha(bgColorArgb) * bgOpacity).toInt().coerceIn(0, 255)
             val bgColor = Color.argb(bgAlpha,
                 Color.red(bgColorArgb), Color.green(bgColorArgb), Color.blue(bgColorArgb))
