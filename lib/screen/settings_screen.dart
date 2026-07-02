@@ -231,7 +231,7 @@ class _SettingsContainerState extends State<_SettingsContainer>
               _switchTile(context, isDark, scheme,
                   icon: Icons.subtitles_rounded,
                   title: '启用字幕',
-                  subtitle: '按视频名自动加载同名字幕（本地和远程）',
+                  subtitle: '按视频名自动加载同名字幕\n（本地和远程）',
                   value: _enableLocalSubtitle.value,
                   onChanged: (v) {
                     SpUtil.putBool(AlistConstant.enableLocalSubtitle, v);
