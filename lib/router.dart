@@ -25,6 +25,7 @@ import 'package:alist/screen/search_filter_settings_screen.dart';
 import 'package:alist/screen/security_lock_screen.dart';
 import 'package:alist/screen/security_lock_settings_screen.dart';
 import 'package:alist/screen/subtitle_settings_screen.dart';
+import 'package:alist/screen/subtitle_style_settings_screen.dart';
 import 'package:alist/screen/splash_screen.dart';
 import 'package:alist/screen/txt_reader_screen.dart';
 import 'package:alist/screen/uploading_files_screen.dart';
@@ -117,6 +118,11 @@ class AlistRouter {
     GetPage(
       name: NamedRouter.subtitleSettings,
       page: () => const SubtitleSettingsScreen(),
+    ),
+    // 字幕样式自定义
+    GetPage(
+      name: NamedRouter.subtitleStyleSettings,
+      page: () => const SubtitleStyleSettingsScreen(),
     ),
     // LRC 歌词调试
     GetPage(

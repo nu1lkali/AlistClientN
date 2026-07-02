@@ -1,3 +1,4 @@
+import 'package:alist/util/named_router.dart';
 import 'package:alist/util/subtitle/subtitle_controller.dart';
 import 'package:alist/util/subtitle/subtitle_matcher.dart';
 import 'package:alist/util/subtitle/subtitle_settings.dart';
@@ -87,6 +88,43 @@ class _SubtitleSettingsBody extends StatelessWidget {
                 ),
               ),
             ],
+          ),
+        ),
+
+        const SizedBox(height: 8),
+
+        // 字幕样式入口卡片
+        Card(
+          margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+          elevation: isDark ? 0 : 1,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+          color: isDark
+              ? scheme.surfaceVariant.withOpacity(0.3)
+              : scheme.surface,
+          child: ListTile(
+            contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+            leading: Container(
+              width: 40, height: 40,
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  colors: [
+                    scheme.tertiaryContainer.withOpacity(0.8),
+                    scheme.tertiaryContainer.withOpacity(0.5),
+                  ],
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                ),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Icon(Icons.palette_rounded, size: 20,
+                  color: isDark ? Colors.white.withOpacity(0.9) : scheme.tertiary),
+            ),
+            title: const Text('字幕样式自定义',
+                style: TextStyle(fontSize: 15, fontWeight: FontWeight.w500)),
+            subtitle: const Text('字体大小、颜色、描边、背景等', style: TextStyle(fontSize: 11)),
+            trailing: Icon(Icons.chevron_right_rounded,
+                color: scheme.outlineVariant, size: 22),
+            onTap: () => Get.toNamed(NamedRouter.subtitleStyleSettings),
           ),
         ),
 

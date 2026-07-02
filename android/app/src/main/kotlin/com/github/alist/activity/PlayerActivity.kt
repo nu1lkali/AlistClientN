@@ -46,6 +46,7 @@ import com.shuyu.gsyvideoplayer.listener.GSYVideoProgressListener
 import com.shuyu.gsyvideoplayer.player.PlayerFactory
 import com.shuyu.gsyvideoplayer.utils.Debuger
 import android.graphics.Color
+import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.widget.FrameLayout
 import com.shuyu.gsyvideoplayer.utils.OrientationUtils
@@ -1012,26 +1013,70 @@ class PlayerActivity : AppCompatActivity(), GSYVideoProgressListener {
         return 0
     }
 
+    /** 从 FlutterSharedPreferences 读取字幕样式并应用到 TextView */
+    private fun applySubtitleStyle(tv: TextView) {
+        val density = resources.displayMetrics.density
+        try {
+            val prefs = getSharedPreferences("FlutterSharedPreferences", MODE_PRIVATE)
+
+            // 字号 × 缩放
+            val fontSize = prefs.getFloat("flutter.subtitleFontSize", 16f)
+            val scale = prefs.getFloat("flutter.subtitleScale", 1.0f)
+            tv.textSize = fontSize * scale
+
+            // 文字颜色 + 不透明度
+            val textColorArgb = prefs.getLong("flutter.subtitleTextColor", 0xFFFFFFFF).toInt()
+            val textOpacity = prefs.getFloat("flutter.subtitleTextOpacity", 1.0f)
+            val alpha = (Color.alpha(textColorArgb) * textOpacity).toInt().coerceIn(0, 255)
+            tv.setTextColor(Color.argb(alpha,
+                Color.red(textColorArgb), Color.green(textColorArgb), Color.blue(textColorArgb)))
+
+            // 字重 (API 28+ 支持精细字重)
+            val fontWeightIndex = prefs.getLong("flutter.subtitleFontWeightIndex", 2).toInt()
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                val weight = when (fontWeightIndex) {
+                    0 -> 400; 1 -> 500; 2 -> 600; 3 -> 700; 4 -> 800; 5 -> 900
+                    else -> 600
+                }
+                tv.typeface = Typeface.create(Typeface.DEFAULT, weight, false)
+            } else if (fontWeightIndex >= 3) {
+                tv.setTypeface(null, Typeface.BOLD)
+            }
+
+            // 描边 (通过 shadowLayer 模拟)
+            val strokeWidth = prefs.getFloat("flutter.subtitleStrokeWidth", 1.5f)
+            val strokeColorArgb = prefs.getLong("flutter.subtitleStrokeColor", 0xFF000000).toInt()
+            val shadowRadius = (strokeWidth * density * 1.2f).coerceAtLeast(1f)
+            tv.setShadowLayer(shadowRadius, 0f, 0f, strokeColorArgb)
+
+            // 背景颜色 + 不透明度
+            val bgColorArgb = prefs.getLong("flutter.subtitleBgColor", 0xFF000000).toInt()
+            val bgOpacity = prefs.getFloat("flutter.subtitleBgOpacity", 0.5f)
+            val bgAlpha = (Color.alpha(bgColorArgb) * bgOpacity).toInt().coerceIn(0, 255)
+            val bgColor = Color.argb(bgAlpha,
+                Color.red(bgColorArgb), Color.green(bgColorArgb), Color.blue(bgColorArgb))
+            tv.background = GradientDrawable().apply {
+                setColor(bgColor)
+                cornerRadius = 6 * density
+            }
+        } catch (e: Exception) {
+            Debuger.printfError("applySubtitleStyle failed: ${e.message}")
+        }
+    }
+
     /** 确保字幕 TextView 已创建并添加到根 FrameLayout */
     private fun ensureSubtitleOverlay() {
         if (subtitleTextView != null) return
         val density = resources.displayMetrics.density
         val tv = TextView(this).apply {
-            textSize = 16f
-            setTextColor(Color.WHITE)
-            setShadowLayer(4f, 2f, 2f, Color.BLACK)
             gravity = android.view.Gravity.CENTER
             visibility = View.GONE
-            // 参考strm播放器字幕样式：半透明暗色背景框 + 圆角
-            background = GradientDrawable().apply {
-                setColor(0x80000000.toInt()) // 50%透明度黑色背景
-                cornerRadius = 6 * density // 6dp圆角
-            }
             setPadding(
                 (12 * density).toInt(), (6 * density).toInt(),
                 (12 * density).toInt(), (6 * density).toInt()
             )
         }
+        applySubtitleStyle(tv)
         subtitleTextView = tv
         val root = gsyVideoPlayer.parent as? FrameLayout ?: return
         val lp = FrameLayout.LayoutParams(
@@ -1057,21 +1102,14 @@ class PlayerActivity : AppCompatActivity(), GSYVideoProgressListener {
         val fullscreenRoot = fullscreenPlayer.parent as? FrameLayout ?: return
         val density = resources.displayMetrics.density
         val tv = TextView(this).apply {
-            textSize = 18f
-            setTextColor(Color.WHITE)
-            setShadowLayer(4f, 2f, 2f, Color.BLACK)
             gravity = android.view.Gravity.CENTER
             visibility = View.GONE
-            // 参考strm播放器字幕样式：半透明暗色背景框 + 圆角
-            background = GradientDrawable().apply {
-                setColor(0x80000000.toInt()) // 50%透明度黑色背景
-                cornerRadius = 6 * density // 6dp圆角
-            }
             setPadding(
                 (12 * density).toInt(), (6 * density).toInt(),
                 (12 * density).toInt(), (6 * density).toInt()
             )
         }
+        applySubtitleStyle(tv)
         fullscreenSubtitleTextView = tv
         val lp = FrameLayout.LayoutParams(
             FrameLayout.LayoutParams.WRAP_CONTENT,
