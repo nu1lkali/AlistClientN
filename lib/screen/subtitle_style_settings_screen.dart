@@ -443,14 +443,25 @@ class _FontWeightSelector extends StatelessWidget {
           : (idx >= SubtitleSettings.fontWeightOptions.length
               ? SubtitleSettings.fontWeightOptions.length - 1
               : idx);
+      final currentInfo = SubtitleSettings.fontWeightOptions[clampedIdx];
       return Padding(
         padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text('字重',
-                style:
-                    TextStyle(fontSize: 14, fontWeight: FontWeight.w500)),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                const Text('字重',
+                    style: TextStyle(
+                        fontSize: 14, fontWeight: FontWeight.w500)),
+                Text(currentInfo.localizedLabel,
+                    style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                        color: scheme.primary)),
+              ],
+            ),
             const SizedBox(height: 8),
             Wrap(
               spacing: 8,
@@ -461,7 +472,7 @@ class _FontWeightSelector extends StatelessWidget {
                   final info = SubtitleSettings.fontWeightOptions[i];
                   final selected = i == clampedIdx;
                   return ChoiceChip(
-                    label: Text(info.label,
+                    label: Text(info.localizedLabel,
                         style: TextStyle(
                             fontSize: 12,
                             fontWeight: info.fontWeight)),

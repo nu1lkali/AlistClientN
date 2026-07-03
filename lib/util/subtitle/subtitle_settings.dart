@@ -71,12 +71,12 @@ class SubtitleSettings {
 
   /// 字重索引 → FontWeight 映射表
   static const List<FontWeightInfo> fontWeightOptions = [
-    FontWeightInfo(400, 'Regular'),
-    FontWeightInfo(500, 'Medium'),
-    FontWeightInfo(600, 'SemiBold'),
-    FontWeightInfo(700, 'Bold'),
-    FontWeightInfo(800, 'ExtraBold'),
-    FontWeightInfo(900, 'Black'),
+    FontWeightInfo(400, 'Regular', '常规'),
+    FontWeightInfo(500, 'Medium', '中等'),
+    FontWeightInfo(600, 'SemiBold', '半粗'),
+    FontWeightInfo(700, 'Bold', '粗体'),
+    FontWeightInfo(800, 'ExtraBold', '特粗'),
+    FontWeightInfo(900, 'Black', '黑体'),
   ];
 
   /// 从持久化存储加载设置
@@ -199,8 +199,9 @@ class SubtitleSettings {
 /// 字重选项描述
 class FontWeightInfo {
   final int weight;
-  final String label;
-  const FontWeightInfo(this.weight, this.label);
+  final String label; // 英文标签（默认）
+  final String labelZh; // 中文标签
+  const FontWeightInfo(this.weight, this.label, this.labelZh);
 
   FontWeight get fontWeight {
     switch (weight) {
@@ -212,5 +213,11 @@ class FontWeightInfo {
       case 900: return FontWeight.w900;
       default: return FontWeight.w600;
     }
+  }
+
+  /// 根据系统语言获取本地化标签
+  String get localizedLabel {
+    final isZh = Get.locale?.toString().startsWith("zh_") == true;
+    return isZh ? labelZh : label;
   }
 }
