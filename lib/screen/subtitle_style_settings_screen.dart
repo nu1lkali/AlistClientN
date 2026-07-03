@@ -2,6 +2,7 @@ import 'package:alist/util/subtitle/subtitle_settings.dart';
 import 'package:alist/widget/alist_scaffold.dart';
 import 'package:alist/widget/subtitle_view.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_colorpicker/flutter_colorpicker.dart';
 import 'package:get/get.dart';
 
 /// 字幕样式自定义页面
@@ -153,16 +154,22 @@ const _textColorPresets = [
 const _strokeColorPresets = [
   Colors.black,
   Color(0xFF333333), // 深灰
+  Color(0xFF666666), // 中灰
   Colors.white,
   Color(0xFF880000), // 暗红
+  Color(0xFF006600), // 暗绿
   Color(0xFF000088), // 暗蓝
+  Color(0xFF440066), // 暗紫
 ];
 
 const _bgColorPresets = [
+  Colors.transparent,
   Colors.black,
   Color(0xFF1A1A1A), // 近黑
-  Color(0xFF333333), // 深灰
-  Colors.transparent,
+  Color(0xFF2A2A2A), // 深灰
+  Color(0xFF111133), // 深蓝黑
+  Color(0xFF331111), // 深红黑
+  Color(0xFF1A1A2E), // 深紫黑
 ];
 
 // ==================== 预览卡片 ====================
@@ -463,32 +470,50 @@ class _FontWeightSelector extends StatelessWidget {
               ],
             ),
             const SizedBox(height: 8),
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: List.generate(
-                SubtitleSettings.fontWeightOptions.length,
-                (i) {
-                  final info = SubtitleSettings.fontWeightOptions[i];
-                  final selected = i == clampedIdx;
-                  return ChoiceChip(
-                    label: Text(info.localizedLabel,
-                        style: TextStyle(
-                            fontSize: 12,
-                            fontWeight: info.fontWeight)),
-                    selected: selected,
-                    onSelected: (_) =>
-                        settings.setSubtitleFontWeightIndex(i),
-                    selectedColor:
-                        scheme.primaryContainer,
-                    labelStyle: TextStyle(
-                      color: selected
-                          ? scheme.onPrimaryContainer
-                          : scheme.onSurface,
-                    ),
-                  );
-                },
-              ),
+            LayoutBuilder(
+              builder: (context, constraints) {
+                const spacing = 8.0;
+                final chipWidth =
+                    (constraints.maxWidth - spacing * 2) / 3;
+                final options = SubtitleSettings.fontWeightOptions;
+                return Column(
+                  children: [
+                    for (int row = 0; row < 2; row++)
+                      Padding(
+                        padding: EdgeInsets.only(top: row > 0 ? spacing : 0),
+                        child: Row(
+                          children: List.generate(3, (col) {
+                            final i = row * 3 + col;
+                            final info = options[i];
+                            final selected = i == clampedIdx;
+                            return Padding(
+                              padding: EdgeInsets.only(
+                                  right: col < 2 ? spacing : 0),
+                              child: SizedBox(
+                                width: chipWidth,
+                                child: ChoiceChip(
+                                  label: Text(info.localizedLabel,
+                                      style: TextStyle(
+                                          fontSize: 12,
+                                          fontWeight: info.fontWeight)),
+                                  selected: selected,
+                                  onSelected: (_) =>
+                                      settings.setSubtitleFontWeightIndex(i),
+                                  selectedColor: scheme.primaryContainer,
+                                  labelStyle: TextStyle(
+                                    color: selected
+                                        ? scheme.onPrimaryContainer
+                                        : scheme.onSurface,
+                                  ),
+                                ),
+                              ),
+                            );
+                          }),
+                        ),
+                      ),
+                  ],
+                );
+              },
             ),
           ],
         ),
@@ -498,6 +523,10 @@ class _FontWeightSelector extends StatelessWidget {
 }
 
 // ==================== 颜色预设选择 ====================
+
+/// 每个颜色圆点 + 间距的宽度
+const double _kDotSize = 36;
+const double _kDotSpacing = 8;
 
 class _ColorPresetRow extends StatelessWidget {
   final String label;
@@ -521,39 +550,67 @@ class _ColorPresetRow extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(label,
-              style: const TextStyle(
-                  fontSize: 14, fontWeight: FontWeight.w500)),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(label,
+                  style: const TextStyle(
+                      fontSize: 14, fontWeight: FontWeight.w500)),
+              Obx(() => Container(
+                width: 18,
+                height: 18,
+                decoration: BoxDecoration(
+                  color: Color(currentColorRx.value),
+                  shape: BoxShape.circle,
+                  border: Border.all(
+                      color: scheme.outlineVariant, width: 1),
+                ),
+              )),
+            ],
+          ),
           const SizedBox(height: 8),
           Obx(() {
             final current = Color(currentColorRx.value);
-            return Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: [
-                ...defaultColors.map((c) => _colorDot(c, current, onColorPicked)),
-                const SizedBox(width: 4),
-                // 自定义颜色按钮
-                GestureDetector(
-                  onTap: () => _showCustomColorPicker(context, onColorPicked),
-                  child: Container(
-                    width: 36,
-                    height: 36,
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      border: Border.all(
-                          color: scheme.outlineVariant, width: 1.5),
-                      gradient: const SweepGradient(colors: [
-                        Colors.red, Colors.yellow, Colors.green,
-                        Colors.cyan, Colors.blue, Colors.purple, Colors.red,
-                      ]),
+            return LayoutBuilder(
+              builder: (context, constraints) {
+                // 自定义颜色按钮宽度：圆点 + 前方间距
+                const customBtnWidth = _kDotSize + 4;
+                // 计算能放几个预设颜色
+                final maxDots = ((constraints.maxWidth - customBtnWidth) /
+                        (_kDotSize + _kDotSpacing))
+                    .floor()
+                    .clamp(3, defaultColors.length);
+                final displayColors = defaultColors.take(maxDots).toList();
+                return Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    ...displayColors
+                        .map((c) => _colorDot(c, current, onColorPicked)),
+                    // 自定义颜色按钮
+                    GestureDetector(
+                      onTap: () =>
+                          _showCustomColorPicker(context, onColorPicked, scheme),
+                      child: Container(
+                        width: _kDotSize,
+                        height: _kDotSize,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          border: Border.all(
+                              color: scheme.outlineVariant, width: 1.5),
+                          gradient: const SweepGradient(colors: [
+                            Colors.red, Colors.yellow, Colors.green,
+                            Colors.cyan, Colors.blue, Colors.purple, Colors.red,
+                          ]),
+                        ),
+                        child: const Center(
+                          child:
+                              Icon(Icons.add, size: 16, color: Colors.white),
+                        ),
+                      ),
                     ),
-                    child: const Center(
-                      child: Icon(Icons.add, size: 16, color: Colors.white),
-                    ),
-                  ),
-                ),
-              ],
+                  ],
+                );
+              },
             );
           }),
         ],
@@ -566,8 +623,8 @@ class _ColorPresetRow extends StatelessWidget {
     return GestureDetector(
       onTap: () => onTap(color),
       child: Container(
-        width: 36,
-        height: 36,
+        width: _kDotSize,
+        height: _kDotSize,
         decoration: BoxDecoration(
           color: color,
           shape: BoxShape.circle,
@@ -599,46 +656,74 @@ class _ColorPresetRow extends StatelessWidget {
   }
 
   void _showCustomColorPicker(
-      BuildContext context, ValueChanged<Color> onPicked) {
-    // 简单的自定义颜色输入对话框
-    final controller = TextEditingController(
-        text: '#${currentColorRx.value.toRadixString(16).padLeft(8, '0').toUpperCase()}');
+      BuildContext context, ValueChanged<Color> onPicked, ColorScheme scheme) {
+    Color pickedColor = Color(currentColorRx.value);
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     showDialog(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('自定义颜色'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Text('输入 ARGB 十六进制颜色值',
-                style: TextStyle(fontSize: 12, color: Colors.grey)),
-            const SizedBox(height: 8),
-            TextField(
-              controller: controller,
-              autofocus: true,
-              decoration: const InputDecoration(
-                hintText: 'FFRRGGBB (如 FF00FF00)',
-                border: OutlineInputBorder(),
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setState) {
+          return Center(
+            child: Container(
+              width: 340,
+              decoration: BoxDecoration(
+                color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
+                borderRadius: BorderRadius.circular(24),
+              ),
+              clipBehavior: Clip.antiAlias,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  // 标题栏
+                  const Padding(
+                    padding: EdgeInsets.fromLTRB(20, 16, 20, 4),
+                    child: Align(
+                      alignment: Alignment.centerLeft,
+                      child: Text('自定义颜色',
+                          style: TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.w600)),
+                    ),
+                  ),
+                  // 颜色选择器主体
+                  ColorPicker(
+                    pickerColor: pickedColor,
+                    onColorChanged: (color) {
+                      setState(() {
+                        pickedColor = color;
+                      });
+                    },
+                    enableAlpha: true,
+                    hexInputBar: true,
+                    labelTypes: const [],
+                    displayThumbColor: true,
+                    pickerAreaHeightPercent: 0.55,
+                  ),
+                  // 按钮栏
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 0, 12, 12),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.end,
+                      children: [
+                        TextButton(
+                            onPressed: () => Navigator.pop(ctx),
+                            child: const Text('取消')),
+                        const SizedBox(width: 4),
+                        FilledButton(
+                          onPressed: () {
+                            onPicked(pickedColor);
+                            Navigator.pop(ctx);
+                          },
+                          child: const Text('确定'),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
               ),
             ),
-          ],
-        ),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(ctx),
-              child: const Text('取消')),
-          FilledButton(
-            onPressed: () {
-              final hex = controller.text.trim().replaceAll('#', '');
-              final parsed = int.tryParse(hex, radix: 16);
-              if (parsed != null) {
-                onPicked(Color(parsed));
-                Navigator.pop(ctx);
-              }
-            },
-            child: const Text('确定'),
-          ),
-        ],
+          );
+        },
       ),
     );
   }

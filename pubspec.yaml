@@ -116,6 +116,8 @@ dependencies:
   flutter_media_metadata: ^1.0.0+1
   # audio metadata (cover art, title, etc.)
   audio_metadata_reader: ^0.0.2
+  # color picker for subtitle style customization
+  flutter_colorpicker: ^1.1.0
 dependency_overrides:
   win32: 5.0.0
   sqflite_common: 2.5.0
