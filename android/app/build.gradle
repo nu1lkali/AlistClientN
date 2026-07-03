@@ -115,6 +115,14 @@ android {
             universalApk true
         }
     }
+
+    applicationVariants.all { variant ->
+        variant.outputs.all { output ->
+            def abiName = output.getFilter(com.android.build.OutputFile.ABI)
+            if (abiName == null) abiName = "universal"
+            output.outputFileName = "AlistClientN${defaultConfig.versionName}-${abiName}-${variant.buildType.name}.apk"
+        }
+    }
 }
 
 flutter {
