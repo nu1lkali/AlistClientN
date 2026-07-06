@@ -44,7 +44,7 @@ class AlistRouter {
   static const fileListCopyMoveRouterStackId = 2;
 
   static Widget _audioPlayerPage() {
-    final style = SpUtil.getInt(AlistConstant.audioPlayerUiStyle, defValue: 0) ?? 0;
+    final style = SpUtil.getInt(AlistConstant.audioPlayerUiStyle, defValue: 1) ?? 1;
     return style == 1 ? const AudioPlayerScreenV2() : AudioPlayerScreen();
   }
 
