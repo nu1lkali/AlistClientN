@@ -396,88 +396,62 @@ class _FileListScreenState extends State<FileListScreen>
   Future<void> _loadFilesInner() async {
     _cancelToken?.cancel();
     _cancelToken = dio.CancelToken();
-    
-    // 分页加载所有文件，使用服务端最大限制500
-    const int pageSize = 500;
-    int currentPage = 1;
-    List<FileItemVO> allFiles = [];
-    FileListRespEntity? lastData;
-    bool hasMore = false;
-    int pagesTotal = 1;
 
-    Future<void> loadPage(int page) async {
-      final body = {
-        "path": path,
-        "password": _password ?? "",
-        "page": page,
-      "per_page": 500,
-        "refresh": _forceRefresh
-      };
+    // 使用 per_page: 0 一次性获取全部数据，避免分页逻辑依赖 API 返回
+    // has_more / pages_total 字段（Alist 标准 API 可能不返回这些字段，导致分页提前终止）。
+    final body = {
+      "path": path,
+      "password": _password ?? "",
+      "page": 1,
+      "per_page": 0,
+      "refresh": _forceRefresh,
+    };
 
-      final completer = Completer<void>();
-      DioUtils.instance.requestNetwork<FileListRespEntity>(
-        Method.post, "fs/list", cancelToken: _cancelToken, params: body,
-        onSuccess: (data) async {
-          if (data == null) {
-            if (!completer.isCompleted) completer.complete();
-            return;
-          }
-          lastData = data;
-          final files = data.content ?? [];
-          
-          for (var file in files) {
-            var fileItemVO = _fileResp2VO(data.provider ?? "", file);
-            allFiles.add(fileItemVO);
-          }
-          
-          hasMore = data.hasMore;
-          pagesTotal = data.pagesTotal;
-          
-          if (hasMore && currentPage < pagesTotal) {
-            currentPage++;
-          }
-          if (!completer.isCompleted) completer.complete();
-        },
-        onError: (code, msg) {
-          debugPrint(msg);
-          hasMore = false;
-          if (!completer.isCompleted) completer.complete();
-        },
-      );
-      // 超时保护：防止 requestNetwork 既不调 onSuccess 也不调 onError 导致挂起
-      try {
-        await completer.future.timeout(const Duration(seconds: 15));
-      } on TimeoutException {
-        debugPrint('[FileList] loadPage timeout for page $page');
-        hasMore = false;
-      }
-    }
+    final completer = Completer<FileListRespEntity?>();
+    DioUtils.instance.requestNetwork<FileListRespEntity>(
+      Method.post, "fs/list",
+      cancelToken: _cancelToken,
+      params: body,
+      onSuccess: (data) {
+        if (!completer.isCompleted) completer.complete(data);
+      },
+      onError: (code, msg) {
+        debugPrint(msg);
+        if (!completer.isCompleted) completer.complete(null);
+      },
+    );
 
-    // 加载第一页
-    await loadPage(currentPage);
-    
-    // 根据 hasMore 和 pagesTotal 继续加载后续页面
-    while (mounted && hasMore && currentPage <= pagesTotal) {
-      await loadPage(currentPage);
+    FileListRespEntity? data;
+    try {
+      data = await completer.future.timeout(const Duration(seconds: 30));
+    } on TimeoutException {
+      debugPrint('[FileList] _loadFilesInner timeout for $path');
+      data = null;
     }
 
     if (!mounted) return;
 
     _passwordRetrying = false;
     _forceRefresh = false;
-    
-    // 使用最后一个响应数据获取权限等信息
-    if (lastData != null) {
-      _menuAnchorController.hasWritePermission.value = lastData!.write;
-      _hasWritePermission = lastData!.write;
-      _data = lastData;
-    }
-    
+
+    final files = data?.content ?? [];
+    final allFiles = files
+        .map((f) => _fileResp2VO(data?.provider ?? "", f))
+        .toList();
     _sort(allFiles);
+
+    // 使用响应数据更新权限等信息
+    if (data != null) {
+      _menuAnchorController.hasWritePermission.value = data.write;
+      _hasWritePermission = data.write;
+      _data = data;
+    }
+
     setState(() {
       _files = allFiles;
     });
-    // 大目录可能因超时/网络问题返回空，保留已有缓存数据不覆盖
+
+    // 空结果保护：保留已有缓存数据不覆盖
     if (allFiles.isEmpty && _preloadCache.containsKey(path)) {
       _files = _preloadCache[path]!;
       setState(() {});
@@ -487,7 +461,7 @@ class _FileListScreenState extends State<FileListScreen>
     } else {
       _refreshController.refreshCompleted();
     }
-    
+
     // async load folder thumbnails in grid view
     if (_menuAnchorController.isGridView.value) {
       _loadFolderThumbs(allFiles);
@@ -497,8 +471,12 @@ class _FileListScreenState extends State<FileListScreen>
     // background preload strm URLs
     _preloadStrmUrls(allFiles);
     // cache this result and preload subdirectories
-    _preloadCache[path] = allFiles;
-    
+    // 安全保护：如果预加载缓存中已有更多数据，不覆盖（防止预加载的全量数据被不完整数据覆盖）
+    final cached = _preloadCache[path];
+    if (cached == null || allFiles.length >= cached.length || allFiles.isEmpty) {
+      _preloadCache[path] = allFiles;
+    }
+
     // Check if aggressive cache is enabled
     final enableAggressiveCache = SpUtil.getBool(AlistConstant.enableAggressiveCache, defValue: true) ?? true;
     if (enableAggressiveCache) {

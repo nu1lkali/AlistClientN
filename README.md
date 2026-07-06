@@ -384,6 +384,15 @@ storePassword=your_store_password
 
 ## 更新记录
 
+### v1.3.10
+- **修复大目录视频数据丢失 Bug**：主加载方法 `_loadFilesInner()` 从分页模式（`per_page: 500`）改为全量获取（`per_page: 0`），修复因 Alist API 不返回 `has_more` / `pages_total` 字段导致分页提前终止、大量视频文件丢失的问题
+  - 受影响场景：文件数量超过 500 的目录（如 896 文件目录只加载 250 个视频、3958 文件目录只加载 375 个视频）
+  - 新增缓存保护：预加载缓存中的全量数据不会被不完整数据覆盖
+  - 超时时间从 15s 延长至 30s，适应大目录全量返回
+- **修复进入文件列表时反复弹出"获取文件链接失败"Toast**：`StrmParser` 后台预加载 .strm 文件时未静默调用 `makeFileLink`，当 `basePath` 未就绪时每个 .strm 文件都会弹出一个 Toast，目录中文件越多弹得越久
+  - 为 `parseStrmUrl()` 和 `batchParseStrmUrls()` 中的 `makeFileLink` 调用添加 `toastShowTips: false`，后台预加载失败不再打扰用户
+- **音频播放器风格默认值改为新风格**：`audioPlayerUiStyle` 默认值从 `0`（经典黑胶）改为 `1`（新风格），新用户首次使用直接看到新版播放器 UI
+
 ### v1.3.7
 - **音频播放器布局修复**：
   - 新风格播放器动态布局：修复歌词模式下进度条占用歌词空间导致仅显示半屏的问题

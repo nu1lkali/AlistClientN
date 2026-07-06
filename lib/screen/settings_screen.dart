@@ -202,7 +202,7 @@ class _SettingsContainerState extends State<_SettingsContainer>
                   icon: Icons.music_note_rounded,
                   title: '音频播放器风格',
                   trailingText:
-                      (SpUtil.getInt(AlistConstant.audioPlayerUiStyle, defValue: 0) ?? 0) == 0
+                      (SpUtil.getInt(AlistConstant.audioPlayerUiStyle, defValue: 1) ?? 1) == 0
                           ? '经典黑胶'
                           : '新风格',
                   onTap: () => _showAudioStyleDialog(context)),
@@ -808,7 +808,7 @@ class _SettingsContainerState extends State<_SettingsContainer>
 
   void _showAudioStyleDialog(BuildContext context) {
     final current =
-        SpUtil.getInt(AlistConstant.audioPlayerUiStyle, defValue: 0) ?? 0;
+        SpUtil.getInt(AlistConstant.audioPlayerUiStyle, defValue: 1) ?? 1;
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(

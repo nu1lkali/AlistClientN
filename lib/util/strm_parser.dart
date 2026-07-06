@@ -193,7 +193,7 @@ class StrmParser {
     if (dbCached != null) return dbCached;
 
     try {
-      final strmFileUrl = await FileUtils.makeFileLink(path, sign);
+      final strmFileUrl = await FileUtils.makeFileLink(path, sign, toastShowTips: false);
       if (strmFileUrl == null || strmFileUrl.isEmpty) {
         debugPrint('[StrmParser] 无法生成 .strm 文件直链: $path');
         return null;
@@ -253,7 +253,7 @@ class StrmParser {
         final path = entry['path'] ?? '';
         final sign = entry['sign'];
         try {
-          final strmFileUrl = await FileUtils.makeFileLink(path, sign);
+          final strmFileUrl = await FileUtils.makeFileLink(path, sign, toastShowTips: false);
           if (strmFileUrl == null || strmFileUrl.isEmpty) {
             return (path: path, content: null as String?);
           }
