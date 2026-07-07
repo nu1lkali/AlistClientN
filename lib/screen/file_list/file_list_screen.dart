@@ -2303,7 +2303,7 @@ class _FileListScreenState extends State<FileListScreen>
       if (remark != null && remark.isNotEmpty) {
         _pageName = remark;
       } else {
-        _pageName = user.username;
+        _pageName = '未命名服务器';
       }
     } else {
       // 非首页显示当前目录名称

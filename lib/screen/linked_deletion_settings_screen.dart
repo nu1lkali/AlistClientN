@@ -245,7 +245,7 @@ class _LinkedDeletionSettingsScreenState
                 title: const Text('同时删除帧截图文件',
                     style: TextStyle(fontSize: 15, fontWeight: FontWeight.w500)),
                 subtitle: const Text(
-                    '删除 .strm 时同步删除同名 .jpg / .png 刮削帧截图\n（如 test.(mp4).jpg），不需要通知远程'),
+                    '删除 .strm 时同步删除同名的 .jpg / .png 刮削帧截图文件'),
                 value: _deleteThumbEnabled,
                 onChanged: (v) {
                   setState(() => _deleteThumbEnabled = v);
