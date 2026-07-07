@@ -62,31 +62,56 @@ class _SettingsScreenState extends State<SettingsScreen> {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
 
     return Obx(() {
       final searching = _isSearching.value;
       return AlistScaffold(
         appbarTitle: searching
-            ? TextField(
-                controller: _searchController,
-                focusNode: _searchFocus,
-                autofocus: true,
-                style: TextStyle(fontSize: 16, color: scheme.onSurface),
-                decoration: InputDecoration(
-                  hintText: '搜索设置项...',
-                  hintStyle: TextStyle(fontSize: 16, color: scheme.outline),
-                  border: InputBorder.none,
-                  isDense: true,
-                  contentPadding: EdgeInsets.zero,
+            ? Container(
+                height: 40,
+                decoration: BoxDecoration(
+                  color: isDark
+                      ? scheme.surfaceVariant.withOpacity(0.5)
+                      : scheme.surfaceVariant.withOpacity(0.3),
+                  borderRadius: BorderRadius.circular(10),
                 ),
-                onChanged: (v) => _searchQuery.value = v.trim(),
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+                child: Row(
+                  children: [
+                    Icon(Icons.search_rounded, size: 20, color: scheme.outline),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: TextField(
+                        controller: _searchController,
+                        focusNode: _searchFocus,
+                        style: TextStyle(fontSize: 15, color: scheme.onSurface),
+                        decoration: InputDecoration(
+                          hintText: '搜索设置项...',
+                          hintStyle: TextStyle(fontSize: 15, color: scheme.outline),
+                          border: InputBorder.none,
+                          isCollapsed: true,
+                        ),
+                        onChanged: (v) => _searchQuery.value = v.trim(),
+                      ),
+                    ),
+                    if (_searchQuery.value.isNotEmpty)
+                      GestureDetector(
+                        onTap: () {
+                          _searchController.clear();
+                          _searchQuery.value = '';
+                        },
+                        child: Icon(Icons.clear_rounded, size: 18, color: scheme.outline),
+                      ),
+                  ],
+                ),
               )
             : Text(Intl.screenName_settings.tr),
         appbarActions: [
           if (searching)
-            IconButton(
-              icon: const Icon(Icons.close_rounded),
+            TextButton(
               onPressed: _exitSearch,
+              child: const Text('取消', style: TextStyle(fontSize: 15)),
             )
           else
             IconButton(
@@ -130,8 +155,6 @@ class _SettingsContainerState extends State<_SettingsContainer>
   late final RxBool _subtitleDownloadToSubtitleDir;
   late double _tiktokUiOpacity;
 
-  List<SettingsSectionData> _sections = [];
-
   @override
   void initState() {
     super.initState();
@@ -166,8 +189,6 @@ class _SettingsContainerState extends State<_SettingsContainer>
       _userCnt.value = event?.length ?? 0;
     });
 
-    // 构建设置数据模型（Switches 需要 Rx 初始化后再 build）
-    _sections = _buildSections();
   }
 
   @override
@@ -439,28 +460,30 @@ class _SettingsContainerState extends State<_SettingsContainer>
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final query = widget.searchQuery;
 
-    // 有搜索词时过滤
-    final displaySections = query.isEmpty
-        ? _sections
-        : _sections
-            .map((s) => s.filter(query))
-            .where((s) => s.hasMatches)
-            .toList();
-
-    if (query.isNotEmpty && displaySections.isEmpty) {
-      return Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(Icons.search_off_rounded, size: 64, color: scheme.outlineVariant),
-            const SizedBox(height: 12),
-            Text('未找到 "$query" 相关设置', style: TextStyle(color: scheme.outline)),
-          ],
-        ),
-      );
-    }
-
     return Obx(() {
+      // 每次重建数据模型，确保 Rx 变化能触发 trailingText/subtitle 等动态值更新
+      final allSections = _buildSections();
+
+      final displaySections = query.isEmpty
+          ? allSections
+          : allSections
+              .map((s) => s.filter(query))
+              .where((s) => s.hasMatches)
+              .toList();
+
+      if (query.isNotEmpty && displaySections.isEmpty) {
+        return Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(Icons.search_off_rounded, size: 64, color: scheme.outlineVariant),
+              const SizedBox(height: 12),
+              Text('未找到 "$query" 相关设置', style: TextStyle(color: scheme.outline)),
+            ],
+          ),
+        );
+      }
+
       final sections = displaySections;
       final children = <Widget>[];
 
