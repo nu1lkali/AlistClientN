@@ -245,8 +245,8 @@ class SmartStrmWebhook {
   ) async {
     try {
       final dio = Dio(BaseOptions(
-        connectTimeout: const Duration(seconds: 10),
-        receiveTimeout: const Duration(seconds: 10),
+        connectTimeout: const Duration(seconds: 15),
+        receiveTimeout: const Duration(seconds: 120),
       ));
 
       final response = await dio.post(
