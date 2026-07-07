@@ -9,7 +9,7 @@ import 'package:url_launcher/url_launcher.dart';
 /// 联动删除设置页面
 ///
 /// 配置 SmartStrm 联动删除功能：启用后，当在 AList 中删除 .strm 文件时，
-/// 自动向 SmartStrm 后端发送 Emby 格式 Webhook，通知同步删除网盘中的真实媒体文件。
+/// 自动向 SmartStrm 后端发送 Webhook，通知同步删除网盘中的真实媒体文件。
 class LinkedDeletionSettingsScreen extends StatefulWidget {
   const LinkedDeletionSettingsScreen({super.key});
 
@@ -74,7 +74,7 @@ class _LinkedDeletionSettingsScreenState
             children: [
               SwitchListTile(
                 title: const Text(
-                  '启用 Emby 模拟删除 Webhook',
+                  '启用联动删除 Webhook',
                   style: TextStyle(fontSize: 15, fontWeight: FontWeight.w500),
                 ),
                 subtitle: const Text(
@@ -268,7 +268,7 @@ class _LinkedDeletionSettingsScreenState
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      '保存配置后点击下方按钮，向 Webhook URL 发送一条 Emby 标准测试通知，验证连通性。',
+                      '点击下方按钮发送测试通知，验证接口连通性。',
                       style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant, height: 1.5),
                     ),
                     const SizedBox(height: 12),
@@ -305,7 +305,7 @@ class _LinkedDeletionSettingsScreenState
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      '每次 Webhook 发送都会记录到本地日志文件，方便排查问题。',
+                      '记录每次请求的 payload 与响应，便于排查。',
                       style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant, height: 1.5),
                     ),
                     const SizedBox(height: 12),

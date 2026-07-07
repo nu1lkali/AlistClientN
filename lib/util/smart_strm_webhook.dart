@@ -1,5 +1,6 @@
 ﻿import 'dart:convert';
 import 'dart:io';
+import 'dart:math';
 
 import 'package:alist/entity/file_remove_req.dart';
 import 'package:alist/net/dio_utils.dart';
@@ -13,7 +14,7 @@ import 'package:path_provider/path_provider.dart';
 
 /// SmartStrm 联动删除 Webhook 服务
 ///
-/// 在 AList 中成功删除 .strm 文件后，向 SmartStrm 后端发送高保真 Emby 格式 Webhook，
+/// 在 AList 中成功删除 .strm 文件后，向 SmartStrm 后端发送 Webhook，
 /// 通知后端同步删除 115 网盘中的真实媒体文件。
 class SmartStrmWebhook {
   static const String tag = "SmartStrmWebhook";
@@ -78,7 +79,7 @@ class SmartStrmWebhook {
 
     final payload = {
       "Title": "媒体库删除: $payloadFileName",
-      "Description": "AlistClientN 联动删除: $payloadFileName",
+      "Description": "ALClientN 联动删除: $payloadFileName",
       "Date": dateStr,
       "Event": "library.deleted",
       "Severity": "Warning",
@@ -89,11 +90,7 @@ class SmartStrmWebhook {
         "Type": "Movie",
         "MediaType": "Video",
       },
-      "Server": {
-        "Name": "AlistClient_Virtual",
-        "Id": "55d1d9a5b63e4549aa9fbbe74a76db8c",
-        "Version": "4.9.3.0",
-      },
+      "Server": _serverInfo,
     };
 
     LogUtil.d('[$tag] 发送联动删除 Webhook:\n  URL: $webhookUrl\n  Payload: ${jsonEncode(payload)}',
@@ -106,6 +103,25 @@ class SmartStrmWebhook {
     }
     return ok;
   }
+
+  /// 自动生成一个持久化的虚拟 Server ID（首次生成后存入 SpUtil，后续复用）
+  static String _serverId() {
+    const key = 'smartstrm_virtual_server_id';
+    var id = SpUtil.getString(key);
+    if (id != null && id.isNotEmpty) return id;
+    // 生成 32 位随机 hex 字符串
+    final r = Random();
+    id = List.generate(32, (_) => '0123456789abcdef'[r.nextInt(16)]).join();
+    SpUtil.putString(key, id);
+    return id;
+  }
+
+  /// Server 信息（自动生成，非真实 Emby 服务器）
+  static Map<String, String> get _serverInfo => {
+    "Name": "ALClientN_Virtual",
+    "Id": _serverId(),
+    "Version": "1.0.0",
+  };
 
   /// 格式化 UTC 时间戳为 Emby 风格: "2026-07-07T01:26:33.2186940Z"
   static String _formatUtcTimestamp(DateTime dt) {
@@ -135,11 +151,7 @@ class SmartStrmWebhook {
       "Date": dateStr,
       "Event": "system.notificationtest",
       "Severity": "Info",
-      "Server": {
-        "Name": "AlistClient_Virtual",
-        "Id": "55d1d9a5b63e4549aa9fbbe74a76db8c",
-        "Version": "4.9.3.0",
-      },
+      "Server": _serverInfo,
     };
 
     LogUtil.d('[$tag] 发送测试 Webhook:\n  URL: $webhookUrl\n  Payload: ${jsonEncode(payload)}',
@@ -245,7 +257,7 @@ class SmartStrmWebhook {
   ) async {
     try {
       final dio = Dio(BaseOptions(
-        connectTimeout: const Duration(seconds: 15),
+        connectTimeout: const Duration(seconds: 30),
         receiveTimeout: const Duration(seconds: 120),
       ));
 

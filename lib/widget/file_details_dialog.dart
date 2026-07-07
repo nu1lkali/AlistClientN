@@ -8,6 +8,7 @@ import 'package:alist/util/image_utils.dart';
 import 'package:extended_image/extended_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_smart_dialog/flutter_smart_dialog.dart';
 import 'package:get/get.dart';
 
 class FileDetailsDialog extends StatefulWidget {
@@ -20,6 +21,9 @@ class FileDetailsDialog extends StatefulWidget {
     required this.thumb,
     required this.provider,
     this.isDir = false,
+    this.isVideo = false,
+    this.thumbPath,
+    this.thumbSign,
     this.password,
   }) : super(key: key);
   final String name;
@@ -29,6 +33,9 @@ class FileDetailsDialog extends StatefulWidget {
   final String? thumb;
   final String? provider;
   final bool isDir;
+  final bool isVideo;
+  final String? thumbPath;
+  final String? thumbSign;
   final String? password;
 
   @override
@@ -112,33 +119,38 @@ class _FileDetailsDialogState extends State<FileDetailsDialog> {
             color: scheme.surface,
             borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
           ),
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(20, 24, 20, 20),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Center(
-                  child: Container(
-                    width: 40,
-                    height: 4,
-                    decoration: BoxDecoration(
-                      color: scheme.outlineVariant.withOpacity(0.4),
-                      borderRadius: BorderRadius.circular(2),
+          child: ConstrainedBox(
+            constraints: BoxConstraints(
+              maxHeight: MediaQuery.of(context).size.height * 0.7,
+            ),
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.fromLTRB(20, 24, 20, 20),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Center(
+                    child: Container(
+                      width: 40,
+                      height: 4,
+                      decoration: BoxDecoration(
+                        color: scheme.outlineVariant.withOpacity(0.4),
+                        borderRadius: BorderRadius.circular(2),
+                      ),
                     ),
                   ),
-                ),
-                const SizedBox(height: 20),
-                Text(
-                  "文件详情",
-                  style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                    fontWeight: FontWeight.w600,
-                    letterSpacing: -0.5,
+                  const SizedBox(height: 20),
+                  Text(
+                    "文件详情",
+                    style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                      fontWeight: FontWeight.w600,
+                      letterSpacing: -0.5,
+                    ),
                   ),
-                ),
-                const SizedBox(height: 20),
-                _buildInfoColumn(),
-              ],
+                  const SizedBox(height: 20),
+                  _buildInfoColumn(),
+                ],
+              ),
             ),
           ),
         ));
@@ -161,7 +173,25 @@ class _FileDetailsDialogState extends State<FileDetailsDialog> {
         if (widget.provider != null && widget.provider!.isNotEmpty)
           _buildInfoRow("${Intl.fileDetailsDialog_provider.tr}:", widget.provider!),
         if (widget.thumb != null && widget.thumb!.isNotEmpty)
-          _buildThumb(widget.thumb!, FileUtils.getFileIcon(false, widget.name))
+          _buildThumb(widget.thumb!, FileUtils.getFileIcon(false, widget.name)),
+        if (widget.isVideo) ...[
+          const SizedBox(height: 8),
+          SizedBox(
+            width: double.infinity,
+            child: OutlinedButton.icon(
+              icon: const Icon(Icons.image_search_rounded, size: 18),
+              label: const Text('查看帧截图'),
+              onPressed: () {
+                Navigator.pop(context);
+                _showThumbnailDialog();
+              },
+              style: OutlinedButton.styleFrom(
+                padding: const EdgeInsets.symmetric(vertical: 12),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+              ),
+            ),
+          ),
+        ],
       ],
     );
   }
@@ -244,6 +274,69 @@ class _FileDetailsDialogState extends State<FileDetailsDialog> {
           ),
         ),
       ],
+    );
+  }
+
+  void _showThumbnailDialog() {
+    if (widget.thumbPath == null || widget.thumbPath!.isEmpty) {
+      SmartDialog.showToast('未找到帧截图');
+      return;
+    }
+
+    showDialog(
+      context: Get.context!,
+      barrierDismissible: true,
+      builder: (ctx) {
+        final scheme = Theme.of(ctx).colorScheme;
+        return FutureBuilder<String?>(
+          future: FileUtils.makeFileLink(widget.thumbPath!, widget.thumbSign ?? '', toastShowTips: false),
+          builder: (_, snapshot) {
+            final imageUrl = snapshot.data;
+            return GestureDetector(
+              onTap: () => Navigator.pop(ctx),
+              child: Center(
+                child: Container(
+                  margin: const EdgeInsets.symmetric(horizontal: 32),
+                  decoration: BoxDecoration(borderRadius: BorderRadius.circular(16)),
+                  clipBehavior: Clip.antiAlias,
+                  child: imageUrl != null
+                      ? ExtendedImage(
+                          image: noProxyImageProvider(imageUrl),
+                          fit: BoxFit.contain,
+                          loadStateChanged: (state) {
+                            if (state.extendedImageLoadState == LoadState.failed) {
+                              return _thumbnailPlaceholder(scheme, '加载失败');
+                            }
+                            if (state.extendedImageLoadState == LoadState.loading) {
+                              return _thumbnailPlaceholder(scheme, '加载中...');
+                            }
+                            return null;
+                          },
+                        )
+                      : _thumbnailPlaceholder(scheme, '未找到帧截图'),
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Widget _thumbnailPlaceholder(ColorScheme scheme, String text) {
+    return Container(
+      height: 200,
+      color: scheme.surfaceVariant.withOpacity(0.3),
+      child: Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.image_not_supported_rounded, size: 48, color: scheme.outline),
+            const SizedBox(height: 8),
+            Text(text, style: TextStyle(color: scheme.outline)),
+          ],
+        ),
+      ),
     );
   }
 

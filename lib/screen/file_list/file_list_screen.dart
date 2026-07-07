@@ -2885,7 +2885,7 @@ class _FileListScreenState extends State<FileListScreen>
                     title: Text(Intl.fileList_menu_details.tr),
                     onTap: () {
                       Navigator.pop(context);
-                      _showDetailsDialog(widgetContext, file, password: _password);
+                      _showDetailsDialog(widgetContext, file, _files, password: _password);
                     },
                   ),
                 ],
@@ -3890,7 +3890,7 @@ class _FileListView extends StatelessWidget {
                 extentRatio: hasWritePermission ? 0.5 : 0.25,
                 children: [
                   SlidableAction(
-                    onPressed: (context) => _showDetailsDialog(context, file),
+                    onPressed: (context) => _showDetailsDialog(context, file, []),
                     backgroundColor: Get.theme.colorScheme.secondary,
                     foregroundColor: Colors.white,
                     label: Intl.recentsScreen_menu_details.tr,
@@ -4048,7 +4048,7 @@ class _FileListView extends StatelessWidget {
         extentRatio: hasWritePermission ? 0.5 : 0.25,
         children: [
           SlidableAction(
-            onPressed: (context) => _showDetailsDialog(context, file),
+            onPressed: (context) => _showDetailsDialog(context, file, []),
             backgroundColor: Get.theme.colorScheme.secondary,
             foregroundColor: Colors.white,
             label: Intl.recentsScreen_menu_details.tr,
@@ -4150,12 +4150,39 @@ class _FileListView extends StatelessWidget {
         content: readme,
       )
     });
-  }
 }
 
-_showDetailsDialog(BuildContext context, FileItemVO file, {String? password}) {
+}
+
+void _showDetailsDialog(BuildContext context, FileItemVO file,
+    List<FileItemVO> fileList, {String? password}) {
+  final isVideo = file.type == FileType.video || file.type == FileType.strm;
+  // 从当前文件列表中查找帧截图（同名 .jpg / .png）
+  String? thumbPath;
+  String? thumbSign;
+  if (isVideo) {
+    final baseName = file.name.contains('.')
+        ? (file.name.toLowerCase().endsWith('.strm')
+            ? file.name.substring(0, file.name.length - 5)
+            : file.name.substring(0, file.name.lastIndexOf('.')))
+        : file.name;
+    final thumbFile = fileList.cast<FileItemVO?>().firstWhere(
+      (f) {
+        if (f == null || f.isDir) return false;
+        final fn = f.name.toLowerCase();
+        return (fn == '$baseName.jpg' || fn == '$baseName.png');
+      },
+      orElse: () => null,
+    );
+    if (thumbFile != null) {
+      thumbPath = thumbFile.path;
+      thumbSign = thumbFile.sign;
+    }
+  }
+
   showModalBottomSheet(
     context: Get.context!,
+    isScrollControlled: true,
     builder: (context) => FileDetailsDialog(
       name: file.name,
       size: file.sizeDesc,
@@ -4164,6 +4191,9 @@ _showDetailsDialog(BuildContext context, FileItemVO file, {String? password}) {
       thumb: file.thumb,
       provider: file.provider,
       isDir: file.isDir,
+      isVideo: isVideo,
+      thumbPath: thumbPath,
+      thumbSign: thumbSign,
       password: password,
     ),
   );

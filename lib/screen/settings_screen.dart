@@ -444,11 +444,32 @@ class _SettingsContainerState extends State<_SettingsContainer>
 
       // -------- 影视联动删除 --------
       SettingsSectionData(title: '影视联动删除', icon: Icons.delete_forever_rounded, items: [
-        SettingsItemData(icon: Icons.link_rounded, title: 'Emby 模拟删除 Webhook',
+        SettingsItemData(icon: Icons.link_rounded, title: '联动删除 Webhook',
             subtitle: '删除 .strm 时联动 SmartStrm 删除网盘媒体文件',
-            trailingText: '高风险',
             searchTerms: ['webhook', 'emby', 'smartstrm', '联动', '删除', 'strm', '115'],
-            onTap: () => Get.toNamed(NamedRouter.linkedDeletionSettings)),
+            type: SettingsItemType.custom,
+            customBuilder: (context, scheme, isDark) {
+              return ListTile(
+                onTap: () => Get.toNamed(NamedRouter.linkedDeletionSettings),
+                contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                leading: _leadingIcon(scheme, isDark, Icons.link_rounded),
+                title: const Text('联动删除 Webhook',
+                    maxLines: 1, overflow: TextOverflow.ellipsis,
+                    style: TextStyle(fontSize: 15, fontWeight: FontWeight.w500, letterSpacing: -0.2)),
+                subtitle: Text('删除 .strm 时联动 SmartStrm 删除网盘媒体文件',
+                    style: TextStyle(fontSize: 11, color: scheme.onSurfaceVariant)),
+                trailing: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.warning_amber_rounded, size: 18, color: Colors.red.shade500),
+                    const SizedBox(width: 4),
+                    Text('高风险', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Colors.red.shade500)),
+                    const SizedBox(width: 4),
+                    Icon(Icons.chevron_right_rounded, color: scheme.outlineVariant, size: 22),
+                  ],
+                ),
+              );
+            }),
       ]),
 
       // -------- 关于 --------
