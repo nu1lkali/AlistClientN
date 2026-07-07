@@ -292,9 +292,10 @@ class _DislikedVideosScreenState extends State<DislikedVideosScreen> {
         SmartDialog.dismiss();
         DislikeLog.append('删除文件', item.name, item.remotePath, user.username, user.serverUrl);
         SmartDialog.showToast('删除成功');
-        // 联动删除：仅对 .strm 文件发送 Webhook
+        // 联动删除：仅对 .strm 文件发送 Webhook + 删除帧截图
         if (SmartStrmWebhook.isStrmFile(item.name)) {
           SmartStrmWebhook.sendDeleteWebhook(item.remotePath);
+          SmartStrmWebhook.deleteAssociatedThumbnails(item.remotePath);
         }
       },
       onError: (_, msg) {
@@ -405,11 +406,14 @@ class _DislikedVideosScreenState extends State<DislikedVideosScreen> {
     SmartDialog.showToast(
         '删除完成: 成功 $successCount 个${failCount > 0 ? ', 失败 $failCount 个' : ''}');
 
-    // 联动删除：每批 3 条并发，批间 100ms
+    // 联动删除：每批 3 条并发（webhook + 帧截图），批间 100ms
     const batchSize = 3;
     for (var i = 0; i < strmPaths.length; i += batchSize) {
       final batch = strmPaths.skip(i).take(batchSize).toList();
-      await Future.wait(batch.map((p) => SmartStrmWebhook.sendDeleteWebhook(p)));
+      await Future.wait(batch.map((p) async {
+        await SmartStrmWebhook.sendDeleteWebhook(p);
+        await SmartStrmWebhook.deleteAssociatedThumbnails(p);
+      }));
       if (i + batchSize < strmPaths.length) {
         await Future.delayed(const Duration(milliseconds: 100));
       }

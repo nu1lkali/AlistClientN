@@ -69,6 +69,7 @@ class AlistConstant {
   static const String linkedDeletionEnabled = 'linkedDeletionEnabled'; // 联动删除总开关
   static const String linkedDeletionWebhookUrl = 'linkedDeletionWebhookUrl'; // Webhook 接口地址
   static const String linkedDeletionStrmDir = 'linkedDeletionStrmDir'; // 群晖 strm 目录绝对路径
+  static const String linkedDeletionDeleteThumb = 'linkedDeletionDeleteThumb'; // 同时删除帧截图
 
   // 本地字幕相关
   static const String enableLocalSubtitle = 'enableLocalSubtitle'; // 本地字幕库总开关

@@ -1,6 +1,8 @@
 ﻿import 'dart:convert';
 import 'dart:io';
 
+import 'package:alist/entity/file_remove_req.dart';
+import 'package:alist/net/dio_utils.dart';
 import 'package:alist/util/constant.dart';
 import 'package:alist/util/log_utils.dart';
 import 'package:dio/dio.dart';
@@ -275,6 +277,46 @@ class SmartStrmWebhook {
   /// 判断文件是否为 .strm 文件
   static bool isStrmFile(String fileName) {
     return fileName.toLowerCase().endsWith('.strm');
+  }
+
+  // ==================== 帧截图联动删除 ====================
+
+  /// 同步删除 strm 文件对应的帧截图（同名不同后缀 .jpg / .png）
+  ///
+  /// 仅在开关 [AlistConstant.linkedDeletionDeleteThumb] 开启时执行。
+  /// 失败静默，不阻塞主流程。
+  static Future<void> deleteAssociatedThumbnails(String strmFilePath) async {
+    final enabled = SpUtil.getBool(
+          AlistConstant.linkedDeletionDeleteThumb,
+          defValue: false,
+        ) ??
+        false;
+    if (!enabled) return;
+
+    final dir = strmFilePath.contains('/')
+        ? strmFilePath.substring(0, strmFilePath.lastIndexOf('/'))
+        : '/';
+    final baseName = _extractFileNameWithoutStrm(strmFilePath);
+    final candidates = ['$baseName.jpg', '$baseName.png'];
+
+    for (final thumbName in candidates) {
+      try {
+        final req = FileRemoveReq();
+        req.dir = dir.isEmpty ? '/' : dir;
+        req.names = [thumbName];
+        await DioUtils.instance.requestNetwork<String?>(
+          Method.post,
+          'fs/remove',
+          params: req.toJson(),
+          onSuccess: (_) {
+            LogUtil.d('[$tag] 已删除帧截图: $thumbName', tag: tag);
+          },
+          onError: (code, msg) {
+            LogUtil.d('[$tag] 删除帧截图跳过 (code=$code): $thumbName', tag: tag);
+          },
+        );
+      } catch (_) {}
+    }
   }
 
   /// 将 AList 文件路径转换为 NAS 上的真实 strm 文件绝对路径

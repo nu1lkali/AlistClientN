@@ -94,6 +94,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                             decoration: InputDecoration(
                               hintText: '搜索设置项...',
                               hintStyle: TextStyle(fontSize: 15, color: scheme.outline),
+                              filled: false,
                               border: InputBorder.none,
                               enabledBorder: InputBorder.none,
                               focusedBorder: InputBorder.none,

@@ -21,6 +21,7 @@ class LinkedDeletionSettingsScreen extends StatefulWidget {
 class _LinkedDeletionSettingsScreenState
     extends State<LinkedDeletionSettingsScreen> {
   late bool _enabled;
+  late bool _deleteThumbEnabled;
   late TextEditingController _webhookUrlController;
   late TextEditingController _strmDirController;
 
@@ -29,6 +30,11 @@ class _LinkedDeletionSettingsScreenState
     super.initState();
     _enabled = SpUtil.getBool(
           AlistConstant.linkedDeletionEnabled,
+          defValue: false,
+        ) ??
+        false;
+    _deleteThumbEnabled = SpUtil.getBool(
+          AlistConstant.linkedDeletionDeleteThumb,
           defValue: false,
         ) ??
         false;
@@ -225,6 +231,27 @@ class _LinkedDeletionSettingsScreenState
                     setState(() {});
                   },
                 ),
+              ),
+            ],
+          ),
+
+          const SizedBox(height: 16),
+
+          // ===== 帧截图联动删除 =====
+          _buildSectionHeader('附加选项', Icons.image_rounded, scheme),
+          _SettingsCard(
+            children: [
+              SwitchListTile(
+                title: const Text('同时删除帧截图文件',
+                    style: TextStyle(fontSize: 15, fontWeight: FontWeight.w500)),
+                subtitle: const Text(
+                    '删除 .strm 时同步删除同名 .jpg / .png 刮削帧截图\n（如 test.(mp4).jpg），不需要通知远程'),
+                value: _deleteThumbEnabled,
+                onChanged: (v) {
+                  setState(() => _deleteThumbEnabled = v);
+                  SpUtil.putBool(AlistConstant.linkedDeletionDeleteThumb, v);
+                },
+                secondary: _leadingIcon(scheme, isDark, Icons.image_not_supported_rounded),
               ),
             ],
           ),

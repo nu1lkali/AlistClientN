@@ -2975,9 +2975,10 @@ class _FileListScreenState extends State<FileListScreen>
         _filteredFiles.removeWhere((f) => f.name == file.name);
       });
       SmartDialog.showToast("删除成功");
-      // 联动删除：仅对 .strm 文件发送 Webhook
+      // 联动删除：仅对 .strm 文件发送 Webhook + 删除帧截图
       if (isStrm) {
         SmartStrmWebhook.sendDeleteWebhook(file.path);
+        SmartStrmWebhook.deleteAssociatedThumbnails(file.path);
       }
     }, onError: (code, msg) {
       SmartDialog.showToast(msg);
@@ -3170,13 +3171,16 @@ class _FileListScreenState extends State<FileListScreen>
     });
   }
 
-  /// 并发发送联动删除 Webhook（每批 3 条，批间 100ms）
+  /// 并发发送联动删除 Webhook + 删除帧截图（每批 3 条，批间 100ms）
   static void _sendWebhooksSequentially(List<String> paths) {
     Future.microtask(() async {
       const batchSize = 3;
       for (var i = 0; i < paths.length; i += batchSize) {
         final batch = paths.skip(i).take(batchSize).toList();
-        await Future.wait(batch.map((p) => SmartStrmWebhook.sendDeleteWebhook(p)));
+        await Future.wait(batch.map((p) async {
+          await SmartStrmWebhook.sendDeleteWebhook(p);
+          await SmartStrmWebhook.deleteAssociatedThumbnails(p);
+        }));
         if (i + batchSize < paths.length) {
           await Future.delayed(const Duration(milliseconds: 100));
         }
