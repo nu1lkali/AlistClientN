@@ -32,6 +32,7 @@ import 'package:alist/screen/uploading_files_screen.dart';
 import 'package:alist/screen/video_player_screen.dart';
 import 'package:alist/screen/tiktok_player_page.dart';
 import 'package:alist/screen/strm_player_screen.dart';
+import 'package:alist/screen/linked_deletion_settings_screen.dart';
 import 'package:alist/screen/web_screen.dart';
 import 'package:alist/util/constant.dart';
 import 'package:alist/util/named_router.dart';
@@ -138,6 +139,11 @@ class AlistRouter {
     GetPage(
       name: NamedRouter.strmPlayer,
       page: () => const StrmPlayerScreen(),
+    ),
+    // 联动删除设置
+    GetPage(
+      name: NamedRouter.linkedDeletionSettings,
+      page: () => const LinkedDeletionSettingsScreen(),
     ),
   ];
 }

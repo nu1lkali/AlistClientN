@@ -47,6 +47,7 @@ import 'package:alist/util/markdown_utils.dart';
 import 'package:alist/util/named_router.dart';
 import 'package:alist/util/nature_sort.dart';
 import 'package:alist/util/security_lock_controller.dart';
+import 'package:alist/util/smart_strm_webhook.dart';
 import 'package:alist/util/strm_parser.dart';
 import 'package:alist/util/stream_size_resolver.dart';
 import 'package:alist/util/proxy.dart';
@@ -2962,6 +2963,8 @@ class _FileListScreenState extends State<FileListScreen>
     }
     req.names = [file.name];
 
+    final isStrm = SmartStrmWebhook.isStrmFile(file.name);
+
     SmartDialog.showLoading(msg: Intl.fileList_tips_deleting.tr);
     DioUtils.instance.requestNetwork<String?>(Method.post, "fs/remove",
         params: req.toJson(), onSuccess: (data) {
@@ -2972,6 +2975,10 @@ class _FileListScreenState extends State<FileListScreen>
         _filteredFiles.removeWhere((f) => f.name == file.name);
       });
       SmartDialog.showToast("删除成功");
+      // 联动删除：仅对 .strm 文件发送 Webhook
+      if (isStrm) {
+        SmartStrmWebhook.sendDeleteWebhook(file.path);
+      }
     }, onError: (code, msg) {
       SmartDialog.showToast(msg);
       SmartDialog.dismiss();
@@ -3135,6 +3142,14 @@ class _FileListScreenState extends State<FileListScreen>
     FileRemoveReq req = FileRemoveReq();
     req.dir = path;
     req.names = names;
+    // 记录批量删除中的 .strm 文件路径，用于联动删除
+    final strmPaths = <String>[];
+    for (final name in names) {
+      if (SmartStrmWebhook.isStrmFile(name)) {
+        final strmPath = path == '/' ? '/$name' : '$path/$name';
+        strmPaths.add(strmPath);
+      }
+    }
     SmartDialog.showLoading(msg: Intl.fileList_tips_deleting.tr);
     DioUtils.instance.requestNetwork<String?>(Method.post, "fs/remove",
         params: req.toJson(), onSuccess: (_) {
@@ -3147,9 +3162,25 @@ class _FileListScreenState extends State<FileListScreen>
         _selectedIndices.clear();
       });
       SmartDialog.showToast("删除成功");
+      // 联动删除：串行发送 Webhook，每条间隔 300ms，避免并发冲垮后端
+      _sendWebhooksSequentially(strmPaths);
     }, onError: (code, msg) {
       SmartDialog.showToast(msg);
       SmartDialog.dismiss();
+    });
+  }
+
+  /// 并发发送联动删除 Webhook（每批 3 条，批间 100ms）
+  static void _sendWebhooksSequentially(List<String> paths) {
+    Future.microtask(() async {
+      const batchSize = 3;
+      for (var i = 0; i < paths.length; i += batchSize) {
+        final batch = paths.skip(i).take(batchSize).toList();
+        await Future.wait(batch.map((p) => SmartStrmWebhook.sendDeleteWebhook(p)));
+        if (i + batchSize < paths.length) {
+          await Future.delayed(const Duration(milliseconds: 100));
+        }
+      }
     });
   }
 

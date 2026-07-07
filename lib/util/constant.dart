@@ -65,6 +65,11 @@ class AlistConstant {
   static const String strmBrightness = 'strmBrightness'; // strm 播放器亮度记忆
   static const String strmPreloadEnabled = 'strmPreloadEnabled'; // strm 预加载下一个视频
 
+  // SmartStrm 联动删除
+  static const String linkedDeletionEnabled = 'linkedDeletionEnabled'; // 联动删除总开关
+  static const String linkedDeletionWebhookUrl = 'linkedDeletionWebhookUrl'; // Webhook 接口地址
+  static const String linkedDeletionStrmDir = 'linkedDeletionStrmDir'; // 群晖 strm 目录绝对路径
+
   // 本地字幕相关
   static const String enableLocalSubtitle = 'enableLocalSubtitle'; // 本地字幕库总开关
   static const String localSubtitlePath = 'localSubtitlePath'; // 本地字幕目录绝对路径

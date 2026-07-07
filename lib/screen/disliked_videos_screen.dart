@@ -5,6 +5,7 @@ import 'package:alist/database/table/disliked_video.dart';
 import 'package:alist/entity/file_remove_req.dart';
 import 'package:alist/net/dio_utils.dart';
 import 'package:alist/screen/video_player_screen.dart';
+import 'package:alist/util/smart_strm_webhook.dart';
 import 'package:alist/util/string_utils.dart';
 import 'package:alist/util/user_controller.dart';
 import 'package:alist/util/video_player_util.dart';
@@ -291,6 +292,10 @@ class _DislikedVideosScreenState extends State<DislikedVideosScreen> {
         SmartDialog.dismiss();
         DislikeLog.append('删除文件', item.name, item.remotePath, user.username, user.serverUrl);
         SmartDialog.showToast('删除成功');
+        // 联动删除：仅对 .strm 文件发送 Webhook
+        if (SmartStrmWebhook.isStrmFile(item.name)) {
+          SmartStrmWebhook.sendDeleteWebhook(item.remotePath);
+        }
       },
       onError: (_, msg) {
         DislikeLog.append('删除失败', item.name, item.remotePath, user.username, user.serverUrl);
@@ -368,6 +373,7 @@ class _DislikedVideosScreenState extends State<DislikedVideosScreen> {
     SmartDialog.showLoading(msg: '批量删除中...');
     int successCount = 0;
     int failCount = 0;
+    final strmPaths = <String>[];
 
     for (final item in items) {
       final fileName = item.remotePath.substringAfterLast("/") ?? "";
@@ -375,6 +381,10 @@ class _DislikedVideosScreenState extends State<DislikedVideosScreen> {
       final req = FileRemoveReq();
       req.dir = dir.isEmpty ? "/" : dir;
       req.names = [fileName];
+
+      if (SmartStrmWebhook.isStrmFile(item.name)) {
+        strmPaths.add(item.remotePath);
+      }
 
       await DioUtils.instance.requestNetwork<String?>(
         Method.post, 'fs/remove',
@@ -394,5 +404,15 @@ class _DislikedVideosScreenState extends State<DislikedVideosScreen> {
     SmartDialog.dismiss();
     SmartDialog.showToast(
         '删除完成: 成功 $successCount 个${failCount > 0 ? ', 失败 $failCount 个' : ''}');
+
+    // 联动删除：每批 3 条并发，批间 100ms
+    const batchSize = 3;
+    for (var i = 0; i < strmPaths.length; i += batchSize) {
+      final batch = strmPaths.skip(i).take(batchSize).toList();
+      await Future.wait(batch.map((p) => SmartStrmWebhook.sendDeleteWebhook(p)));
+      if (i + batchSize < strmPaths.length) {
+        await Future.delayed(const Duration(milliseconds: 100));
+      }
+    }
   }
 }

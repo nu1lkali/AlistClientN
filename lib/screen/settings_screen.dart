@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:alist/database/alist_database_controller.dart';
+import 'package:alist/entity/settings_item.dart';
 import 'package:alist/generated/images.dart';
 import 'package:alist/l10n/intl_keys.dart';
 import 'package:alist/main.dart';
@@ -24,19 +25,84 @@ import 'package:get/get.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:permission_handler/permission_handler.dart';
 
-class SettingsScreen extends StatelessWidget {
+class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
 
   @override
+  State<SettingsScreen> createState() => _SettingsScreenState();
+}
+
+class _SettingsScreenState extends State<SettingsScreen> {
+  final _searchController = TextEditingController();
+  final _searchFocus = FocusNode();
+  final _isSearching = false.obs;
+  final _searchQuery = ''.obs;
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    _searchFocus.dispose();
+    super.dispose();
+  }
+
+  void _enterSearch() {
+    _isSearching.value = true;
+    Future.delayed(const Duration(milliseconds: 100), () {
+      _searchFocus.requestFocus();
+    });
+  }
+
+  void _exitSearch() {
+    _isSearching.value = false;
+    _searchQuery.value = '';
+    _searchController.clear();
+    _searchFocus.unfocus();
+  }
+
+  @override
   Widget build(BuildContext context) {
-    return AlistScaffold(
-        appbarTitle: Text(Intl.screenName_settings.tr),
-        body: const _SettingsContainer());
+    final scheme = Theme.of(context).colorScheme;
+
+    return Obx(() {
+      final searching = _isSearching.value;
+      return AlistScaffold(
+        appbarTitle: searching
+            ? TextField(
+                controller: _searchController,
+                focusNode: _searchFocus,
+                autofocus: true,
+                style: TextStyle(fontSize: 16, color: scheme.onSurface),
+                decoration: InputDecoration(
+                  hintText: '搜索设置项...',
+                  hintStyle: TextStyle(fontSize: 16, color: scheme.outline),
+                  border: InputBorder.none,
+                  isDense: true,
+                  contentPadding: EdgeInsets.zero,
+                ),
+                onChanged: (v) => _searchQuery.value = v.trim(),
+              )
+            : Text(Intl.screenName_settings.tr),
+        appbarActions: [
+          if (searching)
+            IconButton(
+              icon: const Icon(Icons.close_rounded),
+              onPressed: _exitSearch,
+            )
+          else
+            IconButton(
+              icon: const Icon(Icons.search_rounded),
+              onPressed: _enterSearch,
+            ),
+        ],
+        body: _SettingsContainer(searchQuery: _searchQuery.value),
+      );
+    });
   }
 }
 
 class _SettingsContainer extends StatefulWidget {
-  const _SettingsContainer({Key? key}) : super(key: key);
+  final String searchQuery;
+  const _SettingsContainer({Key? key, required this.searchQuery}) : super(key: key);
 
   @override
   State<_SettingsContainer> createState() => _SettingsContainerState();
@@ -63,6 +129,8 @@ class _SettingsContainerState extends State<_SettingsContainer>
   late final RxString _localSubtitlePath;
   late final RxBool _subtitleDownloadToSubtitleDir;
   late double _tiktokUiOpacity;
+
+  List<SettingsSectionData> _sections = [];
 
   @override
   void initState() {
@@ -97,6 +165,9 @@ class _SettingsContainerState extends State<_SettingsContainer>
         _databaseController.serverDao.serverList().listen((event) {
       _userCnt.value = event?.length ?? 0;
     });
+
+    // 构建设置数据模型（Switches 需要 Rx 初始化后再 build）
+    _sections = _buildSections();
   }
 
   @override
@@ -105,363 +176,375 @@ class _SettingsContainerState extends State<_SettingsContainer>
     super.dispose();
   }
 
+  // ==================== 设置数据模型 ====================
+
+  List<SettingsSectionData> _buildSections() {
+    return [
+      // -------- 账户与存储 --------
+      SettingsSectionData(title: '账户与存储', icon: Icons.account_circle_outlined, items: [
+        SettingsItemData(icon: Icons.person_outline, title: Intl.settingsScreen_item_account.tr,
+            onTap: () => Get.toNamed(NamedRouter.account)),
+        SettingsItemData(icon: Icons.download_outlined, title: Intl.settingsScreen_item_downloads.tr,
+            onTap: () => Get.toNamed(NamedRouter.downloadManager)),
+        SettingsItemData(icon: Icons.storage_outlined, title: Intl.settingsScreen_item_cacheManagement.tr,
+            onTap: () => Get.toNamed(NamedRouter.cacheManager)),
+      ]),
+
+      // -------- 网络与预加载 --------
+      SettingsSectionData(title: '网络与预加载', icon: Icons.wifi_outlined, items: [
+        SettingsItemData(
+            icon: Icons.speed_rounded, title: '智能预加载', subtitle: '适合局域网环境，提前加载子文件夹',
+            searchTerms: ['preload', 'cache', '缓存'],
+            type: SettingsItemType.switchTile,
+            switchValue: () => _aggressiveCacheEnabled.value,
+            switchOnChanged: (v) {
+              SpUtil.putBool(AlistConstant.enableAggressiveCache, v);
+              _aggressiveCacheEnabled.value = v;
+              if (!v && _wifiOnlyPreloadEnabled.value) {
+                SpUtil.putBool(AlistConstant.wifiOnlyPreload, false);
+                _wifiOnlyPreloadEnabled.value = false;
+              }
+            }),
+        SettingsItemData(
+            icon: Icons.wifi, title: '仅 WiFi 预加载',
+            subtitle: '仅在 WiFi 环境下预加载',
+            searchTerms: ['wifi', '网络'],
+            type: SettingsItemType.switchTile,
+            switchValue: () => _wifiOnlyPreloadEnabled.value,
+            switchEnabled: () => _aggressiveCacheEnabled.value,
+            switchOnChanged: _aggressiveCacheEnabled.value ? (v) {
+              SpUtil.putBool(AlistConstant.wifiOnlyPreload, v);
+              _wifiOnlyPreloadEnabled.value = v;
+            } : null),
+      ]),
+
+      // -------- 播放器配置 --------
+      SettingsSectionData(title: '播放器配置', icon: Icons.play_circle_outline, items: [
+        SettingsItemData(
+            icon: Icons.play_circle_filled, title: '启用 MPV 播放器',
+            subtitle: '使用 libmpv 解码器播放视频',
+            searchTerms: ['mpv', 'libmpv', 'media kit', 'mediakit'],
+            type: SettingsItemType.switchTile,
+            switchValue: () => _enableMediaKitPlayer.value,
+            switchOnChanged: (v) {
+              SpUtil.putBool(AlistConstant.enableMediaKitPlayer, v);
+              _enableMediaKitPlayer.value = v;
+            }),
+        SettingsItemData(icon: Icons.tune_rounded, title: Intl.settingsScreen_item_videoPlayer.tr,
+            searchTerms: ['player', '播放'], onTap: () => Get.toNamed(NamedRouter.playerSettings)),
+        SettingsItemData(icon: Icons.live_tv_rounded, title: '流媒体地址播放',
+            searchTerms: ['stream', 'url', '地址'], onTap: () => _showUrlInputDialog(context)),
+        SettingsItemData(icon: Icons.music_note_rounded, title: '音频播放器风格',
+            trailingText: (SpUtil.getInt(AlistConstant.audioPlayerUiStyle, defValue: 1) ?? 1) == 0 ? '经典黑胶' : '新风格',
+            searchTerms: ['audio', '音乐', '黑胶'], onTap: () => _showAudioStyleDialog(context)),
+        SettingsItemData(icon: Icons.lyrics_rounded, title: '歌词视图风格',
+            trailingText: (SpUtil.getInt(AlistConstant.lyricsStyle, defValue: 0) ?? 0) == 0 ? '流线型' : '时间轴',
+            searchTerms: ['lyrics', 'lrc', '歌词'], onTap: () => _showLyricsStyleDialog(context)),
+      ]),
+
+      // -------- 本地字幕 --------
+      SettingsSectionData(title: '本地字幕', icon: Icons.subtitles_rounded, items: [
+        SettingsItemData(
+            icon: Icons.subtitles_rounded, title: '启用字幕',
+            subtitle: '按视频名自动加载同名字幕（本地和远程）',
+            searchTerms: ['subtitle', '字幕'],
+            type: SettingsItemType.switchTile,
+            switchValue: () => _enableLocalSubtitle.value,
+            switchOnChanged: (v) {
+              SpUtil.putBool(AlistConstant.enableLocalSubtitle, v);
+              _enableLocalSubtitle.value = v;
+              SubtitleSettings.instance.isSubtitleEnabled.value = v;
+            }),
+        SettingsItemData(icon: Icons.folder_rounded, title: '字幕目录',
+            subtitle: _localSubtitlePath.value.isEmpty ? '未设置，点击选择' : _localSubtitlePath.value,
+            searchTerms: ['dir', '目录', 'path'],
+            switchEnabled: () => _enableLocalSubtitle.value,
+            onTap: () => _pickSubtitleDir(context)),
+        SettingsItemData(icon: Icons.search_rounded, title: '字幕查找模式',
+            subtitle: _matchModeLabel(),
+            searchTerms: ['match', '匹配', 'fuzzy', 'exact', '模糊', '精确'],
+            switchEnabled: () => _enableLocalSubtitle.value,
+            onTap: () => Get.toNamed(NamedRouter.subtitleSettings)),
+        SettingsItemData(icon: Icons.palette_rounded, title: '字幕样式',
+            subtitle: '自定义字体、颜色、描边等',
+            searchTerms: ['style', 'font', '字体', '颜色'],
+            switchEnabled: () => _enableLocalSubtitle.value,
+            onTap: () => Get.toNamed(NamedRouter.subtitleStyleSettings)),
+        SettingsItemData(
+            icon: Icons.download_rounded, title: '字幕下载到字幕目录',
+            subtitle: '下载字幕时直接存入字幕目录',
+            searchTerms: ['download', '下载'],
+            type: SettingsItemType.switchTile,
+            switchValue: () => _subtitleDownloadToSubtitleDir.value,
+            switchEnabled: () => _enableLocalSubtitle.value,
+            switchOnChanged: _enableLocalSubtitle.value ? (v) {
+              SpUtil.putBool(AlistConstant.subtitleDownloadToSubtitleDir, v);
+              _subtitleDownloadToSubtitleDir.value = v;
+            } : null),
+      ]),
+
+      // -------- 界面与个性化 --------
+      SettingsSectionData(title: '界面与个性化', icon: Icons.palette_outlined, items: [
+        SettingsItemData(
+            icon: Icons.smart_button_rounded, title: '显示浮动按钮',
+            subtitle: '文件列表右下角的浮动菜单按钮',
+            searchTerms: ['fab', '浮动按钮'],
+            type: SettingsItemType.switchTile,
+            switchValue: () => _showFabButton.value,
+            switchOnChanged: (v) {
+              SpUtil.putBool(AlistConstant.showFabButton, v);
+              AlistConstant.showFabButtonRx.value = v;
+              _showFabButton.value = v;
+            }),
+        SettingsItemData(
+            icon: Icons.shuffle_rounded, title: '随机排序按类型分组',
+            subtitle: '随机排序时同类文件聚合在一起',
+            searchTerms: ['group', 'sort', '分组'],
+            type: SettingsItemType.switchTile,
+            switchValue: () => _groupedRandomSort.value,
+            switchOnChanged: (v) {
+              SpUtil.putBool(AlistConstant.groupedRandomSort, v);
+              _groupedRandomSort.value = v;
+            }),
+        SettingsItemData(
+            icon: Icons.format_list_numbered_rounded, title: '视界流页码指示器',
+            subtitle: '播放器右侧的播放列表页码',
+            searchTerms: ['tiktok', 'page', 'indicator', '页码'],
+            type: SettingsItemType.switchTile,
+            switchValue: () => _showTiktokPageIndicator.value,
+            switchOnChanged: (v) {
+              SpUtil.putBool(AlistConstant.showTiktokPageIndicator, v);
+              _showTiktokPageIndicator.value = v;
+            }),
+        SettingsItemData(
+            icon: Icons.shuffle_on_rounded, title: '文件列表随机播放按钮',
+            subtitle: '文件项右侧的快捷随机播放入口',
+            searchTerms: ['shuffle', '按钮'],
+            type: SettingsItemType.switchTile,
+            switchValue: () => _showFileListShuffleButton.value,
+            switchOnChanged: (v) {
+              SpUtil.putBool(AlistConstant.showFileListShuffleButton, v);
+              AlistConstant.showFileListShuffleButtonRx.value = v;
+              _showFileListShuffleButton.value = v;
+            }),
+        SettingsItemData(icon: Icons.palette_rounded, title: '主题颜色',
+            searchTerms: ['theme', 'color', '颜色', 'seed'],
+            onTap: () => _showThemeColorPicker(context)),
+        SettingsItemData(icon: Icons.slideshow_rounded, title: '幻灯片间隔时间',
+            trailingText: '${SpUtil.getInt(AlistConstant.slideshowIntervalSeconds, defValue: 3) ?? 3} 秒',
+            searchTerms: ['slide', '播放', '间隔'],
+            onTap: () => _showSlideshowIntervalDialog(context)),
+        SettingsItemData(icon: Icons.favorite_border, title: '不喜欢视频列表',
+            searchTerms: ['dislike', '不喜欢', 'disliked'],
+            onTap: () => Get.toNamed(NamedRouter.dislikedVideos)),
+        SettingsItemData(icon: Icons.opacity, title: '视界流控件透明度',
+            trailingText: '${(_tiktokUiOpacity * 100).round()}%',
+            searchTerms: ['tiktok', 'opacity', '透明度'],
+            onTap: () => _showTiktokOpacityDialog(context)),
+      ]),
+
+      // -------- 过滤器与高级 --------
+      SettingsSectionData(title: '过滤器与高级', icon: Icons.tune_outlined, items: [
+        SettingsItemData(icon: Icons.filter_list_off_rounded, title: Intl.settingsScreen_item_extensionFilter.tr,
+            searchTerms: ['extension', 'ext', '扩展名', 'filter', 'nfo'],
+            onTap: () => _showExtensionFilterDialog(context)),
+        SettingsItemData(icon: Icons.filter_list_rounded, title: '搜索过滤',
+            searchTerms: ['search', 'filter', '过滤'],
+            onTap: () => Get.toNamed(NamedRouter.searchFilterSettings)),
+        SettingsItemData(icon: Icons.lock_outline_rounded, title: '安全锁',
+            searchTerms: ['lock', 'security', '密码', '手势'],
+            onTap: () => Get.toNamed(NamedRouter.securityLockSettings)),
+        SettingsItemData(icon: Icons.playlist_play_rounded, title: '随机播放数量',
+            trailingText: '${SpUtil.getInt(AlistConstant.randomPlayCount, defValue: 10) ?? 10}',
+            searchTerms: ['random', 'play', '数量'],
+            onTap: () => _showRandomPlayCountDialog(context)),
+        SettingsItemData(
+            icon: Icons.picture_in_picture_alt_rounded, title: '自动画中画',
+            subtitle: '按 Home 键时自动进入画中画',
+            searchTerms: ['pip', '画中画', 'picture in picture'],
+            type: SettingsItemType.switchTile,
+            switchValue: () => _autoPipEnabled.value,
+            switchOnChanged: (v) {
+              SpUtil.putBool(AlistConstant.autoPipEnabled, v);
+              _autoPipEnabled.value = v;
+            }),
+      ]),
+
+      // -------- .strm 设置 --------
+      SettingsSectionData(title: '.strm 设置', icon: Icons.swap_horiz_rounded, items: [
+        SettingsItemData(
+            icon: Icons.swap_horiz_rounded, title: '启用主机映射',
+            subtitle: '将 .strm 中的内网地址替换为 FRP/代理地址',
+            searchTerms: ['strm', 'host', 'frp', '代理', '内网'],
+            type: SettingsItemType.switchTile,
+            switchValue: () => SpUtil.getBool(AlistConstant.strmHostOverrideEnabled, defValue: false) ?? false,
+            switchOnChanged: (v) {
+              SpUtil.putBool(AlistConstant.strmHostOverrideEnabled, v);
+              setState(() {});
+            }),
+        SettingsItemData(icon: Icons.edit_rounded, title: '内网→公网地址映射',
+            subtitle: '配置 .strm URL 主机地址替换规则',
+            trailingText: '未配置',
+            searchTerms: ['strm', 'host', 'frp', '映射', '公网'],
+            onTap: () => _showStrmHostOverrideDialog(context)),
+        SettingsItemData(
+            icon: Icons.speed_rounded, title: '预加载下一个视频',
+            subtitle: '播放 2 秒后预加载下一段流，可能触发风控',
+            searchTerms: ['strm', 'preload', '预加载', '风控'],
+            type: SettingsItemType.switchTile,
+            switchValue: () => SpUtil.getBool(AlistConstant.strmPreloadEnabled, defValue: false) ?? false,
+            switchOnChanged: (v) {
+              SpUtil.putBool(AlistConstant.strmPreloadEnabled, v);
+              setState(() {});
+            }),
+      ]),
+
+      // -------- 影视联动删除 --------
+      SettingsSectionData(title: '影视联动删除', icon: Icons.delete_forever_rounded, items: [
+        SettingsItemData(icon: Icons.link_rounded, title: 'Emby 模拟删除 Webhook',
+            subtitle: '删除 .strm 时联动 SmartStrm 删除网盘媒体文件',
+            trailingText: '高风险',
+            searchTerms: ['webhook', 'emby', 'smartstrm', '联动', '删除', 'strm', '115'],
+            onTap: () => Get.toNamed(NamedRouter.linkedDeletionSettings)),
+      ]),
+
+      // -------- 关于 --------
+      SettingsSectionData(title: '关于', icon: Icons.info_outline, items: [
+        SettingsItemData(icon: Icons.privacy_tip_outlined, title: Intl.settingsScreen_item_privacyPolicy.tr,
+            searchTerms: ['privacy', '隐私', '政策'],
+            onTap: () {
+              String local = Get.locale?.toString().startsWith("zh_") == true ? "zh" : "en_US";
+              Get.toNamed(NamedRouter.web, arguments: {
+                "url": "https://${Global.configServerHost}/alist_h5/privacyPolicy?version=${packageInfo?.version ?? ""}&lang=$local",
+                "title": Intl.settingsScreen_item_privacyPolicy.tr
+              });
+            }),
+        SettingsItemData(icon: Icons.info_outline_rounded, title: Intl.settingsScreen_item_about.tr,
+            searchTerms: ['about', '关于', '版本'],
+            onTap: () {
+              String local = Get.locale?.toString().startsWith("zh_") == true ? "zh" : "en_US";
+              Get.toNamed(NamedRouter.web, arguments: {
+                "url": "https://${Global.configServerHost}/alist_h5/declaration?version=${packageInfo?.version ?? ""}&lang=$local",
+                "title": Intl.screenName_about.tr
+              });
+            }),
+      ]),
+    ];
+  }
+
   @override
   Widget build(BuildContext context) {
     super.build(context);
     final scheme = Theme.of(context).colorScheme;
     final isDark = Theme.of(context).brightness == Brightness.dark;
+    final query = widget.searchQuery;
 
-    return ListView(
-      padding: const EdgeInsets.symmetric(vertical: 12),
-      children: [
-        // ===== 账户与存储 =====
-        _SectionHeader(title: '账户与存储', icon: Icons.account_circle_outlined),
-        _SettingsCard(
+    // 有搜索词时过滤
+    final displaySections = query.isEmpty
+        ? _sections
+        : _sections
+            .map((s) => s.filter(query))
+            .where((s) => s.hasMatches)
+            .toList();
+
+    if (query.isNotEmpty && displaySections.isEmpty) {
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            _navTile(context, isDark, scheme,
-                icon: Icons.person_outline,
-                title: Intl.settingsScreen_item_account.tr,
-                onTap: () => Get.toNamed(NamedRouter.account)),
-            _navTile(context, isDark, scheme,
-                icon: Icons.download_outlined,
-                title: Intl.settingsScreen_item_downloads.tr,
-                onTap: () => Get.toNamed(NamedRouter.downloadManager)),
-            _navTile(context, isDark, scheme,
-                icon: Icons.storage_outlined,
-                title: Intl.settingsScreen_item_cacheManagement.tr,
-                onTap: () => Get.toNamed(NamedRouter.cacheManager)),
+            Icon(Icons.search_off_rounded, size: 64, color: scheme.outlineVariant),
+            const SizedBox(height: 12),
+            Text('未找到 "$query" 相关设置', style: TextStyle(color: scheme.outline)),
           ],
         ),
+      );
+    }
 
-        // ===== 网络与预加载 =====
-        _SectionHeader(title: '网络与预加载', icon: Icons.wifi_outlined),
-        Obx(() {
-          return _SettingsCard(
-            children: [
-              _switchTile(context, isDark, scheme,
-                  icon: Icons.speed_rounded,
-                  title: '智能预加载',
-                  subtitle: '适合局域网环境，提前加载子文件夹',
-                  value: _aggressiveCacheEnabled.value,
-                  onChanged: (v) {
-                    SpUtil.putBool(AlistConstant.enableAggressiveCache, v);
-                    _aggressiveCacheEnabled.value = v;
-                    // 关闭智能预加载时同步关闭WiFi限制
-                    if (!v && _wifiOnlyPreloadEnabled.value) {
-                      SpUtil.putBool(AlistConstant.wifiOnlyPreload, false);
-                      _wifiOnlyPreloadEnabled.value = false;
-                    }
-                  }),
-              _switchTile(context, isDark, scheme,
-                  icon: Icons.wifi,
-                  title: '仅 WiFi 预加载',
-                  subtitle: _aggressiveCacheEnabled.value
-                      ? '仅在 WiFi 环境下预加载'
-                      : '开启智能预加载后生效',
-                  value: _wifiOnlyPreloadEnabled.value,
-                  enabled: _aggressiveCacheEnabled.value,
-                  onChanged: _aggressiveCacheEnabled.value
-                      ? (v) {
-                          SpUtil.putBool(AlistConstant.wifiOnlyPreload, v);
-                          _wifiOnlyPreloadEnabled.value = v;
-                        }
-                      : null),
-            ],
-          );
-        }),
+    return Obx(() {
+      final sections = displaySections;
+      final children = <Widget>[];
 
-        // ===== 播放器配置 =====
-        _SectionHeader(title: '播放器配置', icon: Icons.play_circle_outline),
-        // 必须用 Obx 包裹，因为读取了 _enableMediaKitPlayer.value 和 _subtitleEnabled.value
-        Obx(() {
-          return _SettingsCard(
-            children: [
-              _switchTile(context, isDark, scheme,
-                  icon: Icons.play_circle_filled,
-                  title: '启用 MPV 播放器',
-                  subtitle: '使用 libmpv 解码器播放视频',
-                  value: _enableMediaKitPlayer.value,
-                  onChanged: (v) {
-                    SpUtil.putBool(AlistConstant.enableMediaKitPlayer, v);
-                    _enableMediaKitPlayer.value = v;
-                  }),
-              // _navTile(context, isDark, scheme,
-              //     icon: Icons.subtitles_rounded,
-              //     title: '外挂字幕',
-              //     trailingText: _subtitleEnabled.value ? '已开启' : '已关闭',
-              //     onTap: () => Get.toNamed(NamedRouter.subtitleSettings)),
-              _navTile(context, isDark, scheme,
-                  icon: Icons.tune_rounded,
-                  title: Intl.settingsScreen_item_videoPlayer.tr,
-                  onTap: () => Get.toNamed(NamedRouter.playerSettings)),
-              _navTile(context, isDark, scheme,
-                  icon: Icons.live_tv_rounded,
-                  title: '流媒体地址播放',
-                  onTap: () => _showUrlInputDialog(context)),
-              _navTile(context, isDark, scheme,
-                  icon: Icons.music_note_rounded,
-                  title: '音频播放器风格',
-                  trailingText:
-                      (SpUtil.getInt(AlistConstant.audioPlayerUiStyle, defValue: 1) ?? 1) == 0
-                          ? '经典黑胶'
-                          : '新风格',
-                  onTap: () => _showAudioStyleDialog(context)),
-              _navTile(context, isDark, scheme,
-                  icon: Icons.lyrics_rounded,
-                  title: '歌词视图风格',
-                  trailingText:
-                      (SpUtil.getInt(AlistConstant.lyricsStyle, defValue: 0) ?? 0) == 0
-                          ? '流线型'
-                          : '时间轴',
-                  onTap: () => _showLyricsStyleDialog(context)),
-              // _navTile(context, isDark, scheme,
-              //     icon: Icons.bug_report_outlined,
-              //     title: 'LRC 歌词调试',
-              //     trailingText: '诊断工具',
-              //     onTap: () => Get.toNamed(NamedRouter.lrcDebug)),
-            ],
-          );
-        }),
+      for (final section in sections) {
+        children.add(_buildSectionHeader(section.title, section.icon, scheme));
+        children.add(_buildSectionCard(section, context, isDark, scheme));
+      }
 
-        // ===== 本地字幕 =====
-        _SectionHeader(title: '本地字幕', icon: Icons.subtitles_rounded),
-        Obx(() {
-          return _SettingsCard(
-            children: [
-              _switchTile(context, isDark, scheme,
-                  icon: Icons.subtitles_rounded,
-                  title: '启用字幕',
-                  subtitle: '按视频名自动加载同名字幕\n（本地和远程）',
-                  value: _enableLocalSubtitle.value,
-                  onChanged: (v) {
-                    SpUtil.putBool(AlistConstant.enableLocalSubtitle, v);
-                    _enableLocalSubtitle.value = v;
-                    // 同步更新 SubtitleSettings 的响应式状态
-                    SubtitleSettings.instance.isSubtitleEnabled.value = v;
-                  }),
-              _navTile(context, isDark, scheme,
-                  icon: Icons.folder_rounded,
-                  title: '字幕目录',
-                  subtitle: _localSubtitlePath.value.isEmpty
-                      ? '未设置，点击选择'
-                      : _localSubtitlePath.value,
-                  enabled: _enableLocalSubtitle.value,
-                  onTap: () => _pickSubtitleDir(context)),
-              _navTile(context, isDark, scheme,
-                  icon: Icons.search_rounded,
-                  title: '字幕查找模式',
-                  subtitle: _matchModeLabel(),
-                  enabled: _enableLocalSubtitle.value,
-                  onTap: () => Get.toNamed(NamedRouter.subtitleSettings)),
-              _navTile(context, isDark, scheme,
-                  icon: Icons.palette_rounded,
-                  title: '字幕样式',
-                  subtitle: '自定义字体、颜色、描边等',
-                  enabled: _enableLocalSubtitle.value,
-                  onTap: () => Get.toNamed(NamedRouter.subtitleStyleSettings)),
-              _switchTile(context, isDark, scheme,
-                  icon: Icons.download_rounded,
-                  title: '字幕下载到字幕目录',
-                  subtitle: '下载字幕时直接存入字幕目录',
-                  value: _subtitleDownloadToSubtitleDir.value,
-                  enabled: _enableLocalSubtitle.value,
-                  onChanged: _enableLocalSubtitle.value
-                      ? (v) {
-                          SpUtil.putBool(AlistConstant.subtitleDownloadToSubtitleDir, v);
-                          _subtitleDownloadToSubtitleDir.value = v;
-                        }
-                      : null),
-            ],
-          );
-        }),
+      // 版本号
+      children.add(const SizedBox(height: 16));
+      if (packageInfo != null) {
+        children.add(Center(
+          child: Text('v${packageInfo!.version}',
+              style: TextStyle(fontSize: 12, color: scheme.outlineVariant)),
+        ));
+      }
+      children.add(const SizedBox(height: 24));
 
-        // ===== 界面与个性化 =====
-        _SectionHeader(title: '界面与个性化', icon: Icons.palette_outlined),
-        Obx(() {
-          return _SettingsCard(
-            children: [
-              _switchTile(context, isDark, scheme,
-                  icon: Icons.smart_button_rounded,
-                  title: '显示浮动按钮',
-                  subtitle: '文件列表右下角的浮动菜单按钮',
-                  value: _showFabButton.value,
-                  onChanged: (v) {
-                    SpUtil.putBool(AlistConstant.showFabButton, v);
-                    AlistConstant.showFabButtonRx.value = v;
-                    _showFabButton.value = v;
-                  }),
-              _switchTile(context, isDark, scheme,
-                  icon: Icons.shuffle_rounded,
-                  title: '随机排序按类型分组',
-                  subtitle: '随机排序时同类文件聚合在一起',
-                  value: _groupedRandomSort.value,
-                  onChanged: (v) {
-                    SpUtil.putBool(AlistConstant.groupedRandomSort, v);
-                    _groupedRandomSort.value = v;
-                  }),
-              _switchTile(context, isDark, scheme,
-                  icon: Icons.format_list_numbered_rounded,
-                  title: '视界流页码指示器',
-                  subtitle: '播放器右侧的播放列表页码',
-                  value: _showTiktokPageIndicator.value,
-                  onChanged: (v) {
-                    SpUtil.putBool(AlistConstant.showTiktokPageIndicator, v);
-                    _showTiktokPageIndicator.value = v;
-                  }),
-              _switchTile(context, isDark, scheme,
-                  icon: Icons.shuffle_on_rounded,
-                  title: '文件列表随机播放按钮',
-                  subtitle: '文件项右侧的快捷随机播放入口',
-                  value: _showFileListShuffleButton.value,
-                  onChanged: (v) {
-                    SpUtil.putBool(AlistConstant.showFileListShuffleButton, v);
-                    AlistConstant.showFileListShuffleButtonRx.value = v;
-                    _showFileListShuffleButton.value = v;
-                  }),
-              _navTile(context, isDark, scheme,
-                  icon: Icons.palette_rounded,
-                  title: '主题颜色',
-                  onTap: () => _showThemeColorPicker(context)),
-              _navTile(context, isDark, scheme,
-                  icon: Icons.slideshow_rounded,
-                  title: '幻灯片间隔时间',
-                  trailingText:
-                      '${SpUtil.getInt(AlistConstant.slideshowIntervalSeconds, defValue: 3) ?? 3} 秒',
-                  onTap: () => _showSlideshowIntervalDialog(context)),
-              _navTile(context, isDark, scheme,
-                  icon: Icons.favorite_border,
-                  title: '不喜欢视频列表',
-                  onTap: () => Get.toNamed(NamedRouter.dislikedVideos)),
-              // 视界流控件透明度
-              _navTile(context, isDark, scheme,
-                  icon: Icons.opacity,
-                  title: '视界流控件透明度',
-                  trailingText: '${(_tiktokUiOpacity * 100).round()}%',
-                  onTap: () => _showTiktokOpacityDialog(context)),
-            ],
-          );
-        }),
+      return ListView(
+        padding: const EdgeInsets.symmetric(vertical: 12),
+        children: children,
+      );
+    });
+  }
 
-        // ===== 过滤器与高级 =====
-        _SectionHeader(title: '过滤器与高级', icon: Icons.tune_outlined),
-        Obx(() {
-          return _SettingsCard(
-            children: [
-              _navTile(context, isDark, scheme,
-                  icon: Icons.filter_list_off_rounded,
-                  title: Intl.settingsScreen_item_extensionFilter.tr,
-                  onTap: () => _showExtensionFilterDialog(context)),
-              _navTile(context, isDark, scheme,
-                  icon: Icons.filter_list_rounded,
-                  title: '搜索过滤',
-                  onTap: () => Get.toNamed(NamedRouter.searchFilterSettings)),
-              _navTile(context, isDark, scheme,
-                  icon: Icons.lock_outline_rounded,
-                  title: '安全锁',
-                  onTap: () => Get.toNamed(NamedRouter.securityLockSettings)),
-              _navTile(context, isDark, scheme,
-                  icon: Icons.playlist_play_rounded,
-                  title: '随机播放数量',
-                  trailingText:
-                      '${SpUtil.getInt(AlistConstant.randomPlayCount, defValue: 10) ?? 10}',
-                  onTap: () => _showRandomPlayCountDialog(context)),
-              _switchTile(context, isDark, scheme,
-                  icon: Icons.picture_in_picture_alt_rounded,
-                  title: '自动画中画',
-                  subtitle: '按 Home 键时自动进入画中画',
-                  value: _autoPipEnabled.value,
-                  onChanged: (v) {
-                    SpUtil.putBool(AlistConstant.autoPipEnabled, v);
-                    _autoPipEnabled.value = v;
-                  }),
-            ],
-          );
-        }),
+  // ==================== 数据驱动渲染 ====================
 
-        // ===== .strm 设置 =====
-        _SectionHeader(title: '.strm 设置', icon: Icons.swap_horiz_rounded),
-        Builder(builder: (_) {
-          final enabled = SpUtil.getBool(AlistConstant.strmHostOverrideEnabled, defValue: false) ?? false;
-          final from = SpUtil.getString(AlistConstant.strmHostOverrideFrom) ?? '';
-          final to = SpUtil.getString(AlistConstant.strmHostOverrideTo) ?? '';
-          final preloadEnabled = SpUtil.getBool(AlistConstant.strmPreloadEnabled, defValue: false) ?? false;
-          return _SettingsCard(
-            children: [
-              _switchTile(context, isDark, scheme,
-                  icon: Icons.swap_horiz_rounded,
-                  title: '启用主机映射',
-                  subtitle: '将 .strm 中的内网地址替换为 FRP/代理地址',
-                  value: enabled,
-                  onChanged: (v) {
-                    SpUtil.putBool(AlistConstant.strmHostOverrideEnabled, v);
-                    setState(() {});
-                  }),
-              if (enabled && (from.isNotEmpty || to.isNotEmpty))
-                _buildHostMappingCard(context, scheme, isDark, from, to),
-              if (!enabled || (from.isEmpty && to.isEmpty))
-                _navTile(context, isDark, scheme,
-                    icon: Icons.edit_rounded,
-                    title: '内网→公网地址映射',
-                    trailingText: '未配置',
-                    onTap: () => _showStrmHostOverrideDialog(context)),
-              _switchTile(context, isDark, scheme,
-                  icon: Icons.speed_rounded,
-                  title: '预加载下一个视频',
-                  subtitle: '播放 2 秒后预加载下一段流，可能触发风控',
-                  value: preloadEnabled,
-                  onChanged: (v) {
-                    SpUtil.putBool(AlistConstant.strmPreloadEnabled, v);
-                    setState(() {});
-                  }),
-            ],
-          );
-        }),
-
-        // ===== 关于 =====
-        _SectionHeader(title: '关于', icon: Icons.info_outline),
-        _SettingsCard(
-          children: [
-            _navTile(context, isDark, scheme,
-                icon: Icons.privacy_tip_outlined,
-                title: Intl.settingsScreen_item_privacyPolicy.tr,
-                onTap: () {
-              String local =
-                  Get.locale?.toString().startsWith("zh_") == true ? "zh" : "en_US";
-              Get.toNamed(NamedRouter.web, arguments: {
-                "url":
-                    "https://${Global.configServerHost}/alist_h5/privacyPolicy?version=${packageInfo?.version ?? ""}&lang=$local",
-                "title": Intl.settingsScreen_item_privacyPolicy.tr
-              });
-            }),
-            _navTile(context, isDark, scheme,
-                icon: Icons.info_outline_rounded,
-                title: Intl.settingsScreen_item_about.tr,
-                onTap: () {
-              String local =
-                  Get.locale?.toString().startsWith("zh_") == true ? "zh" : "en_US";
-              Get.toNamed(NamedRouter.web, arguments: {
-                "url":
-                    "https://${Global.configServerHost}/alist_h5/declaration?version=${packageInfo?.version ?? ""}&lang=$local",
-                "title": Intl.screenName_about.tr
-              });
-            }),
-          ],
-        ),
-
-        // ===== 版本号 =====
-        const SizedBox(height: 16),
-        if (packageInfo != null)
-          Center(
-            child: Text(
-              'v${packageInfo!.version}',
-              style: TextStyle(
-                  fontSize: 12,
-                  color: Theme.of(context).colorScheme.outlineVariant),
-            ),
-          ),
-        const SizedBox(height: 24),
-      ],
+  Widget _buildSectionHeader(String title, IconData icon, ColorScheme scheme) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 16, 20, 6),
+      child: Row(
+        children: [
+          Icon(icon, size: 16, color: scheme.primary),
+          const SizedBox(width: 6),
+          Text(title,
+              style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600,
+                  color: scheme.primary, letterSpacing: 0.5)),
+        ],
+      ),
     );
+  }
+
+  Widget _buildSectionCard(
+      SettingsSectionData section, BuildContext context, bool isDark, ColorScheme scheme) {
+    return Card(
+      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+      elevation: isDark ? 0 : 1,
+      shadowColor: scheme.shadow.withOpacity(0.08),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+      color: isDark ? scheme.surfaceVariant.withOpacity(0.3) : scheme.surface,
+      clipBehavior: Clip.antiAlias,
+      child: Column(
+        children: [
+          for (int i = 0; i < section.items.length; i++) ...[
+            _buildSettingsItem(context, isDark, scheme, section.items[i]),
+            if (i < section.items.length - 1)
+              Divider(height: 1, indent: 68, endIndent: 16,
+                  color: scheme.outlineVariant.withOpacity(0.25)),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSettingsItem(
+      BuildContext context, bool isDark, ColorScheme scheme, SettingsItemData item) {
+    switch (item.type) {
+      case SettingsItemType.switchTile:
+        return _switchTile(context, isDark, scheme,
+            icon: item.icon, title: item.title, subtitle: item.subtitle,
+            value: item.switchValue?.call() ?? false,
+            enabled: item.switchEnabled?.call() ?? true,
+            onChanged: item.switchOnChanged);
+      case SettingsItemType.custom:
+        return item.customBuilder?.call(context, scheme, isDark) ?? const SizedBox.shrink();
+      case SettingsItemType.nav:
+      default:
+        return _navTile(context, isDark, scheme,
+            icon: item.icon, title: item.title,
+            subtitle: item.subtitle,
+            trailingText: item.trailingText,
+            enabled: item.switchEnabled?.call() ?? true,
+            onTap: item.onTap ?? () {});
+    }
   }
 
   // ==================== 通用构建方法 ====================
@@ -1251,69 +1334,4 @@ class _SettingsContainerState extends State<_SettingsContainer>
   bool get wantKeepAlive => true;
 }
 
-// ==================== 辅助组件 ====================
-
-/// 分组标题
-class _SectionHeader extends StatelessWidget {
-  final String title;
-  final IconData icon;
-
-  const _SectionHeader({required this.title, required this.icon});
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 16, 20, 6),
-      child: Row(
-        children: [
-          Icon(icon, size: 16, color: scheme.primary),
-          const SizedBox(width: 6),
-          Text(title,
-              style: TextStyle(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w600,
-                  color: scheme.primary,
-                  letterSpacing: 0.5)),
-        ],
-      ),
-    );
-  }
-}
-
-/// 统一卡片容器
-class _SettingsCard extends StatelessWidget {
-  final List<Widget> children;
-
-  const _SettingsCard({required this.children});
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-
-    return Card(
-      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-      elevation: isDark ? 0 : 1,
-      shadowColor: scheme.shadow.withOpacity(0.08),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-      color: isDark
-          ? scheme.surfaceVariant.withOpacity(0.3)
-          : scheme.surface,
-      clipBehavior: Clip.antiAlias,
-      child: Column(
-        children: [
-          for (int i = 0; i < children.length; i++) ...[
-            children[i],
-            if (i < children.length - 1)
-              Divider(
-                  height: 1,
-                  indent: 68,
-                  endIndent: 16,
-                  color: scheme.outlineVariant.withOpacity(0.25)),
-          ]
-        ],
-      ),
-    );
-  }
-}
+  // (旧的 _SectionHeader / _SettingsCard 已替换为 _buildSectionHeader / _buildSectionCard)

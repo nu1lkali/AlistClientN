@@ -33,4 +33,5 @@ class NamedRouter {
   static const lrcDebug = "/lrcDebug";
   static const tiktokPlayer = "/tiktokPlayer";
   static const strmPlayer = "/strmPlayer";
+  static const linkedDeletionSettings = "/linkedDeletionSettings";
 }

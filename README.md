@@ -16,6 +16,8 @@
 - 📥 下载管理器（并发下载、断点续传）
 - 🌐 多服务器/多账户管理
 - 💬 外挂字幕支持
+- 🔗 **SmartStrm 联动删除**（v1.4.0 新增）：删除 .strm 文件自动通知 SmartStrm 同步删除云盘媒体文件
+- 🔍 **设置搜索**（v1.4.0 新增）：快速搜索定位设置项
 
 ## 下载
 
@@ -258,8 +260,10 @@ https://wwanb.lanzoum.com/b016kpl6ub
 - 流媒体地址直接播放
 - .strm 主机替换配置（内网→公网地址映射）
 - STRM 预加载下一个视频开关
+- **SmartStrm 联动删除**（v1.4.0）：Emby 模拟删除 Webhook 配置与测试
+- **设置搜索**（v1.4.0）：搜索按钮动态过滤设置项
 - 外挂字幕开关与配置
-- 设置页分组重构：账户与存储、网络与预加载、播放器配置、界面与个性化、过滤器与高级、关于
+- 设置页分组重构：账户与存储、网络与预加载、播放器配置、本地字幕、界面与个性化、过滤器与高级、.strm 设置、影视联动删除、关于
 
 ### UI 优化
 - 圆角卡片设计，增强视觉层次
@@ -383,6 +387,23 @@ storePassword=your_store_password
 ---
 
 ## 更新记录
+
+### v1.4.0
+- **SmartStrm 联动删除**：删除 .strm 文件时自动发送 Emby 格式 Webhook 通知 SmartStrm 同步删除网盘媒体文件
+  - 独立设置页面：功能总开关、Webhook URL 配置、群晖 strm 目录配置、路径转换预览
+  - 五级渐进式路径匹配算法，兼容各种 AList 挂载前缀命名（`NAS`/`NASABCD`/`群晖` 等）
+  - 空路径安全拦截，防止误删整个网盘
+  - 连通性测试按钮（发送 Emby 标准 `system.notificationtest` 事件）
+  - 文件日志系统：记录每次发送的 Payload 和响应，最多保留 300 行，支持查看和清空
+  - 发送方式从 multipart/form-data 改为 application/json，与 SmartStrm 官方格式一致
+  - 批量删除改造为并发批次发送（每批 3 条，批间 100ms）
+  - 覆盖所有删除入口：左滑删除、更多菜单删除、多选批量删除、不喜欢列表单条/全部删除
+  - 仅对 .strm 文件生效，普通视频不触发
+- **设置页面搜索**：AppBar 右侧新增搜索按钮，输入关键词动态过滤设置项
+  - 设置页重构为数据模型驱动（`SettingsItemData` / `SettingsSectionData`）
+  - 支持中英文搜索词、拼音别名
+  - 无匹配项时显示空状态提示
+- 致谢 [SmartStrm](https://github.com/Cp0204/SmartStrm) 作者
 
 ### v1.3.10
 - **修复大目录视频数据丢失 Bug**：主加载方法 `_loadFilesInner()` 从分页模式（`per_page: 500`）改为全量获取（`per_page: 0`），修复因 Alist API 不返回 `has_more` / `pages_total` 字段导致分页提前终止、大量视频文件丢失的问题
