@@ -75,13 +75,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   return Container(
                     height: 40,
                     decoration: BoxDecoration(
-                      color: isDark
-                          ? scheme.surfaceVariant.withOpacity(0.5)
-                          : scheme.surfaceVariant.withOpacity(0.3),
                       borderRadius: BorderRadius.circular(10),
                       border: hasFocus
                           ? Border.all(color: scheme.primary, width: 1.5)
-                          : Border.all(color: Colors.transparent, width: 1.5),
+                          : Border.all(color: scheme.outlineVariant.withOpacity(0.4), width: 1),
                     ),
                     padding: const EdgeInsets.symmetric(horizontal: 12),
                     child: Row(
