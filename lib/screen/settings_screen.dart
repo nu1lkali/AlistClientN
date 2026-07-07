@@ -68,43 +68,55 @@ class _SettingsScreenState extends State<SettingsScreen> {
       final searching = _isSearching.value;
       return AlistScaffold(
         appbarTitle: searching
-            ? Container(
-                height: 40,
-                decoration: BoxDecoration(
-                  color: isDark
-                      ? scheme.surfaceVariant.withOpacity(0.5)
-                      : scheme.surfaceVariant.withOpacity(0.3),
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                padding: const EdgeInsets.symmetric(horizontal: 12),
-                child: Row(
-                  children: [
-                    Icon(Icons.search_rounded, size: 20, color: scheme.outline),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: TextField(
-                        controller: _searchController,
-                        focusNode: _searchFocus,
-                        style: TextStyle(fontSize: 15, color: scheme.onSurface),
-                        decoration: InputDecoration(
-                          hintText: '搜索设置项...',
-                          hintStyle: TextStyle(fontSize: 15, color: scheme.outline),
-                          border: InputBorder.none,
-                          isCollapsed: true,
-                        ),
-                        onChanged: (v) => _searchQuery.value = v.trim(),
-                      ),
+            ? ListenableBuilder(
+                listenable: _searchFocus,
+                builder: (_, __) {
+                  final hasFocus = _searchFocus.hasFocus;
+                  return Container(
+                    height: 40,
+                    decoration: BoxDecoration(
+                      color: isDark
+                          ? scheme.surfaceVariant.withOpacity(0.5)
+                          : scheme.surfaceVariant.withOpacity(0.3),
+                      borderRadius: BorderRadius.circular(10),
+                      border: hasFocus
+                          ? Border.all(color: scheme.primary, width: 1.5)
+                          : Border.all(color: Colors.transparent, width: 1.5),
                     ),
-                    if (_searchQuery.value.isNotEmpty)
-                      GestureDetector(
-                        onTap: () {
-                          _searchController.clear();
-                          _searchQuery.value = '';
-                        },
-                        child: Icon(Icons.clear_rounded, size: 18, color: scheme.outline),
-                      ),
-                  ],
-                ),
+                    padding: const EdgeInsets.symmetric(horizontal: 12),
+                    child: Row(
+                      children: [
+                        Icon(Icons.search_rounded, size: 20, color: hasFocus ? scheme.primary : scheme.outline),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: TextField(
+                            controller: _searchController,
+                            focusNode: _searchFocus,
+                            cursorColor: scheme.primary,
+                            style: TextStyle(fontSize: 15, color: scheme.onSurface),
+                            decoration: InputDecoration(
+                              hintText: '搜索设置项...',
+                              hintStyle: TextStyle(fontSize: 15, color: scheme.outline),
+                              border: InputBorder.none,
+                              enabledBorder: InputBorder.none,
+                              focusedBorder: InputBorder.none,
+                              isCollapsed: true,
+                            ),
+                            onChanged: (v) => _searchQuery.value = v.trim(),
+                          ),
+                        ),
+                        if (_searchQuery.value.isNotEmpty)
+                          GestureDetector(
+                            onTap: () {
+                              _searchController.clear();
+                              _searchQuery.value = '';
+                            },
+                            child: Icon(Icons.clear_rounded, size: 18, color: scheme.outline),
+                          ),
+                      ],
+                    ),
+                  );
+                },
               )
             : Text(Intl.screenName_settings.tr),
         appbarActions: [
@@ -403,11 +415,23 @@ class _SettingsContainerState extends State<_SettingsContainer>
               SpUtil.putBool(AlistConstant.strmHostOverrideEnabled, v);
               setState(() {});
             }),
-        SettingsItemData(icon: Icons.edit_rounded, title: '内网→公网地址映射',
-            subtitle: '配置 .strm URL 主机地址替换规则',
-            trailingText: '未配置',
+        SettingsItemData(
+            icon: Icons.edit_rounded, title: '内网→公网地址映射',
             searchTerms: ['strm', 'host', 'frp', '映射', '公网'],
-            onTap: () => _showStrmHostOverrideDialog(context)),
+            type: SettingsItemType.custom,
+            customBuilder: (context, scheme, isDark) {
+              final enabled = SpUtil.getBool(AlistConstant.strmHostOverrideEnabled, defValue: false) ?? false;
+              final from = SpUtil.getString(AlistConstant.strmHostOverrideFrom) ?? '';
+              final to = SpUtil.getString(AlistConstant.strmHostOverrideTo) ?? '';
+              if (enabled && (from.isNotEmpty || to.isNotEmpty)) {
+                return _buildHostMappingCard(context, scheme, isDark, from, to);
+              }
+              return _navTile(context, isDark, scheme,
+                  icon: Icons.edit_rounded,
+                  title: '内网→公网地址映射',
+                  trailingText: '未配置',
+                  onTap: () => _showStrmHostOverrideDialog(context));
+            }),
         SettingsItemData(
             icon: Icons.speed_rounded, title: '预加载下一个视频',
             subtitle: '播放 2 秒后预加载下一段流，可能触发风控',
