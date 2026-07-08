@@ -8,6 +8,7 @@ import 'package:alist/util/constant.dart';
 import 'package:alist/util/log_utils.dart';
 import 'package:dio/dio.dart';
 import 'package:flustars/flustars.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter_smart_dialog/flutter_smart_dialog.dart';
 import 'package:intl/intl.dart';
 import 'package:path_provider/path_provider.dart';
@@ -15,18 +16,214 @@ import 'package:path_provider/path_provider.dart';
 /// SmartStrm 联动删除 Webhook 服务
 ///
 /// 在 AList 中成功删除 .strm 文件后，向 SmartStrm 后端发送 Webhook，
-/// 通知后端同步删除 115 网盘中的真实媒体文件。
+/// 通知后端同步删除云端存储中的真实媒体文件。
+
+/// Webhook 发送结果
+class _WebhookSendResult {
+  final bool ok;
+  final bool pathMismatch;
+  final String remotePath;
+  final String expectedName;
+  const _WebhookSendResult({
+    required this.ok,
+    required this.pathMismatch,
+    required this.remotePath,
+    required this.expectedName,
+  });
+}
+
 class SmartStrmWebhook {
   static const String tag = "SmartStrmWebhook";
 
-  /// 发送联动删除 Webhook
+  /// 发送联动删除 Webhook（单个文件，带 toast/dialog 提示）
   ///
   /// [alistFilePath] AList 中的文件完整路径，如:
   ///   "/NAS/volume1/docker/smartstrm/strm/115/测试/(1集)_(1).(mp4).strm"
   ///   或 "/volume1/docker/smartstrm/strm/115/测试/(1集)_(1).(mp4).strm"
   ///
   /// 返回 true 表示发送成功，false 表示发送失败或被拦截。
+  /// 成功时弹 toast；路径不匹配时弹醒目的 AlertDialog 警告。
   static Future<bool> sendDeleteWebhook(String alistFilePath) async {
+    final r =
+        await _sendDeleteWebhookInternal(alistFilePath, showToast: true);
+    return r.ok;
+  }
+
+  /// 发送联动删除 Webhook（静默模式，不弹 toast/dialog）
+  ///
+  /// 与 [sendDeleteWebhook] 逻辑一致，但不弹任何 UI 提示，
+  /// 适用于批量删除场景，由调用方统一汇总。
+  ///
+  /// 返回 true 表示发送成功，false 表示发送失败或被拦截。
+  static Future<bool> sendDeleteWebhookSilently(String alistFilePath) async {
+    final r =
+        await _sendDeleteWebhookInternal(alistFilePath, showToast: false);
+    return r.ok;
+  }
+
+  /// 批量发送联动删除 Webhook（静默汇总 + 路径异常立即中止）
+  ///
+  /// 每批 3 条并发。一旦检测到任何路径不匹配，立即中止后续发送，
+  /// 防止后端异常时灾难性地误删整个网盘。
+  ///
+  /// 返回 (成功数, 失败数, 已跳过数, 是否因路径异常中止)。
+  static Future<({
+    int success,
+    int fail,
+    int skipped,
+    bool aborted,
+    ({String expected, String actual})? mismatch
+  })> sendBatchDeleteWebhooks(List<String> paths) async {
+    int success = 0;
+    int fail = 0;
+    int skipped = 0;
+    ({String expected, String actual})? mismatch;
+
+    const batchSize = 3;
+    for (var i = 0; i < paths.length; i += batchSize) {
+      final batch = paths.skip(i).take(batchSize).toList();
+      final results = await Future.wait(
+        batch.map((p) => _sendDeleteWebhookInternal(p, showToast: false)),
+      );
+      for (final r in results) {
+        if (r.ok && r.pathMismatch) {
+          // 路径异常！立即标记并中止后续发送
+          mismatch = (expected: r.expectedName, actual: r.remotePath);
+          success++; // 这个请求本身"成功"了，但路径不对
+          break;
+        } else if (r.ok) {
+          success++;
+        } else {
+          fail++;
+        }
+      }
+      // 检测到异常，立即停止
+      if (mismatch != null) {
+        // 计算剩余未发送的数量
+        final remainingInBatch = batch.length - results.length;
+        final remainingAfter = paths.length - (i + batch.length);
+        skipped = remainingInBatch + remainingAfter;
+        break;
+      }
+      if (i + batchSize < paths.length) {
+        await Future.delayed(const Duration(milliseconds: 100));
+      }
+    }
+
+    // 路径异常时弹醒目的中止对话框
+    if (mismatch != null) {
+      _showAbortDialog(mismatch, success, fail, skipped);
+    }
+
+    return (
+      success: success,
+      fail: fail,
+      skipped: skipped,
+      aborted: mismatch != null,
+      mismatch: mismatch
+    );
+  }
+
+  /// 批量删除遇到路径异常 → 立即中止的醒目警告对话框
+  static void _showAbortDialog(
+    ({String expected, String actual}) mismatch,
+    int success,
+    int fail,
+    int skipped,
+  ) {
+    SmartDialog.show(
+      clickMaskDismiss: false,
+      builder: (context) => AlertDialog(
+        shape:
+            RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Row(
+          children: [
+            Icon(Icons.dangerous_rounded,
+                color: Colors.red.shade700, size: 28),
+            const SizedBox(width: 8),
+            const Expanded(
+              child: Text('🛑 联动删除已紧急中止',
+                  style: TextStyle(fontWeight: FontWeight.w700, fontSize: 17)),
+            ),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('检测到 SmartStrm 后端返回的删除路径与预期不符，'
+                '已立即中止后续所有请求，防止灾难性误删！',
+                style: TextStyle(
+                    fontSize: 14,
+                    color: Colors.red.shade700,
+                    fontWeight: FontWeight.w500)),
+            const SizedBox(height: 16),
+            // 异常详情
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.red.shade50,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.red.shade200),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text('触发异常的请求:',
+                      style: TextStyle(
+                          fontSize: 12, fontWeight: FontWeight.w600)),
+                  const SizedBox(height: 6),
+                  _mismatchRow('预期', mismatch.expected),
+                  const SizedBox(height: 4),
+                  _mismatchRow('实际', mismatch.actual),
+                ],
+              ),
+            ),
+            const SizedBox(height: 12),
+            // 统计
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.orange.shade50,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.orange.shade200),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('已发送 $success 个 | 失败 $fail 个 | 已阻止 $skipped 个',
+                      style: const TextStyle(
+                          fontSize: 14, fontWeight: FontWeight.w600)),
+                ],
+              ),
+            ),
+            const SizedBox(height: 12),
+            const Text(
+                '请立即检查 SmartStrm 的回收站恢复误删数据，'
+                '并排查后端异常后再重新操作。',
+                style: TextStyle(fontSize: 13, color: Colors.grey)),
+          ],
+        ),
+        actions: [
+          FilledButton(
+            style: FilledButton.styleFrom(
+                backgroundColor: Colors.red.shade700),
+            onPressed: () => SmartDialog.dismiss(),
+            child: const Text('我知道了'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// 核心发送逻辑（内部方法）
+  ///
+  /// [showToast] 为 true 时成功/失败/路径异常都会弹 toast，false 则静默返回。
+  static Future<_WebhookSendResult> _sendDeleteWebhookInternal(
+      String alistFilePath,
+      {required bool showToast}) async {
     final fileName = _extractFileNameWithoutStrm(alistFilePath);
 
     // 1. 检查功能开关
@@ -35,7 +232,8 @@ class SmartStrmWebhook {
             false;
     if (!enabled) {
       await _logSkip(fileName, '功能开关未开启');
-      return false;
+      return const _WebhookSendResult(
+          ok: false, pathMismatch: false, remotePath: '', expectedName: '');
     }
 
     // 2. 获取配置
@@ -43,7 +241,8 @@ class SmartStrmWebhook {
         SpUtil.getString(AlistConstant.linkedDeletionWebhookUrl) ?? '';
     if (webhookUrl.isEmpty) {
       await _logSkip(fileName, 'Webhook URL 未配置');
-      return false;
+      return const _WebhookSendResult(
+          ok: false, pathMismatch: false, remotePath: '', expectedName: '');
     }
 
     final strmDir = SpUtil.getString(
@@ -53,7 +252,8 @@ class SmartStrmWebhook {
         '';
     if (strmDir.isEmpty) {
       await _logSkip(fileName, 'strm 目录未配置');
-      return false;
+      return const _WebhookSendResult(
+          ok: false, pathMismatch: false, remotePath: '', expectedName: '');
     }
 
     // 3. 路径转换
@@ -68,7 +268,8 @@ class SmartStrmWebhook {
         '【安全拦截】解析后的 strm 路径异常（$transformedPath），'
         '已阻止联动删除请求，防止误删网盘数据！',
       );
-      return false;
+      return const _WebhookSendResult(
+          ok: false, pathMismatch: false, remotePath: '', expectedName: '');
     }
 
     // 5. 从转换后的路径重新提取准确文件名
@@ -97,11 +298,116 @@ class SmartStrmWebhook {
         tag: tag);
 
     // 7. 发送请求 + 写日志
-    final ok = await _doPost(webhookUrl, payload, '联动删除', payloadFileName);
-    if (ok) {
-      SmartDialog.showToast('联动删除通知已发送');
+    final result =
+        await _doPost(webhookUrl, payload, '联动删除', payloadFileName);
+    if (showToast) {
+      if (result.ok && result.pathMismatch) {
+        _showPathMismatchDialog(payloadFileName, result.remotePath);
+      } else if (result.ok) {
+        SmartDialog.showToast('联动删除通知已发送');
+      } else {
+        SmartDialog.showToast('联动删除通知发送失败');
+      }
     }
-    return ok;
+    return result;
+  }
+
+  /// 弹出路径不匹配的警告对话框（醒目提醒用户检查回收站）
+  static void _showPathMismatchDialog(
+      String expectedName, String actualRemotePath) {
+    SmartDialog.show(
+      clickMaskDismiss: false,
+      builder: (context) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Row(
+          children: [
+            Icon(Icons.warning_amber_rounded, color: Colors.red.shade600, size: 28),
+            const SizedBox(width: 8),
+            const Text('⚠️ 联动删除路径异常',
+                style: TextStyle(fontWeight: FontWeight.w700, fontSize: 17)),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('SmartStrm 后端返回的删除路径与预期不符，'
+                '可能误删了其他文件或目录！',
+                style: TextStyle(
+                    fontSize: 14,
+                    color: Colors.red.shade700,
+                    fontWeight: FontWeight.w500)),
+            const SizedBox(height: 16),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.red.shade50,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.red.shade200),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  _mismatchRow('预期删除', expectedName),
+                  const SizedBox(height: 8),
+                  _mismatchRow('实际删除', actualRemotePath),
+                ],
+              ),
+            ),
+            const SizedBox(height: 12),
+            const Text('请立即检查 SmartStrm 的回收站，恢复误删数据。',
+                style: TextStyle(fontSize: 13, color: Colors.grey)),
+          ],
+        ),
+        actions: [
+          FilledButton(
+            style: FilledButton.styleFrom(
+                backgroundColor: Colors.red.shade600),
+            onPressed: () => SmartDialog.dismiss(),
+            child: const Text('我知道了'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ==================== UI 测试入口（模拟数据，不发送真实请求） ====================
+
+  /// 测试：弹出单个文件路径异常警告对话框（模拟数据）
+  static void showTestSingleMismatch() {
+    _showPathMismatchDialog('(1集)_(1).(mp4)', '/七海/测试2');
+  }
+
+  /// 测试：弹出批量中止对话框（模拟数据）
+  static void showTestBatchAbort() {
+    _showAbortDialog(
+      (expected: '(1集)_(1).(mp4)', actual: '/七海/测试2'),
+      5, 1, 12,
+    );
+  }
+
+  static Widget _mismatchRow(String label, String value) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        SizedBox(
+          width: 64,
+          child: Text(label,
+              style: const TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                  color: Colors.black54)),
+        ),
+        Expanded(
+          child: Text(value,
+              style: const TextStyle(
+                  fontSize: 13,
+                  fontFamily: 'monospace',
+                  fontWeight: FontWeight.w500)),
+        ),
+      ],
+    );
   }
 
   /// 自动生成一个持久化的虚拟 Server ID（首次生成后存入 SpUtil，后续复用）
@@ -248,8 +554,11 @@ class SmartStrmWebhook {
 
   // ==================== 核心发送逻辑 ====================
 
+  /// Webhook 发送结果
+  /// [ok] 是否成功, [pathMismatch] 远端删除路径是否与预期不符,
+  /// [remotePath] 服务端返回的 remote_path
   /// 实际执行 HTTP POST 并写日志
-  static Future<bool> _doPost(
+  static Future<_WebhookSendResult> _doPost(
     String webhookUrl,
     Map<String, dynamic> payload,
     String logAction,
@@ -275,14 +584,46 @@ class SmartStrmWebhook {
       LogUtil.d('[$tag] Webhook 响应: status=${response.statusCode}, body=${response.data}',
           tag: tag);
 
-      final ok = response.statusCode == 200;
+      // 判断成功: HTTP 200 且响应体的 success 字段为 true
+      bool ok = response.statusCode == 200;
+      bool pathMismatch = false;
+      String remotePath = '';
+      final expectedName = payload['Item']?['Name']?.toString() ?? '';
+
+      if (response.data is Map) {
+        final data = response.data as Map;
+        if (data.containsKey('success')) {
+          ok = data['success'] == true;
+        }
+        // 检查 remote_path 是否与预期一致：远端路径应当以预期的文件名结尾
+        remotePath = data['remote_path']?.toString() ?? '';
+        if (ok && remotePath.isNotEmpty && expectedName.isNotEmpty) {
+          pathMismatch = !remotePath.endsWith(expectedName);
+        }
+      }
+
       await _logResult(ok, logAction, logDetail, payload,
           response.statusCode ?? -1, '${response.data}');
-      return ok;
+      if (pathMismatch) {
+        final ts = DateFormat('yyyy-MM-dd HH:mm:ss').format(DateTime.now());
+        await _appendLog(
+            '[$ts] ⚠️ 路径异常！请求: $expectedName, 远端实际删除: $remotePath');
+      }
+      return _WebhookSendResult(
+          ok: ok,
+          pathMismatch: pathMismatch,
+          remotePath: remotePath,
+          expectedName: expectedName);
     } catch (e) {
       LogUtil.e('[$tag] 发送 Webhook 失败: $e', tag: tag);
       await _logResult(false, logAction, logDetail, payload, -1, '$e');
-      return false;
+      final expectedName =
+          payload['Item']?['Name']?.toString() ?? '';
+      return _WebhookSendResult(
+          ok: false,
+          pathMismatch: false,
+          remotePath: '',
+          expectedName: expectedName);
     }
   }
 

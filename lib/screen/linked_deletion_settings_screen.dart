@@ -398,6 +398,61 @@ class _LinkedDeletionSettingsScreenState
 
           const SizedBox(height: 16),
 
+          // ===== UI 测试 =====
+          _buildSectionHeader('UI 测试（模拟数据）', Icons.bug_report_rounded, scheme),
+          _SettingsCard(
+            children: [
+              Padding(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      '使用模拟数据测试警告对话框 UI，不会发起真实请求。',
+                      style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant, height: 1.5),
+                    ),
+                    const SizedBox(height: 12),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: OutlinedButton.icon(
+                            icon: const Icon(Icons.warning_amber_rounded, size: 18),
+                            label: const Text('单个路径异常'),
+                            onPressed: () => SmartStrmWebhook.showTestSingleMismatch(),
+                            style: OutlinedButton.styleFrom(
+                              foregroundColor: Colors.red.shade600,
+                              padding: const EdgeInsets.symmetric(vertical: 14),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(10),
+                              ),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: OutlinedButton.icon(
+                            icon: const Icon(Icons.dangerous_rounded, size: 18),
+                            label: const Text('批量紧急中止'),
+                            onPressed: () => SmartStrmWebhook.showTestBatchAbort(),
+                            style: OutlinedButton.styleFrom(
+                              foregroundColor: Colors.red.shade700,
+                              padding: const EdgeInsets.symmetric(vertical: 14),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(10),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+
+          const SizedBox(height: 16),
+
           // ===== 感谢 SmartStrm =====
           _buildSectionHeader('致谢', Icons.favorite_rounded, scheme),
           _SettingsCard(
@@ -576,6 +631,36 @@ class _LinkedDeletionSettingsScreenState
                         style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
                     const Spacer(),
                     IconButton(
+                      icon: const Icon(Icons.delete_sweep_rounded, size: 22),
+                      tooltip: '清空全部',
+                      onPressed: () async {
+                        final confirmed = await showDialog<bool>(
+                          context: ctx,
+                          builder: (dCtx) => AlertDialog(
+                            title: const Text('清空日志'),
+                            content: const Text('确定要清空所有 Webhook 发送日志吗？'),
+                            actions: [
+                              TextButton(
+                                onPressed: () => Navigator.pop(dCtx, false),
+                                child: const Text('取消'),
+                              ),
+                              FilledButton(
+                                onPressed: () => Navigator.pop(dCtx, true),
+                                style: FilledButton.styleFrom(
+                                    backgroundColor: Colors.red),
+                                child: const Text('清空'),
+                              ),
+                            ],
+                          ),
+                        );
+                        if (confirmed == true) {
+                          await SmartStrmWebhook.clearLog();
+                          if (ctx.mounted) Navigator.pop(ctx);
+                          SmartDialog.showToast('日志已清空');
+                        }
+                      },
+                    ),
+                    IconButton(
                       icon: const Icon(Icons.close),
                       onPressed: () => Navigator.pop(ctx),
                     ),
@@ -679,8 +764,9 @@ class _LinkedDeletionSettingsScreenState
                 ),
                 const SizedBox(height: 6),
                 Text(
-                  '此功能会在删除本地 .strm 文件后，自动通知 SmartStrm 后端同步删除 115 网盘中对应的真实媒体大文件（可能几十 GB）。\n\n'
+                  '此功能会在删除本地 .strm 文件后，自动通知 SmartStrm 后端同步删除云端存储中对应的真实媒体大文件（可能几十 GB）。\n\n'
                   '• 删除操作不可撤销\n'
+                  '• 需先部署配置 SmartStrm 后端服务才能使用\n'
                   '• 请务必确认 strm 目录配置正确\n'
                   '• 内置空路径保护机制，但是否启用仍需谨慎\n\n'
                   '启用前请先在测试环境验证路径解析是否正常。',

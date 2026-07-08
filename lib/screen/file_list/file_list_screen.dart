@@ -3163,27 +3163,35 @@ class _FileListScreenState extends State<FileListScreen>
         _selectedIndices.clear();
       });
       SmartDialog.showToast("删除成功");
-      // 联动删除：串行发送 Webhook，每条间隔 300ms，避免并发冲垮后端
-      _sendWebhooksSequentially(strmPaths);
+      // 联动删除：后台批量发送 Webhook + 删除帧截图，汇总后统一弹 toast
+      if (strmPaths.isNotEmpty) {
+        _sendBatchWebhooksWithSummary(strmPaths);
+      }
     }, onError: (code, msg) {
       SmartDialog.showToast(msg);
       SmartDialog.dismiss();
     });
   }
 
-  /// 并发发送联动删除 Webhook + 删除帧截图（每批 3 条，批间 100ms）
-  static void _sendWebhooksSequentially(List<String> paths) {
+  /// 后台批量发送联动删除 Webhook + 帧截图删除，完成后统一弹 toast 汇总
+  static void _sendBatchWebhooksWithSummary(List<String> paths) {
     Future.microtask(() async {
-      const batchSize = 3;
-      for (var i = 0; i < paths.length; i += batchSize) {
-        final batch = paths.skip(i).take(batchSize).toList();
-        await Future.wait(batch.map((p) async {
-          await SmartStrmWebhook.sendDeleteWebhook(p);
-          await SmartStrmWebhook.deleteAssociatedThumbnails(p);
-        }));
-        if (i + batchSize < paths.length) {
-          await Future.delayed(const Duration(milliseconds: 100));
-        }
+      final result = await SmartStrmWebhook.sendBatchDeleteWebhooks(paths);
+      // 仅对已成功发送的删除帧截图（跳过被中止的）
+      final effectiveCount = result.success + result.fail;
+      for (var i = 0; i < effectiveCount && i < paths.length; i++) {
+        await SmartStrmWebhook.deleteAssociatedThumbnails(paths[i]);
+      }
+      // 路径异常中止时，dialog 已由 sendBatchDeleteWebhooks 内部弹出，不再弹 toast
+      if (result.aborted) return;
+      // 统一汇总 toast
+      if (result.success > 0 && result.fail == 0) {
+        SmartDialog.showToast('联动删除通知: 全部成功 (${result.success}个)');
+      } else if (result.success > 0 && result.fail > 0) {
+        SmartDialog.showToast(
+            '联动删除通知: 成功 ${result.success} 个, 失败 ${result.fail} 个');
+      } else if (result.success == 0 && result.fail > 0) {
+        SmartDialog.showToast('联动删除通知: 全部失败 (${result.fail}个)');
       }
     });
   }

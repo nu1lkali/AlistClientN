@@ -446,7 +446,7 @@ class _SettingsContainerState extends State<_SettingsContainer>
       SettingsSectionData(title: '影视联动删除', icon: Icons.delete_forever_rounded, items: [
         SettingsItemData(icon: Icons.link_rounded, title: '联动删除 Webhook',
             subtitle: '删除 .strm 时联动 SmartStrm 删除网盘媒体文件',
-            searchTerms: ['webhook', 'emby', 'smartstrm', '联动', '删除', 'strm', '115'],
+            searchTerms: ['webhook', 'emby', 'smartstrm', '联动', '删除', 'strm', '云端'],
             type: SettingsItemType.custom,
             customBuilder: (context, scheme, isDark) {
               return ListTile(

@@ -406,17 +406,29 @@ class _DislikedVideosScreenState extends State<DislikedVideosScreen> {
     SmartDialog.showToast(
         '删除完成: 成功 $successCount 个${failCount > 0 ? ', 失败 $failCount 个' : ''}');
 
-    // 联动删除：每批 3 条并发（webhook + 帧截图），批间 100ms
-    const batchSize = 3;
-    for (var i = 0; i < strmPaths.length; i += batchSize) {
-      final batch = strmPaths.skip(i).take(batchSize).toList();
-      await Future.wait(batch.map((p) async {
-        await SmartStrmWebhook.sendDeleteWebhook(p);
-        await SmartStrmWebhook.deleteAssociatedThumbnails(p);
-      }));
-      if (i + batchSize < strmPaths.length) {
-        await Future.delayed(const Duration(milliseconds: 100));
-      }
+    // 联动删除：后台批量发送 Webhook + 帧截图，汇总后统一弹 toast
+    if (strmPaths.isNotEmpty) {
+      _sendBatchWebhooksWithSummary(strmPaths);
+    }
+  }
+
+  /// 后台批量发送联动删除 Webhook + 帧截图，完成后统一弹 toast 汇总
+  void _sendBatchWebhooksWithSummary(List<String> paths) async {
+    final result = await SmartStrmWebhook.sendBatchDeleteWebhooks(paths);
+    // 仅对已成功发送的删除帧截图（跳过被中止的）
+    final effectiveCount = result.success + result.fail;
+    for (var i = 0; i < effectiveCount && i < paths.length; i++) {
+      await SmartStrmWebhook.deleteAssociatedThumbnails(paths[i]);
+    }
+    // 路径异常中止时，dialog 已由 sendBatchDeleteWebhooks 内部弹出，不再弹 toast
+    if (result.aborted) return;
+    if (result.success > 0 && result.fail == 0) {
+      SmartDialog.showToast('联动删除通知: 全部成功 (${result.success}个)');
+    } else if (result.success > 0 && result.fail > 0) {
+      SmartDialog.showToast(
+          '联动删除通知: 成功 ${result.success} 个, 失败 ${result.fail} 个');
+    } else if (result.success == 0 && result.fail > 0) {
+      SmartDialog.showToast('联动删除通知: 全部失败 (${result.fail}个)');
     }
   }
 }
