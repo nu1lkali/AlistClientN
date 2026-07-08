@@ -376,13 +376,13 @@ class SmartStrmWebhook {
 
   /// 测试：弹出单个文件路径异常警告对话框（模拟数据）
   static void showTestSingleMismatch() {
-    _showPathMismatchDialog('(1集)_(1).(mp4)', '/七海/测试2');
+    _showPathMismatchDialog('test-video.(mp4)', '/media/videos');
   }
 
   /// 测试：弹出批量中止对话框（模拟数据）
   static void showTestBatchAbort() {
     _showAbortDialog(
-      (expected: '(1集)_(1).(mp4)', actual: '/七海/测试2'),
+      (expected: 'test-video.(mp4)', actual: '/media/videos'),
       5, 1, 12,
     );
   }
@@ -596,9 +596,12 @@ class SmartStrmWebhook {
           ok = data['success'] == true;
         }
         // 检查 remote_path 是否与预期一致：远端路径应当以预期的文件名结尾
+        // SmartStrm 后端返回真实文件名，Item.Name 是 strm 文件名去后缀。
+        // 归一化：取 remote_path 最后一段，把 .ext 转回 .(ext) 再比较。
         remotePath = data['remote_path']?.toString() ?? '';
         if (ok && remotePath.isNotEmpty && expectedName.isNotEmpty) {
-          pathMismatch = !remotePath.endsWith(expectedName);
+          final actualFileName = remotePath.split('/').last;
+          pathMismatch = _normalizeBackendFileName(actualFileName) != expectedName;
         }
       }
 
@@ -791,6 +794,17 @@ class SmartStrmWebhook {
   /// 从完整路径中提取不含 .strm 后缀的文件名
   ///
   /// 例如: "/volume1/.../测试/(1集)_(1).(mp4).strm" → "(1集)_(1).(mp4)"
+  /// 将后端返回的真实文件名归一化为 strm 风格：.mp4 → .(mp4)
+  ///
+  /// 例如: "video.mp4" → "video.(mp4)"
+  static String _normalizeBackendFileName(String fileName) {
+    final lastDot = fileName.lastIndexOf('.');
+    if (lastDot <= 0 || lastDot == fileName.length - 1) return fileName;
+    final nameWithoutExt = fileName.substring(0, lastDot);
+    final ext = fileName.substring(lastDot + 1);
+    return '$nameWithoutExt.($ext)';
+  }
+
   static String _extractFileNameWithoutStrm(String path) {
     final normalized = path.replaceAll('\\', '/');
     final segments = normalized.split('/').where((s) => s.isNotEmpty).toList();
