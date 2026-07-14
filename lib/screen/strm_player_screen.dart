@@ -773,7 +773,9 @@ class _StrmPlayerScreenState extends State<StrmPlayerScreen>
       _preloadIdx = -1;
 
       _engine?.dispose();
-      _engine = null;
+      final vpEngine = VideoPlayerEngine();
+      vpEngine.wrapController(ctrl);
+      _engine = vpEngine;
       _controller = ctrl;
       _isInitializing = false;
 

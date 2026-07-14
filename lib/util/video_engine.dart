@@ -31,6 +31,14 @@ class VideoPlayerEngine implements VideoEngine {
   VideoPlayerController? _ctrl;
   VideoPlayerController? get ctrl => _ctrl;
 
+  /// 包装一个已初始化的 VideoPlayerController
+  void wrapController(VideoPlayerController c) {
+    _ctrl?.removeListener(_onChanged);
+    _ctrl?.dispose();
+    _ctrl = c;
+    _ctrl?.addListener(_onChanged);
+  }
+
   @override
   Duration get position => _ctrl?.value.position ?? Duration.zero;
 
@@ -261,6 +269,8 @@ class MediaKitEngine implements VideoEngine {
 
   @override
   Future<void> dispose() async {
+    try { _player?.pause(); } catch (_) {}
+    try { _player?.stop(); } catch (_) {}
     await _posSub?.cancel();
     await _playSub?.cancel();
     await _compSub?.cancel();
@@ -271,6 +281,5 @@ class MediaKitEngine implements VideoEngine {
     _videoCtrl = null;
     _player?.dispose();
     _player = null;
-    _videoCtrl = null;
   }
 }

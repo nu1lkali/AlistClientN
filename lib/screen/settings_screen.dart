@@ -266,8 +266,8 @@ class _SettingsContainerState extends State<_SettingsContainer>
             }),
         SettingsItemData(
             icon: Icons.memory_rounded, title: 'FFmpeg 软解',
-            subtitle: '开启后 strm/视界流 用 libmpv，内置播放器用 IJK 内核，支持 AVI/WMV 等老格式',
-            searchTerms: ['ffmpeg', '软解', 'avi', 'wmv', 'rmvb', '解码', 'ijk', 'mpv'],
+            subtitle: 'strm 采用 FFmpeg 软解处理',
+            searchTerms: ['ffmpeg', '软解', 'avi', 'wmv', 'rmvb', '解码'],
             type: SettingsItemType.switchTile,
             switchValue: () => _enableFfmpegSoftDecode.value,
             switchOnChanged: (v) {
