@@ -64,6 +64,7 @@ class AlistConstant {
   static const String strmHostOverrideTo = 'strmHostOverrideTo'; // 替换后主机地址（如 frp.example.com:12345）
   static const String strmBrightness = 'strmBrightness'; // strm 播放器亮度记忆
   static const String strmPreloadEnabled = 'strmPreloadEnabled'; // strm 预加载下一个视频
+  static const String enableFfmpegSoftDecode = 'enableFfmpegSoftDecode'; // FFmpeg 软解 (IJK/libmpv)
 
   // SmartStrm 联动删除
   static const String linkedDeletionEnabled = 'linkedDeletionEnabled'; // 联动删除总开关

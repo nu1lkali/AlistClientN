@@ -160,6 +160,7 @@ class _SettingsContainerState extends State<_SettingsContainer>
   late final RxBool _showTiktokPageIndicator;
   late final RxBool _showFileListShuffleButton;
   late final RxBool _autoPipEnabled;
+  late final RxBool _enableFfmpegSoftDecode;
   late final RxBool _enableLocalSubtitle;
   late final RxString _localSubtitlePath;
   late final RxBool _subtitleDownloadToSubtitleDir;
@@ -186,6 +187,8 @@ class _SettingsContainerState extends State<_SettingsContainer>
         (SpUtil.getBool(AlistConstant.showFileListShuffleButton, defValue: true) ?? true).obs;
     _autoPipEnabled =
         (SpUtil.getBool(AlistConstant.autoPipEnabled, defValue: true) ?? true).obs;
+    _enableFfmpegSoftDecode =
+        (SpUtil.getBool(AlistConstant.enableFfmpegSoftDecode, defValue: false) ?? false).obs;
     _enableLocalSubtitle =
         (SpUtil.getBool(AlistConstant.enableLocalSubtitle, defValue: false) ?? false).obs;
     _localSubtitlePath =
@@ -260,6 +263,16 @@ class _SettingsContainerState extends State<_SettingsContainer>
             switchOnChanged: (v) {
               SpUtil.putBool(AlistConstant.enableMediaKitPlayer, v);
               _enableMediaKitPlayer.value = v;
+            }),
+        SettingsItemData(
+            icon: Icons.memory_rounded, title: 'FFmpeg 软解',
+            subtitle: '开启后 strm/视界流 用 libmpv，内置播放器用 IJK 内核，支持 AVI/WMV 等老格式',
+            searchTerms: ['ffmpeg', '软解', 'avi', 'wmv', 'rmvb', '解码', 'ijk', 'mpv'],
+            type: SettingsItemType.switchTile,
+            switchValue: () => _enableFfmpegSoftDecode.value,
+            switchOnChanged: (v) {
+              SpUtil.putBool(AlistConstant.enableFfmpegSoftDecode, v);
+              _enableFfmpegSoftDecode.value = v;
             }),
         SettingsItemData(icon: Icons.tune_rounded, title: Intl.settingsScreen_item_videoPlayer.tr,
             searchTerms: ['player', '播放'], onTap: () => Get.toNamed(NamedRouter.playerSettings)),

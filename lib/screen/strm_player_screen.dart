@@ -9,7 +9,9 @@ import 'package:alist/database/table/favorite.dart';
 import 'package:alist/database/table/file_viewing_record.dart';
 import 'package:alist/database/table/video_viewing_record.dart';
 import 'package:alist/entity/tiktok_play_list_model.dart';
+import 'package:alist/util/alist_plugin.dart';
 import 'package:alist/util/constant.dart';
+import 'package:alist/util/video_engine.dart';
 import 'package:alist/util/subtitle/subtitle.dart';
 import 'package:alist/widget/subtitle_view.dart';
 import 'package:alist/util/log_utils.dart' as log;
@@ -41,7 +43,8 @@ class _StrmPlayerScreenState extends State<StrmPlayerScreen>
   late final TikTokPlayListModel _playList;
   late int _currentIndex;
 
-  VideoPlayerController? _controller;
+  VideoPlayerController? _controller; // 保留给 video_player 引擎
+  VideoEngine? _engine; // 统一引擎接口
   late final SubtitleController _subtitleController;
   bool _isInitializing = false;
   bool _isPlaying = false;
@@ -193,7 +196,7 @@ class _StrmPlayerScreenState extends State<StrmPlayerScreen>
         // horizontal → seek
         _isSeeking = true;
         _wasPlayingBeforeSeek = _isPlaying;
-        _controller?.pause();
+        _engine?.pause();
         _progressTimer?.cancel();
       } else {
         // vertical → brightness / volume
@@ -245,8 +248,8 @@ class _StrmPlayerScreenState extends State<StrmPlayerScreen>
     final dy = e.position.dy - _verticalStartY;
 
     if (_isSeeking) {
-      _controller?.seekTo(_seekTarget);
-      if (_wasPlayingBeforeSeek) _controller?.play();
+      _engine?.seekTo(_seekTarget);
+      if (_wasPlayingBeforeSeek) _engine?.play();
       _startTimer();
       setState(() => _isSeeking = false);
     }
@@ -308,7 +311,9 @@ class _StrmPlayerScreenState extends State<StrmPlayerScreen>
     _preloadTimer?.cancel();
     _playlistSyncTimer?.cancel();
     _saveProgress(); // 退出时保存播放进度
-    _controller?.dispose();
+    _engine?.dispose();
+    _engine = null;
+    _controller = null;
     _preloadController?.dispose();
     _preloadController = null;
     _playlistAnimController.dispose();
@@ -340,7 +345,8 @@ class _StrmPlayerScreenState extends State<StrmPlayerScreen>
     _isInitializing = true;
 
     try {
-      _controller?.dispose();
+      _engine?.dispose();
+      _engine = null;
       _controller = null;
       if (mounted) setState(() {});
 
@@ -351,27 +357,50 @@ class _StrmPlayerScreenState extends State<StrmPlayerScreen>
         return;
       }
 
-      final ctrl = VideoPlayerController.networkUrl(
-        Uri.parse(url),
-        httpHeaders: v.provider == 'BaiduNetdisk'
-            ? {'User-Agent': 'pan.baidu.com'}
-            : {},
-      );
-      await ctrl.initialize();
+      final httpHeaders = v.provider == 'BaiduNetdisk'
+          ? <String, String>{'User-Agent': 'pan.baidu.com'}
+          : <String, String>{};
+
+      // 从 .strm 文件名推测远程视频格式，决定使用哪个解码引擎
+      final remoteExt = _guessRemoteFormat(v.fileName);
+      final ffmpegEnabled = SpUtil.getBool(AlistConstant.enableFfmpegSoftDecode, defValue: false) ?? false;
+      final useMediaKit = ffmpegEnabled ||
+          ['avi', 'wmv', 'rmvb', 'mpg', 'mpeg', 'vob', 'flv', 'divx', 'xvid', 'rm', 'asf', 'ogv', 'ogm'].contains(remoteExt);
+
+      VideoEngine engine;
+      if (useMediaKit) {
+        final mkEngine = MediaKitEngine();
+        mkEngine.createPlayer(); // 先创建 Player+VideoController，让 PlatformView 提前上树
+        _engine = mkEngine;     // 立即设置，让 build 能渲染 Video widget
+        if (mounted) setState(() {});
+        await mkEngine.openMedia(url, httpHeaders: httpHeaders); // 再加载媒体
+        engine = mkEngine;
+      } else {
+        final vpEngine = VideoPlayerEngine();
+        await vpEngine.createFromNetwork(url, httpHeaders: httpHeaders);
+        _controller = (vpEngine as VideoPlayerEngine).ctrl;
+        engine = vpEngine;
+        _engine = engine;
+      }
+
+      await engine.initialize();
       if (!mounted) {
-        ctrl.dispose();
+        engine.dispose();
+        _engine = null;
+        _controller = null;
         _isInitializing = false;
         return;
       }
 
-      ctrl.setLooping(_loopSingle);
-      _controller = ctrl;
+      engine.setLooping(_loopSingle);
       _isInitializing = false;
 
       // 加载上次播放进度并跳转
-      await _loadProgressAndSeek(idx, ctrl);
+      if (!useMediaKit) {
+        await _loadProgressAndSeek(idx, _controller!);
+      }
 
-      ctrl.play();
+      engine.play();
       _isPlaying = true;
       _recordViewing(idx);
       _startTimer();
@@ -441,11 +470,59 @@ class _StrmPlayerScreenState extends State<StrmPlayerScreen>
     _preloadIdx = -1;
   }
 
+  /// 从 .strm 文件名推测远程视频格式
+  /// "test.(avi).strm" → "avi", "movie.mp4.strm" → "mp4", "video.strm" → ""
+  static String _guessRemoteFormat(String fileName) {
+    // 去掉 .strm 后缀
+    var name = fileName;
+    if (name.toLowerCase().endsWith('.strm')) {
+      name = name.substring(0, name.length - 5);
+    }
+    // 匹配结尾的 .(ext) 或 .ext
+    final m = RegExp(r'\.\(?([a-zA-Z0-9]{2,5})\)?$').firstMatch(name);
+    if (m != null) {
+      return m.group(1)!.toLowerCase();
+    }
+    // 再试一次普通扩展名
+    final dot = name.lastIndexOf('.');
+    if (dot > 0 && dot < name.length - 1) {
+      return name.substring(dot + 1).toLowerCase();
+    }
+    return '';
+  }
+
+  /// FFMPEG 软解：将播放路由到原生 PlayerActivity（IJK 内核）
+  void _launchNativePlayer(int idx) async {
+    try {
+      final videosParams = <Map<String, String?>>[];
+      for (final v in _playList.videos) {
+        videosParams.add({
+          "name": v.fileName,
+          "remotePath": v.filePath,
+          "url": v.videoUrl,
+          "sign": v.sign,
+          "provider": v.provider,
+          "thumb": v.thumb,
+          "size": v.fileSize?.toString(),
+        });
+      }
+      final autoPipEnabled = SpUtil.getBool(AlistConstant.autoPipEnabled, defValue: true) ?? true;
+      final ffmpegSoftDecode = SpUtil.getBool(AlistConstant.enableFfmpegSoftDecode, defValue: false) ?? false;
+      await AlistPlugin.playVideoWithInternalPlayer(
+        videosParams, idx, null, null,
+        autoPipEnabled: autoPipEnabled,
+        ffmpegSoftDecode: ffmpegSoftDecode,
+      );
+    } catch (e) {
+      log.Log.e('StrmPlayer launchNative: $e');
+    }
+  }
+
   void _safePlay() {
     try {
-      final c = _controller;
-      if (c != null && c.value.isInitialized) {
-        c.play();
+      final engine = _engine;
+      if (engine != null && engine.isInitialized) {
+        engine.play();
         _isPlaying = true;
         if (mounted) setState(() {});
       }
@@ -454,9 +531,9 @@ class _StrmPlayerScreenState extends State<StrmPlayerScreen>
 
   void _safePause() {
     try {
-      final c = _controller;
-      if (c != null && c.value.isInitialized) {
-        c.pause();
+      final engine = _engine;
+      if (engine != null && engine.isInitialized) {
+        engine.pause();
         _isPlaying = false;
         if (mounted) setState(() {});
       }
@@ -513,10 +590,10 @@ class _StrmPlayerScreenState extends State<StrmPlayerScreen>
   }
 
   Future<void> _saveProgress() async {
-    final ctrl = _controller;
-    if (ctrl == null || !ctrl.value.isInitialized) return;
-    final position = ctrl.value.position.inMilliseconds;
-    final duration = ctrl.value.duration.inMilliseconds;
+    final engine = _engine;
+    if (engine == null || !engine.isInitialized) return;
+    final position = engine.position.inMilliseconds;
+    final duration = engine.duration.inMilliseconds;
     if (duration <= 0) return;
 
     try {
@@ -640,13 +717,13 @@ class _StrmPlayerScreenState extends State<StrmPlayerScreen>
         Timer.periodic(const Duration(milliseconds: 400), (_) {
       if (!mounted) return;
       try {
-        final c = _controller;
-        if (c != null && c.value.isInitialized) {
+        final engine = _engine;
+        if (engine != null && engine.isInitialized) {
           setState(() {
-            _pos = c.value.position;
-            _dur = c.value.duration;
+            _pos = engine.position;
+            _dur = engine.duration;
           });
-          _subtitleController.updatePosition(c.value.position.inMilliseconds);
+          _subtitleController.updatePosition(engine.position.inMilliseconds);
 
           // 定期保存播放进度
           final now = DateTime.now();
@@ -655,17 +732,16 @@ class _StrmPlayerScreenState extends State<StrmPlayerScreen>
             _saveProgress();
           }
 
-          if (c.value.duration > Duration.zero &&
-              c.value.position >=
-                  c.value.duration -
+          if (engine.duration > Duration.zero &&
+              engine.position >=
+                  engine.duration -
                       const Duration(milliseconds: 500) &&
               !_completing) {
             _completing = true;
-            _saveProgress(); // 播放完成时也保存一次
+            _saveProgress();
             if (_loopSingle) {
-              c.seekTo(Duration.zero)
-                  .then((_) {
-                c.play();
+              engine.seekTo(Duration.zero).then((_) {
+                engine.play();
                 _completing = false;
               });
             } else if (_currentIndex < _playList.videos.length - 1) {
@@ -696,7 +772,8 @@ class _StrmPlayerScreenState extends State<StrmPlayerScreen>
       _preloadController = null;
       _preloadIdx = -1;
 
-      _controller?.dispose();
+      _engine?.dispose();
+      _engine = null;
       _controller = ctrl;
       _isInitializing = false;
 
@@ -730,14 +807,14 @@ class _StrmPlayerScreenState extends State<StrmPlayerScreen>
 
   void _togglePlayPause() {
     try {
-      final c = _controller;
-      if (c == null || !c.value.isInitialized) return;
+      final engine = _engine;
+      if (engine == null || !engine.isInitialized) return;
       if (_isPlaying) {
-        c.pause();
+        engine.pause();
         _isPlaying = false;
         _cancelLandscapeAutoHide();
       } else {
-        c.play();
+        engine.play();
         _isPlaying = true;
         _hideUI = false;
         _manualHideUI = false;
@@ -791,7 +868,7 @@ class _StrmPlayerScreenState extends State<StrmPlayerScreen>
   void _toggleLoop() {
     _loopSingle = !_loopSingle;
     try {
-      _controller?.setLooping(_loopSingle);
+      _engine?.setLooping(_loopSingle);
     } catch (_) {}
     if (mounted) setState(() {});
     SmartDialog.showToast(_loopSingle ? '单视频循环' : '自动播放下一个');
@@ -811,7 +888,7 @@ class _StrmPlayerScreenState extends State<StrmPlayerScreen>
   void _onSeekEnd(double val) {
     try {
       if (_dur.inMilliseconds > 0) {
-        _controller
+        _engine
             ?.seekTo(Duration(milliseconds: (val * _dur.inMilliseconds).round()));
       }
     } catch (_) {}
@@ -842,9 +919,9 @@ class _StrmPlayerScreenState extends State<StrmPlayerScreen>
 
       // 裁剪出视频实际渲染区域，去除 Center/AspectRatio 产生的透明填充
       ui.Image finalImage = image;
-      final ctrl = _controller;
-      if (ctrl != null && ctrl.value.isInitialized) {
-        final videoAspectRatio = ctrl.value.aspectRatio;
+      final engine = _engine;
+      if (engine != null && engine.isInitialized) {
+        final videoAspectRatio = engine.aspectRatio;
         final imgW = image.width.toDouble();
         final imgH = image.height.toDouble();
         final boundaryAspectRatio = imgW / imgH;
@@ -1102,23 +1179,28 @@ class _StrmPlayerScreenState extends State<StrmPlayerScreen>
   }
 
   Widget _buildVideoView() {
-    final c = _controller;
-    if (c != null && c.value.isInitialized) {
+    final engine = _engine;
+    if (engine != null && engine.isInitialized) {
+      // media_kit 引擎：Video 是 PlatformView，必须一直在树里，撑满
+      if (engine is MediaKitEngine) {
+        return SizedBox.expand(child: engine.buildVideoWidget());
+      }
+      // video_player 引擎保持原有布局
       if (_isLandscape) {
         return SizedBox.expand(
           child: FittedBox(
             fit: BoxFit.contain,
             child: SizedBox(
-              width: c.value.size.width,
-              height: c.value.size.height,
-              child: VideoPlayer(c),
+              width: engine.videoSize.width,
+              height: engine.videoSize.height,
+              child: engine.buildVideoWidget(),
             ),
           ),
         );
       }
       return Center(
           child:
-              AspectRatio(aspectRatio: c.value.aspectRatio, child: VideoPlayer(c)));
+              AspectRatio(aspectRatio: engine.aspectRatio, child: engine.buildVideoWidget()));
     }
     return const Center(
         child: CircularProgressIndicator(
@@ -1588,7 +1670,7 @@ class _StrmPlayerScreenState extends State<StrmPlayerScreen>
             icon: Icons.replay_10_rounded,
             onTap: () {
               final target = _pos - const Duration(seconds: 10);
-              _controller?.seekTo(target < Duration.zero ? Duration.zero : target);
+              _engine?.seekTo(target < Duration.zero ? Duration.zero : target);
             },
           ),
           const SizedBox(width: 48),
@@ -1608,7 +1690,7 @@ class _StrmPlayerScreenState extends State<StrmPlayerScreen>
             onTap: () {
               final target = _pos + const Duration(seconds: 10);
               final max = _dur;
-              _controller?.seekTo(target > max ? max : target);
+              _engine?.seekTo(target > max ? max : target);
             },
           ),
         ],

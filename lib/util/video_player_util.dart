@@ -128,13 +128,15 @@ class VideoPlayerUtil {
         );
       } else {
         final autoPipEnabled = SpUtil.getBool(AlistConstant.autoPipEnabled, defValue: true) ?? true;
+        final ffmpegSoftDecode = SpUtil.getBool(AlistConstant.enableFfmpegSoftDecode, defValue: false) ?? false;
         // 本地字幕目录：开关开启且路径非空时传给原生播放器
         final localSubEnabled = SpUtil.getBool(AlistConstant.enableLocalSubtitle, defValue: false) ?? false;
         final localSubDir = localSubEnabled ? (SpUtil.getString(AlistConstant.localSubtitlePath) ?? '') : '';
         AlistPlugin.playVideoWithInternalPlayer(
             videosParams, index, headers, playerType,
             autoPipEnabled: autoPipEnabled,
-            subtitleDir: localSubDir.isNotEmpty ? localSubDir : null);
+            subtitleDir: localSubDir.isNotEmpty ? localSubDir : null,
+            ffmpegSoftDecode: ffmpegSoftDecode);
       }
     } else {
       Get.toNamed(

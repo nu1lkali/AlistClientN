@@ -208,6 +208,9 @@ class PlayerActivity : AppCompatActivity(), GSYVideoProgressListener {
     // IJK 播放失败时是否已尝试回退到 MediaKit
     private var hasTriedMediaKitFallback = false
 
+    // FFMPEG 软解开关（从 Flutter 设置页传入）
+    private var ffmpegSoftDecode = false
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         if (BuildConfig.DEBUG) {
@@ -368,6 +371,7 @@ class PlayerActivity : AppCompatActivity(), GSYVideoProgressListener {
             headers = VideoDataHolder.getHeaders()
             playerType = VideoDataHolder.getPlayerType() ?: ""
             autoPipEnabled = VideoDataHolder.getAutoPipEnabled()
+            ffmpegSoftDecode = VideoDataHolder.getFfmpegSoftDecode()
             Debuger.printfLog("Loaded ${videos.size} videos from VideoDataHolder")
         } else {
             // 兼容旧版：从 Intent extras 读取（小数据量场景）
@@ -386,7 +390,7 @@ class PlayerActivity : AppCompatActivity(), GSYVideoProgressListener {
 
         Debuger.printfError("player = $playerType")
 
-        // 混合内核方案：老格式走 IJK（FFmpeg 软解），其他走 ExoPlayer
+        // 播放内核选择逻辑
         val ext = videos.getOrNull(index)?.name?.substringAfterLast(".")?.lowercase() ?: ""
         val ijkFormats = setOf(
             "wmv", "wm", "asf", "asx", "wmx", "wvx", "wtv", "dvr-ms",
@@ -399,19 +403,30 @@ class PlayerActivity : AppCompatActivity(), GSYVideoProgressListener {
             "ogv", "ogm",
         )
 
-        if (ijkFormats.contains(ext)) {
-            // 老格式 → IJK 内核（FFmpeg 软解，兼容性最好）
-            Debuger.printfError("***** 使用 IJK 内核播放: $ext *****")
+        // FFMPEG 软解开关：启用后所有格式统一走 IJK（内建 FFmpeg）内核
+        val useIjk = ffmpegSoftDecode || ijkFormats.contains(ext)
+
+        if (useIjk) {
+            // IJK 内核（FFmpeg 软解，兼容性最好）
+            Debuger.printfError("***** 使用 IJK 内核播放: $ext (ffmpegSoftDecode=$ffmpegSoftDecode) *****")
             PlayerFactory.setPlayManager(IjkPlayerManager::class.java)
             val optionList = mutableListOf<VideoOptionModel>()
-            // 强制软解码 —— 老格式对 MediaCodec 兼容性差
-            optionList.add(VideoOptionModel(IjkMediaPlayer.OPT_CATEGORY_PLAYER, "mediacodec", 0))
-            optionList.add(VideoOptionModel(IjkMediaPlayer.OPT_CATEGORY_PLAYER, "mediacodec-auto-rotate", 0))
-            optionList.add(VideoOptionModel(IjkMediaPlayer.OPT_CATEGORY_PLAYER, "mediacodec-handle-resolution-change", 0))
+            // FFMPEG 软解模式下完全禁用 MediaCodec，纯软解保证兼容性
+            if (ffmpegSoftDecode) {
+                optionList.add(VideoOptionModel(IjkMediaPlayer.OPT_CATEGORY_PLAYER, "mediacodec", 0))
+                optionList.add(VideoOptionModel(IjkMediaPlayer.OPT_CATEGORY_PLAYER, "mediacodec-all-videos", 0))
+                optionList.add(VideoOptionModel(IjkMediaPlayer.OPT_CATEGORY_PLAYER, "mediacodec-auto-rotate", 0))
+                optionList.add(VideoOptionModel(IjkMediaPlayer.OPT_CATEGORY_PLAYER, "mediacodec-handle-resolution-change", 0))
+            } else {
+                // 仅老格式时也禁用 MediaCodec
+                optionList.add(VideoOptionModel(IjkMediaPlayer.OPT_CATEGORY_PLAYER, "mediacodec", 0))
+                optionList.add(VideoOptionModel(IjkMediaPlayer.OPT_CATEGORY_PLAYER, "mediacodec-auto-rotate", 0))
+                optionList.add(VideoOptionModel(IjkMediaPlayer.OPT_CATEGORY_PLAYER, "mediacodec-handle-resolution-change", 0))
+            }
             // 开启环路过滤，优化画质
             optionList.add(VideoOptionModel(IjkMediaPlayer.OPT_CATEGORY_CODEC, "skip_loop_filter", 0))
             // 帧丢弃策略 —— 音画不同步时丢视频帧保音频连续
-            optionList.add(VideoOptionModel(IjkMediaPlayer.OPT_CATEGORY_PLAYER, "framedrop", 5))
+            optionList.add(VideoOptionModel(IjkMediaPlayer.OPT_CATEGORY_PLAYER, "framedrop", if (ffmpegSoftDecode) 5 else 5))
             // 秒开优化
             optionList.add(VideoOptionModel(IjkMediaPlayer.OPT_CATEGORY_FORMAT, "probesize", 10240))
             optionList.add(VideoOptionModel(IjkMediaPlayer.OPT_CATEGORY_FORMAT, "analyzeduration", 500000))

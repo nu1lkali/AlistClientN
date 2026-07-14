@@ -23,6 +23,7 @@ import 'package:alist/util/file_utils.dart';
 import 'package:alist/util/alist_plugin.dart';
 import 'package:alist/util/markdown_utils.dart';
 import 'package:alist/router.dart';
+import 'package:alist/screen/home_screen.dart';
 import 'package:alist/util/named_router.dart';
 import 'package:alist/util/nature_sort.dart';
 import 'package:alist/util/strm_parser.dart';
@@ -188,12 +189,15 @@ class _FavoriteScreenState extends State<FavoriteScreen>
 
     switch (fileType) {
       case FileType.folder:
-        Get.toNamed(
-          NamedRouter.fileList,
-          arguments: {
-            "path": file.path,
-          },
-        );
+        // 先切到"文件"tab，再在嵌套 Navigator 里推路由，保证切 tab 不丢失
+        HomeScreen.pendingTabIndex.value = 0;
+        Future.delayed(const Duration(milliseconds: 100), () {
+          Get.toNamed(
+            NamedRouter.fileList,
+            arguments: {"path": file.path},
+            id: AlistRouter.fileListRouterStackId,
+          );
+        });
         break;
       case FileType.video:
         _gotoVideoPlayer(context, file, fromDialog);
@@ -434,10 +438,14 @@ class _FavoriteScreenState extends State<FavoriteScreen>
       path = path.substring(0, index);
     }
     LogUtil.d("path=$path index=$index");
-    Get.toNamed(
-      NamedRouter.fileList,
-      arguments: {"path": path},
-    );
+    HomeScreen.pendingTabIndex.value = 0;
+    Future.delayed(const Duration(milliseconds: 100), () {
+      Get.toNamed(
+        NamedRouter.fileList,
+        arguments: {"path": path},
+        id: AlistRouter.fileListRouterStackId,
+      );
+    });
   }
 
   Future<List<FileItemVO>?> _loadFilesPrepare(

@@ -356,28 +356,30 @@ class _FileListScreenState extends State<FileListScreen>
   void _navigateToPath(String targetPath) {
     if (targetPath == path) return;
 
-    bool found = false;
-    Get.until((route) {
-      if (route.isFirst) {
-        final args = route.settings.arguments as Map<String, dynamic>?;
-        final routePath = args?['path'] as String? ?? '/';
-        if (routePath == targetPath) {
-          found = true;
+    bool _tryFind(bool Function(dynamic route) test, {int? id}) {
+      bool result = false;
+      Get.until((route) {
+        if (test(route)) {
+          result = true;
+          return true;
         }
-        return true;
-      }
-      if (route.settings.name == NamedRouter.fileList) {
-        final args = route.settings.arguments as Map<String, dynamic>?;
-        if (args != null) {
-          final routePath = args['path'] as String? ?? '/';
-          if (routePath == targetPath) {
-            found = true;
-            return true;
-          }
-        }
-      }
-      return false;
-    }, id: stackId);
+        if (route.isFirst) return true;
+        return false;
+      }, id: id);
+      return result;
+    }
+
+    bool _isMatch(dynamic route) {
+      final args = route.settings.arguments as Map<String, dynamic>?;
+      final routePath = args?['path'] as String?;
+      return route.settings.name == NamedRouter.fileList && routePath == targetPath;
+    }
+
+    // 先在当前栈找，再在根栈找
+    bool found = _tryFind(_isMatch, id: stackId);
+    if (!found && stackId != null) {
+      found = _tryFind(_isMatch, id: null);
+    }
 
     if (!found) {
       Get.toNamed(
@@ -389,7 +391,6 @@ class _FileListScreenState extends State<FileListScreen>
           "backupPassword": _password ?? ""
         },
         preventDuplicates: false,
-        id: stackId,
       );
     }
   }

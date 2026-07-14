@@ -84,7 +84,7 @@ class AlistPlugin {
       int index,
       Map<String, String>? headers,
       String? playerType,
-      {bool autoPipEnabled = true, String? subtitleDir}) async {
+      {bool autoPipEnabled = true, String? subtitleDir, bool ffmpegSoftDecode = false}) async {
     SecurityLockController.instance.markInternalActivity();
     String? headersStr = headers != null ? jsonEncode(headers) : null;
 
@@ -96,6 +96,7 @@ class AlistPlugin {
       "playerType": playerType,
       "autoPipEnabled": autoPipEnabled,
       "subtitleDir": subtitleDir,
+      "ffmpegSoftDecode": ffmpegSoftDecode,
     });
     return result == true;
   }

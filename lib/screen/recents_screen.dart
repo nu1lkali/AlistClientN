@@ -27,6 +27,8 @@ import 'package:alist/util/strm_parser.dart';
 import 'package:alist/util/stream_size_resolver.dart';
 import 'package:alist/util/string_utils.dart';
 import 'package:alist/util/user_controller.dart';
+import 'package:alist/router.dart';
+import 'package:alist/screen/home_screen.dart';
 import 'package:alist/util/video_player_util.dart';
 import 'package:alist/widget/alist_scaffold.dart';
 import 'package:alist/widget/file_details_dialog.dart';
@@ -572,10 +574,14 @@ class _RecentsScreenState extends State<RecentsScreen>
       path = path.substring(0, index);
     }
     LogUtil.d("path=$path index=$index");
-    Get.toNamed(
-      NamedRouter.fileList,
-      arguments: {"path": path},
-    );
+    HomeScreen.pendingTabIndex.value = 0;
+    Future.delayed(const Duration(milliseconds: 100), () {
+      Get.toNamed(
+        NamedRouter.fileList,
+        arguments: {"path": path},
+        id: AlistRouter.fileListRouterStackId,
+      );
+    });
   }
 
   Future<List<FileItemVO>?> _loadFilesPrepare(

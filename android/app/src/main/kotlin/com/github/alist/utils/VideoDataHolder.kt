@@ -14,6 +14,8 @@ object VideoDataHolder {
     private var autoPipEnabled: Boolean = true
     // 外挂字幕本地目录（可选），由 Flutter 侧传入；原生按视频名匹配同名 .srt
     private var subtitleDir: String? = null
+    // FFMPEG 软解开关
+    private var ffmpegSoftDecode: Boolean = false
 
     fun store(
         videosJson: String,
@@ -21,7 +23,8 @@ object VideoDataHolder {
         headersStr: String?,
         playerType: String?,
         autoPipEnabled: Boolean,
-        subtitleDir: String? = null
+        subtitleDir: String? = null,
+        ffmpegSoftDecode: Boolean = false
     ) {
         this.videos = GsonUtils.parseList(videosJson)
         this.index = index
@@ -29,6 +32,7 @@ object VideoDataHolder {
         this.playerType = playerType
         this.autoPipEnabled = autoPipEnabled
         this.subtitleDir = subtitleDir
+        this.ffmpegSoftDecode = ffmpegSoftDecode
     }
 
     fun getVideos(): List<VideoItem> = videos ?: emptyList()
@@ -37,6 +41,7 @@ object VideoDataHolder {
     fun getPlayerType(): String? = playerType
     fun getAutoPipEnabled(): Boolean = autoPipEnabled
     fun getSubtitleDir(): String? = subtitleDir
+    fun getFfmpegSoftDecode(): Boolean = ffmpegSoftDecode
     fun hasData(): Boolean = videos != null
 
     fun clear() {
@@ -46,5 +51,6 @@ object VideoDataHolder {
         playerType = null
         autoPipEnabled = true
         subtitleDir = null
+        ffmpegSoftDecode = false
     }
 }
