@@ -4094,7 +4094,7 @@ class _FileListView extends StatelessWidget {
                     onLongPress: onFileLongPress != null
                         ? () => onFileLongPress!(context, index)
                         : null,
-                    showShuffleButton: true,
+                    showShuffleButton: AlistConstant.showFileListShuffleButtonRx.value,
                     onShufflePlayTap: file.isDir && onFolderShufflePlay != null
                         ? () => onFolderShufflePlay!(file.path)
                         : null,
@@ -4118,7 +4118,7 @@ class _FileListView extends StatelessWidget {
               onLongPress: onFileLongPress != null
                   ? () => onFileLongPress!(context, index)
                   : null,
-              showShuffleButton: true,
+              showShuffleButton: AlistConstant.showFileListShuffleButtonRx.value,
               onShufflePlayTap: file.isDir && onFolderShufflePlay != null
                   ? () => onFolderShufflePlay!(file.path)
                   : null,

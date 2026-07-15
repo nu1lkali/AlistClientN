@@ -1151,6 +1151,7 @@ class _StrmPlayerScreenState extends State<StrmPlayerScreen>
             child: RepaintBoundary(
                 key: _repaintKey, child: _buildVideoView())),
         _buildPauseIcon(),
+        _buildPortraitCenterControls(),
         if (!(_hideUI && _isLandscape)) _buildTopBar(),
         if (!_hideUI) _buildToolBar(),
         _buildProgress(),
@@ -1210,7 +1211,7 @@ class _StrmPlayerScreenState extends State<StrmPlayerScreen>
   }
 
   Widget _buildPauseIcon() {
-    if (_isPlaying || _isLandscape) return const SizedBox.shrink();
+    if (_isPlaying || _isLandscape || !_hideUI) return const SizedBox.shrink();
     return GestureDetector(
       onTap: _togglePlayPause,
       child: Center(
@@ -1222,6 +1223,56 @@ class _StrmPlayerScreenState extends State<StrmPlayerScreen>
                   borderRadius: BorderRadius.circular(36)),
               child: const Icon(Icons.play_arrow_rounded,
                   color: Colors.white70, size: 44))),
+    );
+  }
+
+  Widget _buildPortraitCenterControls() {
+    if (_isLandscape || _hideUI || _isPlaying) return const SizedBox.shrink();
+    return Center(
+      child: Opacity(
+        opacity: _uiOpacity,
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            _centerCtrlBtn(
+              icon: Icons.replay_10_rounded,
+              onTap: () {
+                final target = _pos - const Duration(seconds: 10);
+                _engine?.seekTo(target < Duration.zero ? Duration.zero : target);
+                setState(() {});
+              },
+              size: 44,
+            ),
+            const SizedBox(width: 28),
+            GestureDetector(
+              onTap: _togglePlayPause,
+              child: Container(
+                width: 68,
+                height: 68,
+                decoration: BoxDecoration(
+                    color: Colors.black45,
+                    borderRadius: BorderRadius.circular(34)),
+                child: Icon(
+                  _isPlaying ? Icons.pause_rounded : Icons.play_arrow_rounded,
+                  color: Colors.white70,
+                  size: 40,
+                ),
+              ),
+            ),
+            const SizedBox(width: 28),
+            _centerCtrlBtn(
+              icon: Icons.forward_10_rounded,
+              onTap: () {
+                final target = _pos + const Duration(seconds: 10);
+                final max = _dur;
+                _engine?.seekTo(target > max ? max : target);
+                setState(() {});
+              },
+              size: 44,
+            ),
+          ],
+        ),
+      ),
     );
   }
 
@@ -1665,37 +1716,40 @@ class _StrmPlayerScreenState extends State<StrmPlayerScreen>
 
   Widget _buildLandscapeCenterControls() {
     return Center(
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          _centerCtrlBtn(
-            icon: Icons.replay_10_rounded,
-            onTap: () {
-              final target = _pos - const Duration(seconds: 10);
-              _engine?.seekTo(target < Duration.zero ? Duration.zero : target);
-            },
-          ),
-          const SizedBox(width: 48),
-          GestureDetector(
-            onTap: _togglePlayPause,
-            child: Icon(
-              _isPlaying
-                  ? Icons.pause_rounded
-                  : Icons.play_arrow_rounded,
-              color: Colors.white.withOpacity(0.85),
-              size: 64,
+      child: Opacity(
+        opacity: _uiOpacity,
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            _centerCtrlBtn(
+              icon: Icons.replay_10_rounded,
+              onTap: () {
+                final target = _pos - const Duration(seconds: 10);
+                _engine?.seekTo(target < Duration.zero ? Duration.zero : target);
+              },
             ),
-          ),
-          const SizedBox(width: 48),
-          _centerCtrlBtn(
-            icon: Icons.forward_10_rounded,
-            onTap: () {
-              final target = _pos + const Duration(seconds: 10);
-              final max = _dur;
-              _engine?.seekTo(target > max ? max : target);
-            },
-          ),
-        ],
+            const SizedBox(width: 48),
+            GestureDetector(
+              onTap: _togglePlayPause,
+              child: Icon(
+                _isPlaying
+                    ? Icons.pause_rounded
+                    : Icons.play_arrow_rounded,
+                color: Colors.white.withOpacity(0.85),
+                size: 64,
+              ),
+            ),
+            const SizedBox(width: 48),
+            _centerCtrlBtn(
+              icon: Icons.forward_10_rounded,
+              onTap: () {
+                final target = _pos + const Duration(seconds: 10);
+                final max = _dur;
+                _engine?.seekTo(target > max ? max : target);
+              },
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -1703,10 +1757,11 @@ class _StrmPlayerScreenState extends State<StrmPlayerScreen>
   Widget _centerCtrlBtn({
     required IconData icon,
     required VoidCallback onTap,
+    double size = 48,
   }) {
     return GestureDetector(
       onTap: onTap,
-      child: Icon(icon, color: Colors.white.withOpacity(0.85), size: 48),
+      child: Icon(icon, color: Colors.white.withOpacity(0.85), size: size),
     );
   }
 
