@@ -1186,7 +1186,17 @@ class _StrmPlayerScreenState extends State<StrmPlayerScreen>
     if (engine != null && engine.isInitialized) {
       // media_kit 引擎：Video 是 PlatformView，必须一直在树里，撑满
       if (engine is MediaKitEngine) {
-        return SizedBox.expand(child: engine.buildVideoWidget());
+        return Stack(
+          fit: StackFit.expand,
+          children: [
+            engine.buildVideoWidget(),
+            if (engine.isBuffering)
+              const Center(
+                child: CircularProgressIndicator(
+                    color: Colors.white, strokeWidth: 2),
+              ),
+          ],
+        );
       }
       // video_player 引擎保持原有布局
       if (_isLandscape) {

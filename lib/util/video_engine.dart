@@ -138,6 +138,13 @@ class VideoPlayerEngine implements VideoEngine {
 class MediaKitEngine implements VideoEngine {
   Player? _player;
   VideoController? _videoCtrl;
+  bool _mediaOpened = false;
+
+  // Seek 防抖：WMV 等老格式频繁 seek 容易卡死
+  DateTime _lastSeekTime = DateTime.fromMillisecondsSinceEpoch(0);
+  static const _seekMinInterval = Duration(milliseconds: 400);
+  Timer? _seekDebounceTimer;
+  Duration? _pendingSeekPosition;
 
   @override
   Duration get position => _player?.state.position ?? Duration.zero;
@@ -149,7 +156,7 @@ class MediaKitEngine implements VideoEngine {
   bool get isPlaying => _player?.state.playing ?? false;
 
   @override
-  bool get isInitialized => _player != null;
+  bool get isInitialized => _player != null && _mediaOpened;
 
   @override
   double get aspectRatio {
@@ -169,8 +176,9 @@ class MediaKitEngine implements VideoEngine {
   final _durationCtrl = StreamController<Duration>.broadcast();
   final _playingCtrl = StreamController<bool>.broadcast();
   final _completedCtrl = StreamController<void>.broadcast();
+  final _bufferingCtrl = StreamController<bool>.broadcast();
 
-  StreamSubscription? _posSub, _playSub, _compSub;
+  StreamSubscription? _posSub, _playSub, _compSub, _bufferingSub;
 
   @override
   Stream<Duration> get onPositionChanged => _positionCtrl.stream;
@@ -183,6 +191,10 @@ class MediaKitEngine implements VideoEngine {
 
   @override
   Stream<void> get onCompleted => _completedCtrl.stream;
+
+  /// 是否正在缓冲（供 UI 显示 loading）
+  Stream<bool> get onBufferingChanged => _bufferingCtrl.stream;
+  bool get isBuffering => _player?.state.buffering ?? false;
 
   /// 先创建 Player 和 VideoController（同步），让 PlatformView 提前挂到 widget 树
   void createPlayer() {
@@ -199,17 +211,20 @@ class MediaKitEngine implements VideoEngine {
     _playSub = _player!.stream.playing.listen((b) => _playingCtrl.add(b));
     _compSub = _player!.stream.completed.listen((_) => _completedCtrl.add(null));
     _player!.stream.duration.listen((d) => _durationCtrl.add(d));
+    _bufferingSub = _player!.stream.buffering.listen((b) => _bufferingCtrl.add(b));
   }
 
   /// 加载媒体（Player 和 VideoController 已提前创建）
   Future<void> openMedia(String url, {Map<String, String>? httpHeaders}) async {
     _player?.open(Media(url, httpHeaders: httpHeaders ?? {}), play: true);
+    _mediaOpened = true;
   }
 
   /// 兼容旧接口
   Future<void> createFromNetwork(String url, {Map<String, String>? httpHeaders}) async {
     createPlayer();
     _player?.open(Media(url, httpHeaders: httpHeaders ?? {}), play: true);
+    _mediaOpened = true;
   }
 
   void _configureFfmpeg() {
@@ -243,7 +258,27 @@ class MediaKitEngine implements VideoEngine {
   Future<void> pause() async => _player?.pause();
 
   @override
-  Future<void> seekTo(Duration position) async => _player?.seek(position);
+  Future<void> seekTo(Duration position) async {
+    final now = DateTime.now();
+    // 距离上次 seek 太近，延迟执行
+    if (now.difference(_lastSeekTime) < _seekMinInterval) {
+      _pendingSeekPosition = position;
+      _seekDebounceTimer?.cancel();
+      _seekDebounceTimer = Timer(_seekMinInterval, () {
+        final target = _pendingSeekPosition;
+        _pendingSeekPosition = null;
+        if (target != null) {
+          _lastSeekTime = DateTime.now();
+          _player?.seek(target);
+        }
+      });
+      return;
+    }
+    _lastSeekTime = now;
+    _seekDebounceTimer?.cancel();
+    _pendingSeekPosition = null;
+    _player?.seek(position);
+  }
 
   @override
   Future<void> setSpeed(double speed) async => _player?.setRate(speed);
@@ -269,17 +304,23 @@ class MediaKitEngine implements VideoEngine {
 
   @override
   Future<void> dispose() async {
+    _seekDebounceTimer?.cancel();
+    _seekDebounceTimer = null;
+    _pendingSeekPosition = null;
     try { _player?.pause(); } catch (_) {}
     try { _player?.stop(); } catch (_) {}
     await _posSub?.cancel();
     await _playSub?.cancel();
     await _compSub?.cancel();
+    await _bufferingSub?.cancel();
     await _positionCtrl.close();
     await _durationCtrl.close();
     await _playingCtrl.close();
     await _completedCtrl.close();
+    await _bufferingCtrl.close();
     _videoCtrl = null;
     _player?.dispose();
     _player = null;
+    _mediaOpened = false;
   }
 }
