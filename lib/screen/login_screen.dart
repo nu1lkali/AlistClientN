@@ -687,7 +687,7 @@ class LoginScreenController extends GetxController with WidgetsBindingObserver {
   }
 
   void _onLoginButtonClick(BuildContext context, {bool ignoreDavCheck = false, String? address}) {
-    address ??= addressController.text.trim();
+    address ??= _buildAddress();
     _login(address, ignoreDavCheck: ignoreDavCheck, onSuccess: () {
       SmartDialog.dismiss();
       _goHomeScreen();
