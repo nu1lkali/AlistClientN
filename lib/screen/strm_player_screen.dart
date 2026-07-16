@@ -49,7 +49,8 @@ class _StrmPlayerScreenState extends State<StrmPlayerScreen>
   bool _isInitializing = false;
   bool _isPlaying = false;
   bool _isLandscape = false;
-  bool _loopSingle = false;
+  // 循环模式: 0=自动下一个, 1=播完即停止, 2=单视频循环
+  int _loopMode = 0;
   bool _hideUI = false;
   bool _manualHideUI = false; // 竖屏下用户手动点击隐藏按钮
 
@@ -392,7 +393,7 @@ class _StrmPlayerScreenState extends State<StrmPlayerScreen>
         return;
       }
 
-      engine.setLooping(_loopSingle);
+      engine.setLooping(_loopMode == 2);
       _isInitializing = false;
 
       // 加载上次播放进度并跳转
@@ -433,9 +434,9 @@ class _StrmPlayerScreenState extends State<StrmPlayerScreen>
     _disposePreload();
     final preloadEnabled = SpUtil.getBool(AlistConstant.strmPreloadEnabled, defValue: false) ?? false;
     if (!preloadEnabled) return;
-    final nextIdx = _loopSingle ? currentIdx : currentIdx + 1;
+    if (_loopMode != 0) return; // 非自动下一个模式不预加载
+    final nextIdx = currentIdx + 1;
     if (nextIdx < 0 || nextIdx >= _playList.videos.length) return;
-    if (_loopSingle && nextIdx == currentIdx) return;
     _preloadTimer = Timer(const Duration(seconds: 2), () {
       _preloadNext(nextIdx);
     });
@@ -739,14 +740,17 @@ class _StrmPlayerScreenState extends State<StrmPlayerScreen>
               !_completing) {
             _completing = true;
             _saveProgress();
-            if (_loopSingle) {
+            if (_loopMode == 2) {
+              // 单视频循环
               engine.seekTo(Duration.zero).then((_) {
                 engine.play();
                 _completing = false;
               });
-            } else if (_currentIndex < _playList.videos.length - 1) {
+            } else if (_loopMode == 0 && _currentIndex < _playList.videos.length - 1) {
+              // 自动下一个
               _playAt(_currentIndex + 1).then((_) => _completing = false);
             } else {
+              // 播完即停止（或已是最后一个）
               _safePause();
               _completing = false;
             }
@@ -779,7 +783,7 @@ class _StrmPlayerScreenState extends State<StrmPlayerScreen>
       _controller = ctrl;
       _isInitializing = false;
 
-      ctrl.setLooping(_loopSingle);
+      ctrl.setLooping(_loopMode == 2);
       ctrl.play();
       _isPlaying = true;
       _recordViewing(idx);
@@ -868,12 +872,13 @@ class _StrmPlayerScreenState extends State<StrmPlayerScreen>
   }
 
   void _toggleLoop() {
-    _loopSingle = !_loopSingle;
+    _loopMode = (_loopMode + 1) % 3;
     try {
-      _engine?.setLooping(_loopSingle);
+      _engine?.setLooping(_loopMode == 2);
     } catch (_) {}
     if (mounted) setState(() {});
-    SmartDialog.showToast(_loopSingle ? '单视频循环' : '自动播放下一个');
+    final labels = ['自动下一个', '播完即停止', '单视频循环'];
+    SmartDialog.showToast(labels[_loopMode]);
   }
 
   // ═══════════════ Seek ═══════════════
@@ -1433,12 +1438,14 @@ class _StrmPlayerScreenState extends State<StrmPlayerScreen>
                       onTap: _toggleDislike),
                   if (!_isLandscape)
                     _toolbarBtn(
-                        icon: _loopSingle
+                        icon: _loopMode == 2
                             ? Icons.repeat_one
-                            : Icons.repeat,
-                        label: _loopSingle ? '单视频循环' : '自动下一个',
+                            : _loopMode == 1
+                                ? Icons.stop_rounded
+                                : Icons.repeat,
+                        label: ['自动下一个', '播完即停止', '单视频循环'][_loopMode],
                         color:
-                            _loopSingle ? Colors.amber : Colors.white,
+                            _loopMode != 0 ? Colors.amber : Colors.white,
                         onTap: _toggleLoop),
                   if (_isLandscape) ...[
                     _toolbarBtn(
@@ -1453,11 +1460,6 @@ class _StrmPlayerScreenState extends State<StrmPlayerScreen>
                         label: '截图',
                         color: Colors.white,
                         onTap: _takeScreenshot),
-                    _toolbarBtn(
-                        icon: Icons.refresh_rounded,
-                        label: '重载',
-                        color: Colors.white,
-                        onTap: _reloadAtCurrentFrame),
                   ],
                   _toolbarBtn(
                       icon: Icons.info_outline,

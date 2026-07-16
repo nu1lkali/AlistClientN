@@ -47,7 +47,8 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
   final Set<int> _initializingIndexes = {};
   bool _isPlaying = false;
   bool _isLandscape = false;
-  bool _loopSingle = false;
+  // 循环模式: 0=自动下一个, 1=播完即停止, 2=单视频循环
+  int _loopMode = 0;
   final List<Offset> _doubleTapIcons = [];
 
   // 预加载1个前后视频，但切换时立即释放所有旧控制器
@@ -342,12 +343,15 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
               c.value.position >= c.value.duration - const Duration(milliseconds: 500) &&
               !_completing) {
             _completing = true;
-            if (_loopSingle) {
+            if (_loopMode == 2) {
+              // 单视频循环
               c.seekTo(Duration.zero).then((_) { c.play(); _completing = false; });
-            } else if (!_isLandscape && _currentIndex < _playList.videos.length - 1) {
+            } else if (_loopMode == 0 && !_isLandscape && _currentIndex < _playList.videos.length - 1) {
+              // 自动下一个
               _pageController.nextPage(duration: const Duration(milliseconds: 300), curve: Curves.easeInOut)
                   .then((_) => _completing = false);
             } else {
+              // 播完即停止（或已是最后一个/横屏中）
               _safePause();
               _completing = false;
             }
@@ -429,7 +433,7 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
         _initializingIndexes.remove(idx);
         return;
       }
-      ctrl.setLooping(_loopSingle);
+      ctrl.setLooping(_loopMode == 2);
       _controllers[idx] = ctrl;
       _initializingIndexes.remove(idx);
       if (idx == _currentIndex) { ctrl.play(); _isPlaying = true; _recordViewing(idx); _loadSubtitleForCurrent(); }
@@ -551,11 +555,11 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
   }
 
   void _toggleLoop() {
-    _loopSingle = !_loopSingle;
-    try { _controllers[_currentIndex]?.setLooping(_loopSingle); } catch (_) {}
+    _loopMode = (_loopMode + 1) % 3;
+    try { _controllers[_currentIndex]?.setLooping(_loopMode == 2); } catch (_) {}
     if (mounted) setState(() {});
-    SmartDialog.showToast(_loopSingle ? '单视频循环' : '自动播放下一个');
-
+    final labels = ['自动下一个', '播完即停止', '单视频循环'];
+    SmartDialog.showToast(labels[_loopMode]);
   }
 
   void _toggleLike() {
@@ -891,8 +895,13 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
           _btn(icon: v.isDisliked ? Icons.thumb_down : Icons.thumb_down_outlined,
             label: v.isDisliked ? '已踩' : '踩', color: v.isDisliked ? Colors.blue : Colors.white, onTap: _toggleDislike),
           if (!_isLandscape)
-            _btn(icon: _loopSingle ? Icons.repeat_one : Icons.repeat,
-              label: _loopSingle ? '单视频循环' : '自动下一个', color: _loopSingle ? Colors.amber : Colors.white, onTap: _toggleLoop),
+            _btn(icon: _loopMode == 2
+                ? Icons.repeat_one
+                : _loopMode == 1
+                    ? Icons.stop_rounded
+                    : Icons.repeat,
+              label: ['自动下一个', '播完即停止', '单视频循环'][_loopMode],
+              color: _loopMode != 0 ? Colors.amber : Colors.white, onTap: _toggleLoop),
           if (_isLandscape) ...[
             _btn(icon: _isLandscape ? Icons.stay_current_portrait : Icons.stay_current_landscape,
               label: _isLandscape ? '竖屏' : '横屏', color: Colors.white, onTap: _toggleOrientation),
