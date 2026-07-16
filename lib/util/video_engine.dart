@@ -230,19 +230,45 @@ class MediaKitEngine implements VideoEngine {
   void _configureFfmpeg() {
     try {
       final native = _player!.platform as dynamic;
-      native.setProperty('hwdec', 'no');
+
+      // ==================== 硬件解码 ====================
+      // 优先尝试硬解（GPU 解码 WMV3 等老格式性能远超纯软解），失败自动回退软解
+      native.setProperty('hwdec', 'auto-safe');
+
+      // ==================== 视频解码 ====================
       native.setProperty('vd-lavc-dr', 'no');
-      native.setProperty('vd-lavc-threads', '0');
+      // 明确分配 4 个解码线程，避免 auto 策略对 WMV/ASF 只分 1~2 线程
+      native.setProperty('vd-lavc-threads', '4');
       native.setProperty('vd-lavc-error-resilience', '1');
+
+      // ==================== 容器探测 ====================
       native.setProperty('demuxer-lavf-analyzeduration', '5000000');
       native.setProperty('demuxer-lavf-probesize', '50000000');
+      native.setProperty('demuxer-lavf-format', '');
       native.setProperty('network-timeout', '30');
+
+      // ==================== 缓存 ====================
       native.setProperty('cache', 'yes');
-      native.setProperty('cache-secs', '30');
-      native.setProperty('demuxer-max-bytes', '100MiB');
-      native.setProperty('demuxer-max-back-bytes', '50MiB');
+      // 网络流缓存 10 秒即可，30 秒过大导致内存压力 + 起播慢
+      native.setProperty('cache-secs', '10');
+      native.setProperty('demuxer-max-bytes', '50MiB');
+      native.setProperty('demuxer-max-back-bytes', '10MiB');
+
+      // ==================== 音频 ====================
       native.setProperty('ad-lavc-dr', 'no');
       native.setProperty('audio-pitch-correction', 'yes');
+
+      // ==================== 同步与 seek ====================
+      // 视频跟音频时钟同步，避免画面卡住不动
+      native.setProperty('video-sync', 'audio');
+      // 双端丢帧（decoder + vo），软解跟不上时平滑降帧而非冻住
+      native.setProperty('framedrop', 'decoder+vo');
+      // 精确 seek：WMV/ASF 无关键帧索引，启用后 seek 更快恢复
+      native.setProperty('hr-seek', 'yes');
+
+      // ==================== 渲染兼容 ====================
+      native.setProperty('correct-pts', 'yes');
+      native.setProperty('video-aspect-override', '0');
     } catch (_) {}
   }
 

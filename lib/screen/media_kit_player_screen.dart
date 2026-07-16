@@ -204,16 +204,14 @@ class _MediaKitPlayerScreenState extends State<MediaKitPlayerScreen>
       final native = _player.platform as dynamic;
 
       // ==================== 硬件解码配置 ====================
-      // 对老格式/兼容性场景，全面回退到软解以获得最佳兼容性
-      // FFmpeg 软解兼容性远超各种硬解芯片，可避免 "could not open codec" 等问题
-      native.setProperty('hwdec', 'no');
+      // 优先尝试硬解（GPU 解码远快于纯软解），失败自动回退软解
+      // auto-safe 会自动跳过已知不兼容的硬解驱动，兼顾性能与兼容性
+      native.setProperty('hwdec', 'auto-safe');
 
       // ==================== 视频解码容错配置 ====================
-      // 禁用 direct rendering 以提升兼容性
       native.setProperty('vd-lavc-dr', 'no');
-      // 自动检测最佳线程数（0=auto）
-      native.setProperty('vd-lavc-threads', '0');
-      // 错误恢复策略：尽可能恢复而非报错
+      // 明确分配 4 个解码线程，避免 auto 策略对 WMV/ASF 只分 1~2 线程
+      native.setProperty('vd-lavc-threads', '4');
       native.setProperty('vd-lavc-error-resilience', '1');
 
       // ==================== 容器格式探测配置 ====================
@@ -227,11 +225,11 @@ class _MediaKitPlayerScreenState extends State<MediaKitPlayerScreen>
       native.setProperty('network-timeout', '30');
 
       // ==================== 缓存配置 ====================
-      // 内存缓存大小 (KB)
       native.setProperty('cache', 'yes');
-      native.setProperty('cache-secs', '30');
-      native.setProperty('demuxer-max-bytes', '100MiB');
-      native.setProperty('demuxer-max-back-bytes', '50MiB');
+      // 网络流缓存 10 秒即可，30 秒过大导致内存压力 + 起播慢
+      native.setProperty('cache-secs', '10');
+      native.setProperty('demuxer-max-bytes', '50MiB');
+      native.setProperty('demuxer-max-back-bytes', '10MiB');
 
       // ==================== 音频解码容错配置 ====================
       native.setProperty('ad-lavc-dr', 'no');
@@ -244,12 +242,12 @@ class _MediaKitPlayerScreenState extends State<MediaKitPlayerScreen>
       native.setProperty('audio-wait-open', 'yes');
 
       // ==================== 同步与渲染配置 ====================
-      // 视频同步模式
+      // 视频跟音频时钟同步，避免画面卡住不动
       native.setProperty('video-sync', 'audio');
-      // 精确seek
-      native.setProperty('hr-seek', 'framedrop');
-      // 帧丢弃策略：丢帧保持同步
-      native.setProperty('framedrop', 'decoder');
+      // 精确 seek：对 WMV/ASF 无关键帧索引的容器尤为重要，seek 后更快恢复
+      native.setProperty('hr-seek', 'yes');
+      // 双端丢帧（decoder + vo），软解跟不上时平滑降帧而非冻住
+      native.setProperty('framedrop', 'decoder+vo');
 
       // ==================== 字幕容错 ====================
       native.setProperty('sub-auto', 'fuzzy');
