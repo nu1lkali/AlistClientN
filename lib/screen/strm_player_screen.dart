@@ -894,7 +894,35 @@ class _StrmPlayerScreenState extends State<StrmPlayerScreen>
             ?.seekTo(Duration(milliseconds: (val * _dur.inMilliseconds).round()));
       }
     } catch (_) {}
-    _startTimer();
+    // 延迟 500ms 再恢复轮询，等待 seek 完成（WMV/ASF 等老格式 seek 慢，
+    // 立即轮询会读到过渡态 position=0 或 duration，导致进度条跳到首/尾）
+    Future.delayed(const Duration(milliseconds: 500), () {
+      if (mounted) _startTimer();
+    });
+  }
+
+  // ═══════════════ Reload ═══════════════
+  Future<void> _reloadAtCurrentFrame() async {
+    final savedPos = _pos;
+    final v = _playList.videos[_currentIndex];
+    final url = v.videoUrl;
+    if (url == null || url.isEmpty) return;
+
+    final httpHeaders = v.provider == 'BaiduNetdisk'
+        ? <String, String>{'User-Agent': 'pan.baidu.com'}
+        : <String, String>{};
+
+    _progressTimer?.cancel();
+    SmartDialog.showLoading(msg: '重新加载中...');
+
+    try {
+      await _engine?.reload(url, savedPos, httpHeaders: httpHeaders);
+      _startTimer();
+      SmartDialog.dismiss();
+    } catch (e) {
+      SmartDialog.dismiss();
+      SmartDialog.showToast('重载失败');
+    }
   }
 
   // ═══════════════ Screenshot ═══════════════
@@ -1425,6 +1453,11 @@ class _StrmPlayerScreenState extends State<StrmPlayerScreen>
                         label: '截图',
                         color: Colors.white,
                         onTap: _takeScreenshot),
+                    _toolbarBtn(
+                        icon: Icons.refresh_rounded,
+                        label: '重载',
+                        color: Colors.white,
+                        onTap: _reloadAtCurrentFrame),
                   ],
                   _toolbarBtn(
                       icon: Icons.info_outline,
@@ -1541,7 +1574,7 @@ class _StrmPlayerScreenState extends State<StrmPlayerScreen>
                   child: Padding(
                     padding: const EdgeInsets.all(8),
                     child: Icon(Icons.screen_rotation_outlined,
-                        color: Colors.white.withOpacity(0.7), size: 22),
+                        color: Colors.white.withOpacity(0.7), size: 20),
                   ),
                 ),
                 GestureDetector(
@@ -1549,6 +1582,14 @@ class _StrmPlayerScreenState extends State<StrmPlayerScreen>
                   child: Padding(
                     padding: const EdgeInsets.all(8),
                     child: Icon(Icons.camera_alt_outlined,
+                        color: Colors.white.withOpacity(0.7), size: 22),
+                  ),
+                ),
+                GestureDetector(
+                  onTap: _reloadAtCurrentFrame,
+                  child: Padding(
+                    padding: const EdgeInsets.all(8),
+                    child: Icon(Icons.refresh_rounded,
                         color: Colors.white.withOpacity(0.7), size: 22),
                   ),
                 ),

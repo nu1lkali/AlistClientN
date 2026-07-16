@@ -300,6 +300,33 @@ class _MediaKitPlayerScreenState extends State<MediaKitPlayerScreen>
     super.dispose();
   }
 
+  Future<void> _reloadAtCurrentFrame() async {
+    final savedPos = _position;
+    final url = _videos[_index]["url"] ?? "";
+    if (url.isEmpty) return;
+    final httpHeaders = _headers.isNotEmpty ? _headers : null;
+
+    _hideTimer?.cancel();
+    _closeSheetAndPanel();
+    SmartDialog.showLoading(msg: '重新加载中...');
+    setState(() => _buffering = true);
+
+    try {
+      _player.stop();
+      _player.open(Media(url, httpHeaders: httpHeaders), play: false);
+      await Future.delayed(const Duration(milliseconds: 300));
+      _player.seek(savedPos);
+      _player.play();
+      _startHideTimer();
+      SmartDialog.dismiss();
+      setState(() => _buffering = false);
+    } catch (e) {
+      SmartDialog.dismiss();
+      SmartDialog.showToast('重载失败');
+      setState(() => _buffering = false);
+    }
+  }
+
   void _playAt(int index) {
     if (index < 0 || index >= _videos.length) return;
     // 切换到新视频时重置重试计数
@@ -708,7 +735,7 @@ class _MediaKitPlayerScreenState extends State<MediaKitPlayerScreen>
       Row(children: [
         if (!isLive) Expanded(child: GestureDetector(onTap: () => _openSheet(PlayerSheet.playbackSpeed), child: Padding(padding: const EdgeInsets.only(left: 4, top: 8, bottom: 8), child: Text('${_fmt(_position)} / ${_fmt(_duration)}', style: const TextStyle(color: Colors.white, fontSize: 12, fontFamily: 'monospace'))))),
         _CircularButton(icon: _areControlsLocked ? Icons.lock : Icons.lock_open_rounded, iconColor: _areControlsLocked ? Colors.blue : Colors.white70, size: 32, onPressed: () { setState(() { _areControlsLocked = !_areControlsLocked; if (!_areControlsLocked) _showControls = true; }); _startHideTimer(); }),
-        
+        _CircularButton(icon: Icons.refresh_rounded, size: 32, onPressed: _reloadAtCurrentFrame),
         _CircularButton(icon: _playbackSpeed == 1.0 ? Icons.speed_rounded : Icons.speed_rounded, iconColor: _playbackSpeed != 1.0 ? Colors.blue : Colors.white70, size: 32, onPressed: () => _openSheet(PlayerSheet.playbackSpeed)),
         _CircularButton(icon: _isFullscreen ? Icons.fullscreen_exit_rounded : Icons.fullscreen_rounded, size: 32, onPressed: _toggleFullscreen),
       ]),
@@ -738,7 +765,7 @@ class _MediaKitPlayerScreenState extends State<MediaKitPlayerScreen>
     ),
   );
 
-  Widget _buildSheetOverlay() => GestureDetector(onTap: _closeSheetAndPanel, child: Container(color: Colors.black54, child: Align(alignment: Alignment.bottomCenter, child: GestureDetector(onTap: () {}, child: Container(constraints: BoxConstraints(maxHeight: _screenHeight * 0.55), width: double.infinity, decoration: const BoxDecoration(color: Color(0xFF1E1E1E), borderRadius: BorderRadius.only(topLeft: Radius.circular(20), topRight: Radius.circular(20))), child: _activeSheet == PlayerSheet.playbackSpeed ? _buildSpeedSheet() : _activeSheet == PlayerSheet.more ? _buildMoreSheet() : const SizedBox.shrink())))));
+  Widget _buildSheetOverlay() => GestureDetector(onTap: _closeSheetAndPanel, child: Container(color: Colors.black54, child: Align(alignment: Alignment.bottomCenter, child: GestureDetector(onTap: () {}, child: Container(constraints: BoxConstraints(maxHeight: _screenHeight * 0.60), width: double.infinity, decoration: const BoxDecoration(color: Color(0xFF1E1E1E), borderRadius: BorderRadius.only(topLeft: Radius.circular(20), topRight: Radius.circular(20))), child: _activeSheet == PlayerSheet.playbackSpeed ? _buildSpeedSheet() : _activeSheet == PlayerSheet.more ? _buildMoreSheet() : const SizedBox.shrink())))));
 
   Widget _buildSpeedSheet() {
     final speeds = [0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0, 2.5, 3.0, 4.0];
@@ -760,6 +787,7 @@ class _MediaKitPlayerScreenState extends State<MediaKitPlayerScreen>
     ),
     _moreTile(Icons.swap_horiz_rounded, '交换亮度/音量位置', _swapVolumeAndBrightness ? '已交换' : null, () { setState(() => _swapVolumeAndBrightness = !_swapVolumeAndBrightness); _showToast(_swapVolumeAndBrightness ? '已交换' : '已恢复默认'); _closeSheetAndPanel(); }),
     _moreTile(Icons.camera_alt_rounded, '截图', null, () { _closeSheetAndPanel(); _captureFrame(); }),
+    _moreTile(Icons.refresh_rounded, '重新加载', null, () { _closeSheetAndPanel(); _reloadAtCurrentFrame(); }),
     _moreTile(Icons.info_outline_rounded, '视频信息', null, () { _closeSheetAndPanel(); _showVideoInfo(); }),
   ])));
 

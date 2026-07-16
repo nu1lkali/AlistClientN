@@ -23,6 +23,8 @@ abstract class VideoEngine {
   Stream<Duration> get onDurationChanged;
   Stream<bool> get onPlayingChanged;
   Stream<void> get onCompleted;
+  /// 重新加载当前媒体并恢复到指定位置（不销毁重建，仅 stop + reopen）
+  Future<void> reload(String url, Duration resumePosition, {Map<String, String>? httpHeaders});
   Future<void> dispose();
 }
 
@@ -120,6 +122,20 @@ class VideoPlayerEngine implements VideoEngine {
       return VideoPlayer(c);
     }
     return const SizedBox.shrink();
+  }
+
+  @override
+  Future<void> reload(String url, Duration resumePosition, {Map<String, String>? httpHeaders}) async {
+    _ctrl?.removeListener(_onChanged);
+    await _ctrl?.dispose();
+    _ctrl = VideoPlayerController.networkUrl(
+      Uri.parse(url),
+      httpHeaders: httpHeaders ?? {},
+    );
+    await _ctrl?.initialize();
+    _ctrl?.addListener(_onChanged);
+    await _ctrl?.seekTo(resumePosition);
+    await _ctrl?.play();
   }
 
   @override
@@ -285,25 +301,24 @@ class MediaKitEngine implements VideoEngine {
 
   @override
   Future<void> seekTo(Duration position) async {
-    final now = DateTime.now();
-    // 距离上次 seek 太近，延迟执行
-    if (now.difference(_lastSeekTime) < _seekMinInterval) {
-      _pendingSeekPosition = position;
-      _seekDebounceTimer?.cancel();
-      _seekDebounceTimer = Timer(_seekMinInterval, () {
-        final target = _pendingSeekPosition;
-        _pendingSeekPosition = null;
-        if (target != null) {
-          _lastSeekTime = DateTime.now();
-          _player?.seek(target);
-        }
-      });
-      return;
-    }
-    _lastSeekTime = now;
+    // 取消之前挂起的 seek，直接 seek 到最新目标位置
+    // 旧防抖策略会导致 UI 已恢复轮询但实际 seek 延迟执行，进度条跳动
     _seekDebounceTimer?.cancel();
     _pendingSeekPosition = null;
+    _lastSeekTime = DateTime.now();
     _player?.seek(position);
+  }
+
+  @override
+  Future<void> reload(String url, Duration resumePosition, {Map<String, String>? httpHeaders}) async {
+    _seekDebounceTimer?.cancel();
+    _pendingSeekPosition = null;
+    try { _player?.stop(); } catch (_) {}
+    _player?.open(Media(url, httpHeaders: httpHeaders ?? {}), play: false);
+    // 等待播放器完成流打开和初始化解码
+    await Future.delayed(const Duration(milliseconds: 300));
+    _player?.seek(resumePosition);
+    _player?.play();
   }
 
   @override
