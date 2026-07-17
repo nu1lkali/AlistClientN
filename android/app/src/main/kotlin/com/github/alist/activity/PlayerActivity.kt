@@ -33,8 +33,8 @@ import androidx.core.view.updateLayoutParams
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import com.github.alist.bean.VideoItem
-import com.github.alist.client.BuildConfig
-import com.github.alist.client.R
+import com.github.alist.clientn.BuildConfig
+import com.github.alist.clientn.R
 import com.github.alist.utils.FlutterMethods
 import com.github.alist.utils.GsonUtils
 import com.github.alist.utils.VideoDataHolder

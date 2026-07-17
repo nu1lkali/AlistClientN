@@ -7,7 +7,7 @@ import 'package:alist/util/security_lock_controller.dart';
 import 'package:flutter/services.dart';
 
 class AlistPlugin {
-  static const _methodChannel = MethodChannel("com.github.alist.client.plugin");
+  static const _methodChannel = MethodChannel("com.github.alist.clientn.plugin");
 
   static void setupChannel() {
     _methodChannel.setMethodCallHandler((MethodCall call) async {

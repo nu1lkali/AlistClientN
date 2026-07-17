@@ -7,11 +7,11 @@ import android.content.Context
 import android.content.Intent
 import android.os.Build
 import androidx.core.app.NotificationCompat
-import com.github.alist.client.R
+import com.github.alist.clientn.R
 
 class DownloadingNotificationService : Service() {
     companion object {
-        const val channelId = "com.github.alist.client.download"
+        const val channelId = "com.github.alist.clientn.download"
         const val channelName = "Download"
     }
 

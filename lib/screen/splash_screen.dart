@@ -48,7 +48,7 @@ class _SplashScreenState extends State<SplashScreen> {
     await _requestStoragePermission();
     
     await JustAudioBackground.init(
-      androidNotificationChannelId: 'com.github.alist.client.audio',
+      androidNotificationChannelId: 'com.github.alist.clientn.audio',
       androidNotificationChannelName: 'Audio playback',
       androidNotificationOngoing: true,
     );

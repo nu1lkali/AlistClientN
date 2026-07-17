@@ -77,7 +77,7 @@ Future<String?> _doConvertHeic(String? localPath, String url) async {
 
     // API 28+ 用原生 ImageDecoder，速度更快，内存更可控
     if (Platform.isAndroid) {
-      const channel = MethodChannel('com.github.alist.client.plugin');
+      const channel = MethodChannel('com.github.alist.clientn.plugin');
       final result = await channel.invokeMethod<String>('convertHeic', {
         'srcPath': heicFilePath,
         'cacheDir': tmpDir.path,

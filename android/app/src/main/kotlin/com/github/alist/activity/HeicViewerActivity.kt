@@ -31,7 +31,7 @@ import androidx.recyclerview.widget.RecyclerView
 import androidx.viewpager2.widget.ViewPager2
 import com.github.chrisbanes.photoview.PhotoView
 import com.github.alist.bean.VideoItem
-import com.github.alist.client.R
+import com.github.alist.clientn.R
 import com.github.alist.utils.FlutterMethods
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers

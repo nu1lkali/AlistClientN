@@ -45,7 +45,7 @@ class AlistPlugin(private val activity: Activity, private val scope: CoroutineSc
     private lateinit var context: Context
 
     override fun onAttachedToEngine(binding: FlutterPlugin.FlutterPluginBinding) {
-        channel = MethodChannel(binding.binaryMessenger, "com.github.alist.client.plugin")
+        channel = MethodChannel(binding.binaryMessenger, "com.github.alist.clientn.plugin")
         FlutterMethods.channel = channel
         context = binding.applicationContext
         channel.setMethodCallHandler(this)
