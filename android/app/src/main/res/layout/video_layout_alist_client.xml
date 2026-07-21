@@ -176,6 +176,23 @@
             android:src="@drawable/ic_delete" />
     </LinearLayout>
 
+    <!-- 网速指示器：独立定位，不占用标题栏空间 -->
+    <TextView
+        android:id="@+id/tv_network_speed"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_below="@id/layout_top"
+        android:layout_alignParentEnd="true"
+        android:layout_marginTop="4dp"
+        android:layout_marginEnd="10dp"
+        android:background="#80000000"
+        android:paddingHorizontal="8dp"
+        android:paddingVertical="3dp"
+        android:textColor="#e6ffffff"
+        android:textSize="11sp"
+        android:fontFamily="monospace"
+        android:visibility="gone"
+        android:text="" />
 
     <ProgressBar
         android:id="@+id/loading"

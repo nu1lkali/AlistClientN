@@ -37,7 +37,7 @@ class SubtitleMatcherUtil {
     if (dirPath.isEmpty) return null;
 
     // 3. 读取匹配模式
-    final modeIndex = SpUtil.getInt(AlistConstant.subtitleMatchMode) ?? 2; // 默认双模式
+    final modeIndex = SpUtil.getInt(AlistConstant.subtitleMatchMode, defValue: 2) ?? 2; // 默认双模式
     final mode = SubtitleMatchMode.values[modeIndex.clamp(0, SubtitleMatchMode.values.length - 1)];
 
     try {

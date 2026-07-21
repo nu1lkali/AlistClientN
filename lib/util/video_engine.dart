@@ -196,6 +196,9 @@ class MediaKitEngine implements VideoEngine {
 
   StreamSubscription? _posSub, _playSub, _compSub, _bufferingSub;
 
+  /// Expose the native player platform for property queries (e.g. cache-speed)
+  dynamic get playerPlatform => _player?.platform;
+
   @override
   Stream<Duration> get onPositionChanged => _positionCtrl.stream;
 

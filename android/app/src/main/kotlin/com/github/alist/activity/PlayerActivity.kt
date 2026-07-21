@@ -211,6 +211,20 @@ class PlayerActivity : AppCompatActivity(), GSYVideoProgressListener {
     // FFMPEG 软解开关（从 Flutter 设置页传入）
     private var ffmpegSoftDecode = false
 
+    // 当前是否使用 IJK 内核（用于决定是否对 URL 做预解码，防止 IJK/OkHttp 二次编码）
+    private var useIjkPlayer = false
+
+    // Network speed tracking (set to true to enable)
+    private val enableNetworkSpeed = false
+
+    // Network speed tracking
+    private var networkSpeedBytesPerSec = 0.0
+    private var lastBufferedMs = 0L
+    private var lastSpeedSampleTime = 0L
+    private var loadStartTime = 0L  // for startup speed calculation
+    private val speedPollHandler = Handler(Looper.getMainLooper())
+    private var speedPollRunnable: Runnable? = null
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         if (BuildConfig.DEBUG) {
@@ -405,6 +419,7 @@ class PlayerActivity : AppCompatActivity(), GSYVideoProgressListener {
 
         // FFMPEG 软解开关：启用后所有格式统一走 IJK（内建 FFmpeg）内核
         val useIjk = ffmpegSoftDecode || ijkFormats.contains(ext)
+        useIjkPlayer = useIjk
 
         if (useIjk) {
             // IJK 内核（FFmpeg 软解，兼容性最好）
@@ -573,6 +588,7 @@ class PlayerActivity : AppCompatActivity(), GSYVideoProgressListener {
                     isPlay = true
                     handler.removeMessages(messageRecordWatchTime)
                     handler.sendEmptyMessageDelayed(messageRecordWatchTime, 30 * 1000)
+                    if (enableNetworkSpeed) startSpeedPolling()
                     // 画中画模式下，视频准备好后更新PiP按钮图标
                     if (isInPictureInPictureMode) {
                         updatePipActions()
@@ -774,8 +790,9 @@ class PlayerActivity : AppCompatActivity(), GSYVideoProgressListener {
     }
 
     private fun startPlay(index: Int, video: VideoItem) {
+        loadStartTime = System.currentTimeMillis()
         val rawUrl = if (video.localPath.isNullOrEmpty()) video.url else video.localPath
-        val playUrl = decodeNetworkUrl(rawUrl ?: "")
+        val playUrl = rawUrl ?: ""
         gsyVideoPlayer.currentPlayer.setUp(playUrl, false, video.name.substringBeforeLast("."))
         // 本地字幕：按视频名在用户配置目录匹配同名 .srt（Exo/Media3 内核生效，IJK 老格式不支持）
         applyLocalSubtitle(video.name)
@@ -1240,6 +1257,10 @@ class PlayerActivity : AppCompatActivity(), GSYVideoProgressListener {
         }
         super.onPause()
         isPause = true
+        if (enableNetworkSpeed) {
+            stopSpeedPolling()
+            gsyVideoPlayer.setNetworkSpeed(0.0)
+        }
         handler.removeMessages(messageRecordWatchTime)
         saveCurrentTime()
         val brightness = window.attributes.screenBrightness
@@ -1262,10 +1283,79 @@ class PlayerActivity : AppCompatActivity(), GSYVideoProgressListener {
         }
     }
 
+    private fun startSpeedPolling() {
+        stopSpeedPolling()
+        lastSpeedSampleTime = System.currentTimeMillis()
+        lastBufferedMs = 0L
+        // Calculate initial speed from startup time (cap at 125 MB/s)
+        val loadElapsed = lastSpeedSampleTime - loadStartTime
+        val fileSize = videos.getOrNull(index)?.size?.toLongOrNull() ?: 0L
+        if (loadElapsed > 500 && fileSize > 0) {
+            val rawSpeed = fileSize.toDouble() / (loadElapsed / 1000.0)
+            networkSpeedBytesPerSec = rawSpeed.coerceAtMost(125_000_000.0)
+            gsyVideoPlayer.setNetworkSpeed(networkSpeedBytesPerSec)
+        } else {
+            networkSpeedBytesPerSec = 0.0
+        }
+        speedPollRunnable = object : Runnable {
+            override fun run() {
+                if (isFinishing) return
+                try {
+                    val currentPlayer = gsyVideoPlayer.currentPlayer
+                    val bufferPercent = try {
+                        (currentPlayer as? AlistClientVideoPlayer)?.bufferPercentage ?: 0
+                    } catch (e: Exception) { 0 }
+                    val totalMs = totalTime
+                    if (totalMs > 0 && bufferPercent > 0) {
+                        val bufferedMs = (bufferPercent.toLong() * totalMs / 100)
+                        val now = System.currentTimeMillis()
+                        val elapsed = now - lastSpeedSampleTime
+                        if (elapsed > 200 && bufferedMs > lastBufferedMs) {
+                            val deltaMs = bufferedMs - lastBufferedMs
+                            val fileSize = videos.getOrNull(index)?.size?.toLongOrNull() ?: 0L
+                            if (fileSize > 0) {
+                                val rawSpeed = (deltaMs.toDouble() / totalMs * fileSize) / (elapsed / 1000.0)
+                                networkSpeedBytesPerSec = rawSpeed.coerceAtMost(125_000_000.0)
+                            }
+                        } else if (elapsed > 5000 && bufferedMs == lastBufferedMs) {
+                            // Decay startup speed over time
+                            networkSpeedBytesPerSec = (networkSpeedBytesPerSec * 0.8).coerceAtMost(125_000_000.0)
+                            if (networkSpeedBytesPerSec < 100) networkSpeedBytesPerSec = 0.0
+                        }
+                        lastBufferedMs = bufferedMs
+                        lastSpeedSampleTime = now
+                    }
+                    gsyVideoPlayer.setNetworkSpeed(networkSpeedBytesPerSec)
+                    // Also update fullscreen player instance if exists
+                    val fullscreenPlayer = findFullscreenPlayer()
+                    if (fullscreenPlayer != null) {
+                        fullscreenPlayer.setNetworkSpeed(networkSpeedBytesPerSec)
+                    }
+                } catch (e: Exception) {
+                    // ignore
+                }
+                speedPollHandler.postDelayed(this, 500)
+            }
+        }
+        speedPollHandler.postDelayed(speedPollRunnable!!, 500)
+    }
+
+    private fun stopSpeedPolling() {
+        speedPollRunnable?.let { speedPollHandler.removeCallbacks(it) }
+        speedPollRunnable = null
+    }
+
     override fun onResume() {
         super.onResume()
         gsyVideoPlayer.currentPlayer.onVideoResume(false)
         isPause = false
+        if (enableNetworkSpeed &&
+            (gsyVideoPlayer.currentPlayer.currentState == GSYVideoView.CURRENT_STATE_PLAYING
+            || gsyVideoPlayer.currentPlayer.currentState == GSYVideoView.CURRENT_STATE_PLAYING_BUFFERING_START
+            || gsyVideoPlayer.currentPlayer.currentState == GSYVideoView.CURRENT_STATE_PREPAREING)
+        ) {
+            startSpeedPolling()
+        }
         val savedBrightness = getSharedPreferences("player_prefs", MODE_PRIVATE)
             .getFloat("last_brightness", -1f)
         if (savedBrightness >= 0f) {
@@ -1286,6 +1376,7 @@ class PlayerActivity : AppCompatActivity(), GSYVideoProgressListener {
     override fun onDestroy() {
         super.onDestroy()
         unregisterPipReceiver()
+        if (enableNetworkSpeed) stopSpeedPolling()
         if (isPlay) {
             gsyVideoPlayer.currentPlayer.release()
         }

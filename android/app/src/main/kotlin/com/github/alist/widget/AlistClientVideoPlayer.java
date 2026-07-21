@@ -54,6 +54,7 @@ public class AlistClientVideoPlayer extends NormalGSYVideoPlayer {
     private View btnQuickPrevious;
     private View btnQuickNext;
     private View btnQuickDislike;
+    protected android.widget.TextView tvNetworkSpeed;
     protected boolean isEnableSeek;
     private boolean isLongPressing;
     private ValueAnimator ffwdIconAnimator;
@@ -184,6 +185,7 @@ public class AlistClientVideoPlayer extends NormalGSYVideoPlayer {
         btnFavorite = findViewById(R.id.btn_favorite);
         btnPip = findViewById(R.id.btn_pip);
         btnDislike = findViewById(R.id.btn_dislike);
+        tvNetworkSpeed = findViewById(R.id.tv_network_speed);
         btnRewind.setVisibility(View.INVISIBLE);
         btnFfwd.setVisibility(View.INVISIBLE);
         btnScreenshot.setOnClickListener(v -> takeScreenshot());
@@ -484,6 +486,43 @@ public class AlistClientVideoPlayer extends NormalGSYVideoPlayer {
 
     public View getBtnScreenshot() {
         return btnScreenshot;
+    }
+
+    /** Expose buffer percentage (0-100) via reflection on GSY's protected field */
+    public int getBufferPercentage() {
+        Class<?> clazz = getClass();
+        while (clazz != null) {
+            try {
+                java.lang.reflect.Field field = clazz.getDeclaredField("mBuffterPoint");
+                field.setAccessible(true);
+                return field.getInt(this);
+            } catch (Exception e) {
+                clazz = clazz.getSuperclass();
+            }
+        }
+        return 0;
+    }
+
+    /**
+     * Update network speed display. Shows formatted speed like "12.5 MB/s".
+     * Pass <= 100 to hide the indicator.
+     */
+    public void setNetworkSpeed(double bytesPerSecond) {
+        if (tvNetworkSpeed == null) return;
+        if (bytesPerSecond <= 100) {
+            tvNetworkSpeed.setVisibility(View.GONE);
+            return;
+        }
+        String text;
+        if (bytesPerSecond < 1024) {
+            text = String.format(Locale.US, "%d B/s", (int) bytesPerSecond);
+        } else if (bytesPerSecond < 1024 * 1024) {
+            text = String.format(Locale.US, "%d KB/s", (int) (bytesPerSecond / 1024));
+        } else {
+            text = String.format(Locale.US, "%.1f MB/s", bytesPerSecond / (1024 * 1024));
+        }
+        tvNetworkSpeed.setText(text);
+        tvNetworkSpeed.setVisibility(View.VISIBLE);
     }
 
     /**

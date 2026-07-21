@@ -9,6 +9,7 @@ import 'package:alist/util/alist_plugin.dart';
 import 'package:alist/util/constant.dart';
 import 'package:alist/util/log_utils.dart';
 import 'package:alist/util/video_player_util.dart';
+import 'package:alist/widget/network_speed_indicator.dart';
 import 'package:alist/widget/slider.dart';
 import 'package:device_info_plus/device_info_plus.dart';
 import 'package:flutter/material.dart';
@@ -80,6 +81,7 @@ final _rateList = [
 
 class AlistPlayerSkinState extends State<AlistPlayerSkin> {
   static const String tag = "AlistPlayerSkinState";
+  static const bool _enableNetworkSpeed = false; // TODO: 调试完成后改为 true
 
   FlutterAliplayer get _player => widget.player;
 
@@ -125,6 +127,7 @@ class AlistPlayerSkinState extends State<AlistPlayerSkin> {
   bool _longPressRating = false;
 
   double _seekPos = -1.0;
+  double _netSpeed = 0;
   StreamSubscription? _currentPosSubs;
   StreamSubscription? _bufferPosSubs;
   StreamSubscription? _volumeSubscription;
@@ -204,6 +207,9 @@ class AlistPlayerSkinState extends State<AlistPlayerSkin> {
       },
       loadingProgress: (int percent, double? netSpeed, String playerId) {
         Log.d("loadingBegin percent=$percent netSpeed=$netSpeed", tag: tag);
+        if (mounted && (netSpeed ?? 0) > 0) {
+          setState(() => _netSpeed = netSpeed!);
+        }
       },
       loadingEnd: (String playerId) {
         if (!mounted) {
@@ -211,6 +217,10 @@ class AlistPlayerSkinState extends State<AlistPlayerSkin> {
         }
         setState(() {
           _loading = false;
+        });
+        // Keep last speed visible for 3 seconds after loading ends
+        Future.delayed(const Duration(seconds: 3), () {
+          if (mounted) setState(() => _netSpeed = 0);
         });
         Log.d("loadingEnd", tag: tag);
       },
@@ -777,6 +787,12 @@ class AlistPlayerSkinState extends State<AlistPlayerSkin> {
           right: 0,
           top: 50,
           child: LongPressRatingWidget(longPressRating: _longPressRating),
+        ),
+        if (_enableNetworkSpeed)
+        NetworkSpeedWidget(
+          bytesPerSecond: _netSpeed,
+          visible: !_locked && _playing,
+          isLandscape: _fullscreen,
         ),
       ],
     );

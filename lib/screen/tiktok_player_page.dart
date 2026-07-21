@@ -13,6 +13,7 @@ import 'package:alist/util/file_utils.dart';
 import 'package:alist/util/log_utils.dart' as log;
 import 'package:alist/util/subtitle/subtitle.dart';
 import 'package:alist/util/video_player_util.dart';
+import 'package:alist/widget/network_speed_indicator.dart';
 import 'package:alist/widget/subtitle_view.dart';
 import 'package:alist/util/stream_size_resolver.dart';
 import 'package:alist/util/user_controller.dart';
@@ -39,6 +40,7 @@ class TikTokPlayerPage extends StatefulWidget {
 
 class _TikTokPlayerPageState extends State<TikTokPlayerPage>
     with WidgetsBindingObserver, TickerProviderStateMixin {
+  static const bool _enableNetworkSpeed = false; // TODO: 调试完成后改为 true
   late final TikTokPlayListModel _playList;
   late PageController _pageController;
   late int _currentIndex;
@@ -74,6 +76,11 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
 
   Timer? _landscapeHideTimer;
   static const _landscapeAutoHide = Duration(seconds: 2);
+
+  double _networkSpeed = 0;
+  Duration _lastBufferedEnd = Duration.zero;
+  DateTime _lastSpeedSample = DateTime.now();
+  DateTime _loadStartTime = DateTime.now();
 
   // ══════ Gesture state ══════
   static const _gestureDecideThreshold = 10.0;
@@ -339,6 +346,8 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
           // 滑动调整进度期间，不从播放器读取位置，避免覆盖预览进度导致闪烁
             setState(() { _pos = c.value.position; _dur = c.value.duration; });
             _subtitleController.updatePosition(c.value.position.inMilliseconds);
+          if (_enableNetworkSpeed)
+          _calcNetworkSpeed(c);
           if (c.value.duration > Duration.zero &&
               c.value.position >= c.value.duration - const Duration(milliseconds: 500) &&
               !_completing) {
@@ -409,6 +418,7 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
     if (_controllers.containsKey(idx) || _initializingIndexes.contains(idx)) return;
     if (_initializingIndexes.length >= 2) return;
     _initializingIndexes.add(idx);
+    if (idx == _currentIndex) _loadStartTime = DateTime.now();
     VideoPlayerController? ctrl;
     try {
       final v = _playList.videos[idx];
@@ -436,7 +446,18 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
       ctrl.setLooping(_loopMode == 2);
       _controllers[idx] = ctrl;
       _initializingIndexes.remove(idx);
-      if (idx == _currentIndex) { ctrl.play(); _isPlaying = true; _recordViewing(idx); _loadSubtitleForCurrent(); }
+      if (idx == _currentIndex) {
+        ctrl.play(); _isPlaying = true; _recordViewing(idx); _loadSubtitleForCurrent();
+        if (_enableNetworkSpeed) {
+          final loadElapsed = DateTime.now().difference(_loadStartTime);
+          final fs = v.fileSize;
+          if (loadElapsed.inMilliseconds > 300 && fs != null && fs > 0) {
+            _networkSpeed = (fs.toDouble() / (loadElapsed.inMilliseconds / 1000.0)).clamp(0.0, 125000000.0);
+            _lastSpeedSample = DateTime.now();
+            _lastBufferedEnd = Duration.zero;
+          }
+        }
+      }
       if (mounted) setState(() {});
 
       // 仅当前播放视频获取大小，预加载视频延迟到切换时再获取（减少CDN请求）
@@ -488,6 +509,35 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
 
   void _safePause() {
     try { final c = _controllers[_currentIndex]; if (c != null && c.value.isInitialized) { c.pause(); _isPlaying = false; if (mounted) setState(() {}); } } catch (_) {}
+  }
+
+  void _calcNetworkSpeed(VideoPlayerController ctrl) {
+    try {
+      final buffered = ctrl.value.buffered;
+      if (buffered.isEmpty) return;
+      final end = buffered.last.end;
+      final now = DateTime.now();
+      final elapsed = now.difference(_lastSpeedSample);
+      if (elapsed.inMilliseconds < 200) return;
+      final deltaMs = (end - _lastBufferedEnd).inMilliseconds.toDouble();
+      // Only calculate if buffer is actually growing
+      if (deltaMs > 0 && elapsed.inMilliseconds > 0) {
+        final fileSize = _playList.videos[_currentIndex].fileSize;
+        final durMs = ctrl.value.duration.inMilliseconds;
+        if (fileSize != null && fileSize > 0 && durMs > 0) {
+          _networkSpeed = (deltaMs / durMs * fileSize) / (elapsed.inMilliseconds / 1000.0);
+        } else if (durMs > 0) {
+          // Estimate bitrate: assume 5 Mbps (625 KB/s) for HD video as fallback
+          const estimatedBitrate = 625000.0; // bytes/s
+          _networkSpeed = (deltaMs / elapsed.inMilliseconds * 1000.0) * estimatedBitrate;
+        }
+      } else if (deltaMs == 0 && elapsed.inMilliseconds > 3000) {
+        // Buffer not growing -> speed is essentially 0
+        _networkSpeed = 0;
+      }
+      _lastBufferedEnd = end;
+      _lastSpeedSample = now;
+    } catch (_) {}
   }
 
   // ═══════════════ Gesture: Single Tap (immediate) + Double Tap ═══════════════
@@ -945,8 +995,15 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
     );
   }
 
+  String _fmtSpeed(double bps) {
+    if (bps < 1024) return '${bps.toInt()} B/s';
+    if (bps < 1024 * 1024) return '${(bps / 1024).toInt()} KB/s';
+    return '${(bps / (1024 * 1024)).toStringAsFixed(1)} MB/s';
+  }
+
   Widget _buildBottomInfo() {
     final v = _playList.videos[_currentIndex];
+    final showSpeed = _enableNetworkSpeed && _isPlaying && _networkSpeed > 100;
     return Positioned(left: 12, bottom: 20, right: 12,
       child: Opacity(opacity: _uiOpacity, child: Row(
         crossAxisAlignment: CrossAxisAlignment.end,
@@ -962,8 +1019,16 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
                   maxLines: 1, overflow: TextOverflow.ellipsis);
               }),
               const SizedBox(height: 4),
-              Text('${v.formattedSize}  |  ${v.filePath}',
-                style: const TextStyle(color: Colors.white70, fontSize: 11), maxLines: 1, overflow: TextOverflow.ellipsis),
+              Row(children: [
+                if (showSpeed) ...[
+                  Text('⬇ ${_fmtSpeed(_networkSpeed)}',
+                      style: const TextStyle(color: Color(0xFF4FC3F7), fontSize: 11, fontFamily: 'monospace')),
+                  const Text('  |  ',
+                      style: TextStyle(color: Colors.white30, fontSize: 11)),
+                ],
+                Text('${v.formattedSize}  |  ${v.filePath}',
+                  style: const TextStyle(color: Colors.white70, fontSize: 11), maxLines: 1, overflow: TextOverflow.ellipsis),
+              ]),
             ]),
           ),
           if (!_isLandscape) ...[

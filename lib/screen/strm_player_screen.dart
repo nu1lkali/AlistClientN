@@ -13,6 +13,7 @@ import 'package:alist/util/alist_plugin.dart';
 import 'package:alist/util/constant.dart';
 import 'package:alist/util/video_engine.dart';
 import 'package:alist/util/subtitle/subtitle.dart';
+import 'package:alist/widget/network_speed_indicator.dart';
 import 'package:alist/widget/subtitle_view.dart';
 import 'package:alist/util/log_utils.dart' as log;
 import 'package:alist/util/stream_size_resolver.dart';
@@ -40,6 +41,7 @@ class StrmPlayerScreen extends StatefulWidget {
 
 class _StrmPlayerScreenState extends State<StrmPlayerScreen>
     with WidgetsBindingObserver, TickerProviderStateMixin {
+  static const bool _enableNetworkSpeed = false; // TODO: 调试完成后改为 true
   late final TikTokPlayListModel _playList;
   late int _currentIndex;
 
@@ -69,6 +71,13 @@ class _StrmPlayerScreenState extends State<StrmPlayerScreen>
 
   Timer? _landscapeHideTimer;
   static const _landscapeAutoHide = Duration(seconds: 2);
+
+  double _networkSpeed = 0;
+  Duration _lastBufferedEnd = Duration.zero;
+  DateTime _lastSpeedSample = DateTime.now();
+  DateTime _loadStartTime = DateTime.now();
+  bool _showStartupSpeed = false;
+  Timer? _speedPollTimer;
 
   double _uiOpacity = 1.0;
 
@@ -311,6 +320,7 @@ class _StrmPlayerScreenState extends State<StrmPlayerScreen>
     _landscapeHideTimer?.cancel();
     _preloadTimer?.cancel();
     _playlistSyncTimer?.cancel();
+    _speedPollTimer?.cancel();
     _saveProgress(); // 退出时保存播放进度
     _engine?.dispose();
     _engine = null;
@@ -344,6 +354,7 @@ class _StrmPlayerScreenState extends State<StrmPlayerScreen>
     if (idx < 0 || idx >= _playList.videos.length) return;
     if (_isInitializing) return;
     _isInitializing = true;
+    _loadStartTime = DateTime.now();
 
     try {
       _engine?.dispose();
@@ -376,6 +387,7 @@ class _StrmPlayerScreenState extends State<StrmPlayerScreen>
         if (mounted) setState(() {});
         await mkEngine.openMedia(url, httpHeaders: httpHeaders); // 再加载媒体
         engine = mkEngine;
+        if (_enableNetworkSpeed) _startMpvSpeedPolling();
       } else {
         final vpEngine = VideoPlayerEngine();
         await vpEngine.createFromNetwork(url, httpHeaders: httpHeaders);
@@ -404,6 +416,17 @@ class _StrmPlayerScreenState extends State<StrmPlayerScreen>
       engine.play();
       _isPlaying = true;
       _recordViewing(idx);
+      if (_enableNetworkSpeed) {
+        final loadElapsed = DateTime.now().difference(_loadStartTime);
+        final fs = _playList.videos[idx].fileSize;
+        if (loadElapsed.inMilliseconds > 300 && fs != null && fs > 0) {
+          _networkSpeed = (fs.toDouble() / (loadElapsed.inMilliseconds / 1000.0)).clamp(0.0, 125000000.0);
+          _showStartupSpeed = true;
+          Future.delayed(const Duration(seconds: 5), () {
+            if (mounted) setState(() => _showStartupSpeed = false);
+          });
+        }
+      }
       _startTimer();
       // 加载本地同名字幕（按视频名在字幕目录匹配 .srt）
       _subtitleController.loadSubtitle(remotePath: v.filePath, sign: v.sign);
@@ -539,6 +562,68 @@ class _StrmPlayerScreenState extends State<StrmPlayerScreen>
         if (mounted) setState(() {});
       }
     } catch (_) {}
+  }
+
+  void _calcNetworkSpeed() {
+    try {
+      final engine = _engine;
+      if (engine == null || !engine.isInitialized) return;
+
+      if (engine is MediaKitEngine) {
+        // MPV engine: cache-speed is polled by timer
+        return;
+      }
+
+      // VideoPlayerEngine: calculate from buffered position changes
+      final ctrl = _controller;
+      if (ctrl == null || !ctrl.value.isInitialized) return;
+      final buffered = ctrl.value.buffered;
+      if (buffered.isEmpty) return;
+      final end = buffered.last.end;
+      final now = DateTime.now();
+      final elapsed = now.difference(_lastSpeedSample);
+      if (elapsed.inMilliseconds < 200) return;
+      final deltaMs = (end - _lastBufferedEnd).inMilliseconds.toDouble();
+      if (deltaMs > 0 && elapsed.inMilliseconds > 0) {
+        final fileSize = _playList.videos[_currentIndex].fileSize;
+        final durMs = ctrl.value.duration.inMilliseconds;
+        if (fileSize != null && fileSize > 0 && durMs > 0) {
+          _networkSpeed = (deltaMs / durMs * fileSize) / (elapsed.inMilliseconds / 1000.0);
+        } else if (durMs > 0) {
+          const estimatedBitrate = 625000.0; // 5 Mbps fallback
+          _networkSpeed = (deltaMs / elapsed.inMilliseconds * 1000.0) * estimatedBitrate;
+        }
+      } else if (deltaMs == 0 && elapsed.inMilliseconds > 3000) {
+        _networkSpeed = 0;
+      }
+      _lastBufferedEnd = end;
+      _lastSpeedSample = now;
+    } catch (_) {}
+  }
+
+  void _startMpvSpeedPolling() {
+    _speedPollTimer?.cancel();
+    _speedPollTimer = Timer.periodic(const Duration(milliseconds: 500), (_) async {
+      if (!mounted) return;
+      try {
+        final engine = _engine;
+        if (engine is MediaKitEngine) {
+          final native = engine.playerPlatform;
+          final result = native.getProperty('cache-speed');
+          double? speed;
+          if (result is Future) {
+            speed = await result;
+          } else if (result is double) {
+            speed = result;
+          } else if (result is int) {
+            speed = result.toDouble();
+          }
+          if (speed != null && mounted) {
+            setState(() => _networkSpeed = speed!);
+          }
+        }
+      } catch (_) {}
+    });
   }
 
   // ═══════════════ DB ═══════════════
@@ -725,6 +810,8 @@ class _StrmPlayerScreenState extends State<StrmPlayerScreen>
             _dur = engine.duration;
           });
           _subtitleController.updatePosition(engine.position.inMilliseconds);
+
+          if (_enableNetworkSpeed) _calcNetworkSpeed();
 
           // 定期保存播放进度
           final now = DateTime.now();
@@ -1533,8 +1620,15 @@ class _StrmPlayerScreenState extends State<StrmPlayerScreen>
       );
   }
 
+  String _fmtSpeed(double bps) {
+    if (bps < 1024) return '${bps.toInt()} B/s';
+    if (bps < 1024 * 1024) return '${(bps / 1024).toInt()} KB/s';
+    return '${(bps / (1024 * 1024)).toStringAsFixed(1)} MB/s';
+  }
+
   Widget _buildBottomInfo() {
     final v = _playList.videos[_currentIndex];
+    final showSpeed = _enableNetworkSpeed && _isPlaying && (_networkSpeed > 100 || _showStartupSpeed);
     return Positioned(
         left: 12,
         bottom: 20,
@@ -1562,12 +1656,22 @@ class _StrmPlayerScreenState extends State<StrmPlayerScreen>
                             overflow: TextOverflow.ellipsis);
                       }),
                       const SizedBox(height: 4),
-                      Text(
-                          '${_getCurrentSortedIndex() + 1}/${_sortedVideos.length}  |  ${v.formattedSize}',
-                          style: const TextStyle(
-                              color: Colors.white70, fontSize: 11),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis),
+                      Row(children: [
+                        if (showSpeed) ...[
+                          Text('⬇ ${_fmtSpeed(_networkSpeed)}',
+                              style: const TextStyle(
+                                  color: Color(0xFF4FC3F7), fontSize: 11,
+                                  fontFamily: 'monospace')),
+                          const Text('  |  ',
+                              style: TextStyle(color: Colors.white30, fontSize: 11)),
+                        ],
+                        Text(
+                            '${_getCurrentSortedIndex() + 1}/${_sortedVideos.length}  |  ${v.formattedSize}',
+                            style: const TextStyle(
+                                color: Colors.white70, fontSize: 11),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis),
+                      ]),
                     ]),
               ),
               if (!_isLandscape) ...[

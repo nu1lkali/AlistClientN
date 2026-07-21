@@ -7,9 +7,12 @@ import 'package:alist/screen/disliked_videos_screen.dart';
 import 'package:alist/database/table/favorite.dart';
 import 'package:alist/screen/video_player_screen.dart';
 import 'package:alist/util/alist_plugin.dart';
+import 'package:alist/util/constant.dart';
 import 'package:alist/util/subtitle/subtitle.dart';
+import 'package:flustars/flustars.dart';
 import 'package:alist/util/user_controller.dart';
 import 'package:alist/util/video_player_util.dart';
+import 'package:alist/widget/network_speed_indicator.dart';
 import 'package:alist/widget/subtitle_view.dart' as subtitle_widget;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -34,6 +37,7 @@ class MediaKitPlayerScreen extends StatefulWidget {
 
 class _MediaKitPlayerScreenState extends State<MediaKitPlayerScreen>
     with WidgetsBindingObserver, TickerProviderStateMixin {
+  static const bool _enableNetworkSpeed = false; // TODO: 调试完成后改为 true
   late final List<Map<String, String?>> _videos;
   late int _index;
   late final Player _player;
@@ -43,11 +47,16 @@ class _MediaKitPlayerScreenState extends State<MediaKitPlayerScreen>
 
   bool _showControls = true;
   Timer? _hideTimer;
+  double _networkSpeed = 0;
+  Timer? _speedPollTimer;
+  DateTime _loadStartTime = DateTime.now();
+  int _speedPollCount = 0;
   Duration _position = Duration.zero;
   Duration _duration = Duration.zero;
   bool _playing = false;
   bool _buffering = false;
   bool _playbackError = false;
+  bool _videoStable = false; // 首帧防撕裂：视频尺寸稳定后才显示
   // 记录上次播放方向，用于播放失败时决定跳过方向
   PlayDirection _lastPlayDirection = PlayDirection.next;
   StreamSubscription? _posSub, _durSub, _playSub, _bufSub, _errSub, _playAtSub, _compSub;
@@ -194,6 +203,8 @@ class _MediaKitPlayerScreenState extends State<MediaKitPlayerScreen>
     }); // end Future.delayed
     }); // end listen
     WidgetsBinding.instance.addPostFrameCallback((_) => _playAt(_index));
+    if (_enableNetworkSpeed)
+      _speedPollTimer = Timer.periodic(const Duration(milliseconds: 500), (_) { _pollNetworkSpeed(); });
     _playlistAnimationController = AnimationController(duration: const Duration(milliseconds: 250), vsync: this);
     _playlistSlideAnimation = Tween<Offset>(begin: const Offset(1.0, 0.0), end: Offset.zero)
         .animate(CurvedAnimation(parent: _playlistAnimationController, curve: Curves.easeOutCubic));
@@ -265,12 +276,19 @@ class _MediaKitPlayerScreenState extends State<MediaKitPlayerScreen>
 
   Future<void> _initBrightnessAndVolume() async {
     try {
-      try {
-        _systemBrightnessValue = await ScreenBrightness().system;
-      } catch (_) {
-        _systemBrightnessValue = await ScreenBrightness().current;
+      // 优先读取上一次保存的亮度
+      final saved = SpUtil.getDouble(AlistConstant.strmBrightness);
+      if (saved != null && saved >= 0.1 && saved <= 1.0) {
+        _systemBrightnessValue = saved;
+      } else {
+        try {
+          _systemBrightnessValue = await ScreenBrightness().system;
+        } catch (_) {
+          _systemBrightnessValue = await ScreenBrightness().current;
+        }
+        if (_systemBrightnessValue < 0.1) _systemBrightnessValue = 1.0;
       }
-      if (_systemBrightnessValue < 0.1) _systemBrightnessValue = 1.0;
+      ScreenBrightness().setScreenBrightness(_systemBrightnessValue);
     } catch (_) { _systemBrightnessValue = 1.0; }
     try { _systemVolumeValue = await VolumeController().getVolume(); } catch (_) { _systemVolumeValue = 0.5; }
   }
@@ -280,7 +298,7 @@ class _MediaKitPlayerScreenState extends State<MediaKitPlayerScreen>
 
   @override
   void dispose() {
-    _hideTimer?.cancel(); _doubleTapResetTimer?.cancel(); _speedIndicatorTimer?.cancel();
+    _hideTimer?.cancel(); _doubleTapResetTimer?.cancel(); _speedIndicatorTimer?.cancel(); _speedPollTimer?.cancel();
     _posSub?.cancel(); _durSub?.cancel(); _playSub?.cancel(); _bufSub?.cancel(); _errSub?.cancel(); _playAtSub?.cancel(); _compSub?.cancel();
     _subtitleController.clear();
     WidgetsBinding.instance.removeObserver(this);
@@ -331,8 +349,11 @@ class _MediaKitPlayerScreenState extends State<MediaKitPlayerScreen>
     if (index < 0 || index >= _videos.length) return;
     // 切换到新视频时重置重试计数
     if (index != _index) _retryCount = 0;
+    _loadStartTime = DateTime.now();
+    _speedPollCount = 0;
+    _networkSpeed = 0;
     _playAtSub?.cancel(); _playAtSub = null;
-    setState(() { _index = index; _isSwitching = true; _buffering = true; _playbackError = false; _playbackSpeed = 1.0; });
+    setState(() { _index = index; _isSwitching = true; _videoStable = false; _buffering = true; _playbackError = false; _playbackSpeed = 1.0; });
     Future.delayed(const Duration(milliseconds: 50), () {
       if (!mounted) return;
       final url = _videos[index]["url"] ?? "";
@@ -354,8 +375,9 @@ class _MediaKitPlayerScreenState extends State<MediaKitPlayerScreen>
         if (videoParamsReady && bufferingReady && mounted) {
           _playAtSub?.cancel();
           _playAtSub = null;
-          Future.delayed(const Duration(milliseconds: 150), () {
-            if (mounted) setState(() => _isSwitching = false);
+          // 延迟稍长（250ms），确保 mpv 纹理已稳定渲染，消除首帧撕裂
+          Future.delayed(const Duration(milliseconds: 250), () {
+            if (mounted) setState(() { _isSwitching = false; _videoStable = true; });
           });
         }
       }
@@ -377,7 +399,7 @@ class _MediaKitPlayerScreenState extends State<MediaKitPlayerScreen>
         if (_playAtSub != null && mounted) {
           _playAtSub?.cancel();
           _playAtSub = null;
-          if (mounted) setState(() => _isSwitching = false);
+          if (mounted) setState(() { _isSwitching = false; _videoStable = true; });
         }
       });
     });
@@ -433,6 +455,47 @@ class _MediaKitPlayerScreenState extends State<MediaKitPlayerScreen>
   }
 
   void _showToast(String msg) { SmartDialog.showToast(msg); }
+
+  Future<void> _pollNetworkSpeed() async {
+    if (!mounted) return;
+    _speedPollCount++;
+    try {
+      final native = _player.platform as dynamic;
+      final result = native.getProperty('cache-speed');
+      double? speed;
+      if (result is Future) {
+        speed = await result;
+      } else if (result is double) {
+        speed = result;
+      } else if (result is int) {
+        speed = result.toDouble();
+      }
+      if (speed != null && mounted && speed > 0) {
+        final capped = speed.clamp(0.0, 125000000.0);
+        setState(() => _networkSpeed = capped);
+        return;
+      }
+    } catch (_) {}
+
+    // Startup speed fallback (first 10 polls = 5 seconds)
+    if (_speedPollCount <= 10) {
+      final loadElapsed = DateTime.now().difference(_loadStartTime);
+      final sizeStr = _videos[_index]["size"];
+      final fileSize = int.tryParse(sizeStr ?? "") ?? 0;
+      if (loadElapsed.inMilliseconds > 500 && fileSize > 0 && mounted) {
+        final rawSpeed = (fileSize.toDouble() / (loadElapsed.inMilliseconds / 1000.0))
+            .clamp(0.0, 125000000.0);
+        setState(() => _networkSpeed = rawSpeed);
+        return;
+      }
+    }
+
+    // Decay speed when no data
+    if (_speedPollCount > 10 && _networkSpeed > 100) {
+      final decayed = (_networkSpeed * 0.8).clamp(0.0, 125000000.0);
+      if (mounted) setState(() => _networkSpeed = decayed < 100 ? 0 : decayed);
+    }
+  }
 
   void _startHideTimer() {
     _hideTimer?.cancel();
@@ -603,7 +666,7 @@ class _MediaKitPlayerScreenState extends State<MediaKitPlayerScreen>
       else { _verticalDragType = _swapVolumeAndBrightness ? VerticalDragType.volume : VerticalDragType.brightness; _systemBrightnessDragStartValue = _systemBrightnessValue; }
     }
     final ratio = (_verticalDragStartY - d.localPosition.dy) / _screenHeight;
-    if (_verticalDragType == VerticalDragType.brightness) { _systemBrightnessValue = (_systemBrightnessDragStartValue + ratio).clamp(0.0, 1.0); ScreenBrightness().setScreenBrightness(_systemBrightnessValue); setState(() { _showBrightnessSlider = true; _showVolumeSlider = false; }); }
+    if (_verticalDragType == VerticalDragType.brightness) { _systemBrightnessValue = (_systemBrightnessDragStartValue + ratio).clamp(0.0, 1.0); ScreenBrightness().setScreenBrightness(_systemBrightnessValue); SpUtil.putDouble(AlistConstant.strmBrightness, _systemBrightnessValue); setState(() { _showBrightnessSlider = true; _showVolumeSlider = false; }); }
     else { _systemVolumeValue = (_systemVolumeDragStartValue + ratio).clamp(0.0, 1.0); VolumeController().setVolume(_systemVolumeValue, showSystemUI: false); setState(() { _showVolumeSlider = true; _showBrightnessSlider = false; }); }
   }
   void _onVerticalDragEnd(DragEndDetails d) {
@@ -646,11 +709,24 @@ class _MediaKitPlayerScreenState extends State<MediaKitPlayerScreen>
       child: AnnotatedRegion<SystemUiOverlayStyle>(
         value: const SystemUiOverlayStyle(systemNavigationBarColor: Colors.black, systemNavigationBarDividerColor: Colors.black, statusBarColor: Colors.transparent),
         child: Scaffold(
-          backgroundColor: Colors.transparent,
+          backgroundColor: Colors.black,
           body: Stack(children: <Widget>[
-            Positioned.fill(child: _buildVideoView()),
+            // 始终渲染 Video（PlatformView），用自身透明度消除首帧撕裂：
+            // 纹理在 opacity=0 时已初始化并稳定，淡入时不会出现拉伸/闪烁
+            Positioned.fill(
+              child: AnimatedOpacity(
+                opacity: _videoStable ? 1.0 : 0.0,
+                duration: const Duration(milliseconds: 250),
+                child: _buildVideoView(),
+              ),
+            ),
             subtitle_widget.SubtitleView(controller: _subtitleController),
-            if (_isSwitching) Positioned.fill(child: Container(color: Colors.black)),
+            if (_enableNetworkSpeed)
+            NetworkSpeedWidget(
+              bytesPerSecond: _networkSpeed,
+              visible: _playing && !_areControlsLocked && _activeSheet == PlayerSheet.none,
+              isLandscape: _isFullscreen,
+            ),
             if (_areControlsLocked) Positioned.fill(child: GestureDetector(onTap: () {}, behavior: HitTestBehavior.opaque, child: Container(color: Colors.transparent))),
             if (!_areControlsLocked) Positioned.fill(child: GestureDetector(
               onVerticalDragStart: _onVerticalDragStart, onVerticalDragUpdate: _onVerticalDragUpdate, onVerticalDragEnd: _onVerticalDragEnd,
@@ -735,9 +811,9 @@ class _MediaKitPlayerScreenState extends State<MediaKitPlayerScreen>
       Row(children: [
         if (!isLive) Expanded(child: GestureDetector(onTap: () => _openSheet(PlayerSheet.playbackSpeed), child: Padding(padding: const EdgeInsets.only(left: 4, top: 8, bottom: 8), child: Text('${_fmt(_position)} / ${_fmt(_duration)}', style: const TextStyle(color: Colors.white, fontSize: 12, fontFamily: 'monospace'))))),
         _CircularButton(icon: _areControlsLocked ? Icons.lock : Icons.lock_open_rounded, iconColor: _areControlsLocked ? Colors.blue : Colors.white70, size: 32, onPressed: () { setState(() { _areControlsLocked = !_areControlsLocked; if (!_areControlsLocked) _showControls = true; }); _startHideTimer(); }),
-        _CircularButton(icon: Icons.refresh_rounded, size: 32, onPressed: _reloadAtCurrentFrame),
+        _CircularButton(icon: Icons.refresh_rounded, iconColor: Colors.white70, size: 32, onPressed: _reloadAtCurrentFrame),
         _CircularButton(icon: _playbackSpeed == 1.0 ? Icons.speed_rounded : Icons.speed_rounded, iconColor: _playbackSpeed != 1.0 ? Colors.blue : Colors.white70, size: 32, onPressed: () => _openSheet(PlayerSheet.playbackSpeed)),
-        _CircularButton(icon: _isFullscreen ? Icons.fullscreen_exit_rounded : Icons.fullscreen_rounded, size: 32, onPressed: _toggleFullscreen),
+        _CircularButton(icon: _isFullscreen ? Icons.fullscreen_exit_rounded : Icons.fullscreen_rounded, iconColor: Colors.white70, size: 32, onPressed: _toggleFullscreen),
       ]),
     ]),
   );
