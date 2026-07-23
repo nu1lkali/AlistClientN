@@ -41,6 +41,10 @@ class Favorite {
   @ColumnInfo(name: 'path')
   final String path;
 
+  /// 所属收藏夹 ID（null 表示未归类，按默认夹处理）
+  @ColumnInfo(name: 'folder_id')
+  final int? folderId;
+
   Favorite({
     this.id,
     required this.isDir,
@@ -55,5 +59,6 @@ class Favorite {
     required this.modified,
     required this.provider,
     required this.createTime,
+    this.folderId,
   });
 }

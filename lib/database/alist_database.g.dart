@@ -73,7 +73,13 @@ class _$AlistDatabase extends AlistDatabase {
 
   FavoriteDao? _favoriteDaoInstance;
 
+  FavoriteFolderDao? _favoriteFolderDaoInstance;
+
   SearchHistoryDao? _searchHistoryDaoInstance;
+
+  DislikedVideoDao? _dislikedVideoDaoInstance;
+
+  StrmUrlCacheDao? _strmUrlCacheDaoInstance;
 
   Future<sqflite.Database> open(
     String path,
@@ -81,7 +87,7 @@ class _$AlistDatabase extends AlistDatabase {
     Callback? callback,
   ]) async {
     final databaseOptions = sqflite.OpenDatabaseOptions(
-      version: 9,
+      version: 10,
       onConfigure: (database) async {
         await database.execute('PRAGMA foreign_keys = ON');
         await callback?.onConfigure?.call(database);
@@ -107,7 +113,9 @@ class _$AlistDatabase extends AlistDatabase {
         await database.execute(
             'CREATE TABLE IF NOT EXISTS `file_viewing_record` (`id` INTEGER PRIMARY KEY AUTOINCREMENT, `server_url` TEXT NOT NULL, `user_id` TEXT NOT NULL, `remote_path` TEXT NOT NULL, `name` TEXT NOT NULL, `size` INTEGER NOT NULL, `sign` TEXT, `thumb` TEXT, `modified` INTEGER NOT NULL, `provider` TEXT NOT NULL, `create_time` INTEGER NOT NULL, `path` TEXT NOT NULL)');
         await database.execute(
-            'CREATE TABLE IF NOT EXISTS `favorite` (`id` INTEGER PRIMARY KEY AUTOINCREMENT, `is_dir` INTEGER NOT NULL, `server_url` TEXT NOT NULL, `user_id` TEXT NOT NULL, `remote_path` TEXT NOT NULL, `name` TEXT NOT NULL, `size` INTEGER NOT NULL, `sign` TEXT, `thumb` TEXT, `modified` INTEGER NOT NULL, `provider` TEXT NOT NULL, `create_time` INTEGER NOT NULL, `path` TEXT NOT NULL)');
+            'CREATE TABLE IF NOT EXISTS `favorite` (`id` INTEGER PRIMARY KEY AUTOINCREMENT, `is_dir` INTEGER NOT NULL, `server_url` TEXT NOT NULL, `user_id` TEXT NOT NULL, `remote_path` TEXT NOT NULL, `name` TEXT NOT NULL, `size` INTEGER NOT NULL, `sign` TEXT, `thumb` TEXT, `modified` INTEGER NOT NULL, `provider` TEXT NOT NULL, `create_time` INTEGER NOT NULL, `path` TEXT NOT NULL, `folder_id` INTEGER)');
+        await database.execute(
+            'CREATE TABLE IF NOT EXISTS `favorite_folder` (`id` INTEGER PRIMARY KEY AUTOINCREMENT, `server_url` TEXT NOT NULL, `user_id` TEXT NOT NULL, `name` TEXT NOT NULL, `is_default` INTEGER NOT NULL, `sort` INTEGER NOT NULL, `create_time` INTEGER NOT NULL)');
         await database.execute(
             'CREATE TABLE IF NOT EXISTS `search_history` (`id` INTEGER PRIMARY KEY AUTOINCREMENT, `server_url` TEXT NOT NULL, `user_id` TEXT NOT NULL, `keyword` TEXT NOT NULL, `timestamp` INTEGER NOT NULL)');
         await database.execute(
@@ -156,20 +164,22 @@ class _$AlistDatabase extends AlistDatabase {
   }
 
   @override
+  FavoriteFolderDao get favoriteFolderDao {
+    return _favoriteFolderDaoInstance ??=
+        _$FavoriteFolderDao(database, changeListener);
+  }
+
+  @override
   SearchHistoryDao get searchHistoryDao {
     return _searchHistoryDaoInstance ??=
         _$SearchHistoryDao(database, changeListener);
   }
-
-  DislikedVideoDao? _dislikedVideoDaoInstance;
 
   @override
   DislikedVideoDao get dislikedVideoDao {
     return _dislikedVideoDaoInstance ??=
         _$DislikedVideoDao(database, changeListener);
   }
-
-  StrmUrlCacheDao? _strmUrlCacheDaoInstance;
 
   @override
   StrmUrlCacheDao get strmUrlCacheDao {
@@ -802,7 +812,8 @@ class _$FavoriteDao extends FavoriteDao {
                   'modified': item.modified,
                   'provider': item.provider,
                   'create_time': item.createTime,
-                  'path': item.path
+                  'path': item.path,
+                  'folder_id': item.folderId
                 },
             changeListener),
         _favoriteUpdateAdapter = UpdateAdapter(
@@ -822,7 +833,8 @@ class _$FavoriteDao extends FavoriteDao {
                   'modified': item.modified,
                   'provider': item.provider,
                   'create_time': item.createTime,
-                  'path': item.path
+                  'path': item.path,
+                  'folder_id': item.folderId
                 },
             changeListener),
         _favoriteDeletionAdapter = DeletionAdapter(
@@ -842,7 +854,8 @@ class _$FavoriteDao extends FavoriteDao {
                   'modified': item.modified,
                   'provider': item.provider,
                   'create_time': item.createTime,
-                  'path': item.path
+                  'path': item.path,
+                  'folder_id': item.folderId
                 },
             changeListener);
 
@@ -866,7 +879,7 @@ class _$FavoriteDao extends FavoriteDao {
   ) async {
     return _queryAdapter.query(
         'SELECT * FROM favorite WHERE server_url = ?1 AND user_id=?2 AND path=?3 LIMIT 1',
-        mapper: (Map<String, Object?> row) => Favorite(id: row['id'] as int?, isDir: (row['is_dir'] as int) != 0, serverUrl: row['server_url'] as String, userId: row['user_id'] as String, remotePath: row['remote_path'] as String, name: row['name'] as String, path: row['path'] as String, size: row['size'] as int, sign: row['sign'] as String?, thumb: row['thumb'] as String?, modified: row['modified'] as int, provider: row['provider'] as String, createTime: row['create_time'] as int),
+        mapper: (Map<String, Object?> row) => Favorite(id: row['id'] as int?, isDir: (row['is_dir'] as int) != 0, serverUrl: row['server_url'] as String, userId: row['user_id'] as String, remotePath: row['remote_path'] as String, name: row['name'] as String, path: row['path'] as String, size: row['size'] as int, sign: row['sign'] as String?, thumb: row['thumb'] as String?, modified: row['modified'] as int, provider: row['provider'] as String, createTime: row['create_time'] as int, folderId: row['folder_id'] as int?),
         arguments: [serverUrl, userId, path]);
   }
 
@@ -890,7 +903,8 @@ class _$FavoriteDao extends FavoriteDao {
             thumb: row['thumb'] as String?,
             modified: row['modified'] as int,
             provider: row['provider'] as String,
-            createTime: row['create_time'] as int),
+            createTime: row['create_time'] as int,
+            folderId: row['folder_id'] as int?),
         arguments: [serverUrl, userId],
         queryableName: 'favorite',
         isView: false);
@@ -926,6 +940,87 @@ class _$FavoriteDao extends FavoriteDao {
   }
 
   @override
+  Stream<List<Favorite>?> listByFolder(
+    String serverUrl,
+    String userId,
+    int folderId,
+  ) {
+    return _queryAdapter.queryListStream(
+        'SELECT * FROM favorite WHERE server_url = ?1 AND user_id=?2 AND folder_id = ?3 ORDER BY id DESC',
+        mapper: (Map<String, Object?> row) => Favorite(
+            id: row['id'] as int?,
+            isDir: (row['is_dir'] as int) != 0,
+            serverUrl: row['server_url'] as String,
+            userId: row['user_id'] as String,
+            remotePath: row['remote_path'] as String,
+            name: row['name'] as String,
+            path: row['path'] as String,
+            size: row['size'] as int,
+            sign: row['sign'] as String?,
+            thumb: row['thumb'] as String?,
+            modified: row['modified'] as int,
+            provider: row['provider'] as String,
+            createTime: row['create_time'] as int,
+            folderId: row['folder_id'] as int?),
+        arguments: [serverUrl, userId, folderId],
+        queryableName: 'favorite',
+        isView: false);
+  }
+
+  @override
+  Future<void> moveToFolder(
+    int id,
+    int folderId,
+  ) async {
+    await _queryAdapter.queryNoReturn(
+        'UPDATE favorite SET folder_id = ?2 WHERE id = ?1',
+        arguments: [id, folderId]);
+  }
+
+  @override
+  Future<void> moveAllToFolder(
+    int sourceFolderId,
+    int targetFolderId,
+  ) async {
+    await _queryAdapter.queryNoReturn(
+        'UPDATE favorite SET folder_id = ?2 WHERE folder_id = ?1',
+        arguments: [sourceFolderId, targetFolderId]);
+  }
+
+  @override
+  Future<int?> countByFolder(
+    String serverUrl,
+    String userId,
+    int folderId,
+  ) async {
+    return _queryAdapter.query(
+        'SELECT COUNT(id) FROM favorite WHERE server_url = ?1 AND user_id=?2 AND folder_id = ?3',
+        mapper: (Map<String, Object?> row) => row.values.first as int,
+        arguments: [serverUrl, userId, folderId]);
+  }
+
+  @override
+  Stream<int?> countByFolderStream(
+    String serverUrl,
+    String userId,
+    int folderId,
+  ) {
+    return _queryAdapter.queryStream(
+        'SELECT COUNT(id) FROM favorite WHERE server_url = ?1 AND user_id=?2 AND folder_id = ?3',
+        mapper: (Map<String, Object?> row) => row.values.first as int,
+        arguments: [serverUrl, userId, folderId],
+        queryableName: 'favorite',
+        isView: false);
+  }
+
+  @override
+  Future<void> deleteByFolder(int folderId) async {
+    await _queryAdapter.queryNoReturn(
+        'DELETE FROM favorite WHERE folder_id = ?1',
+        arguments: [folderId]);
+  }
+
+  @override
   Future<int> insertRecord(Favorite favorite) {
     return _favoriteInsertionAdapter.insertAndReturnId(
         favorite, OnConflictStrategy.abort);
@@ -946,6 +1041,151 @@ class _$FavoriteDao extends FavoriteDao {
   @override
   Future<int> deleteRecord(Favorite favorite) {
     return _favoriteDeletionAdapter.deleteAndReturnChangedRows(favorite);
+  }
+}
+
+class _$FavoriteFolderDao extends FavoriteFolderDao {
+  _$FavoriteFolderDao(
+    this.database,
+    this.changeListener,
+  )   : _queryAdapter = QueryAdapter(database, changeListener),
+        _favoriteFolderInsertionAdapter = InsertionAdapter(
+            database,
+            'favorite_folder',
+            (FavoriteFolder item) => <String, Object?>{
+                  'id': item.id,
+                  'server_url': item.serverUrl,
+                  'user_id': item.userId,
+                  'name': item.name,
+                  'is_default': item.isDefault ? 1 : 0,
+                  'sort': item.sort,
+                  'create_time': item.createTime
+                },
+            changeListener),
+        _favoriteFolderUpdateAdapter = UpdateAdapter(
+            database,
+            'favorite_folder',
+            ['id'],
+            (FavoriteFolder item) => <String, Object?>{
+                  'id': item.id,
+                  'server_url': item.serverUrl,
+                  'user_id': item.userId,
+                  'name': item.name,
+                  'is_default': item.isDefault ? 1 : 0,
+                  'sort': item.sort,
+                  'create_time': item.createTime
+                },
+            changeListener),
+        _favoriteFolderDeletionAdapter = DeletionAdapter(
+            database,
+            'favorite_folder',
+            ['id'],
+            (FavoriteFolder item) => <String, Object?>{
+                  'id': item.id,
+                  'server_url': item.serverUrl,
+                  'user_id': item.userId,
+                  'name': item.name,
+                  'is_default': item.isDefault ? 1 : 0,
+                  'sort': item.sort,
+                  'create_time': item.createTime
+                },
+            changeListener);
+
+  final sqflite.DatabaseExecutor database;
+
+  final StreamController<String> changeListener;
+
+  final QueryAdapter _queryAdapter;
+
+  final InsertionAdapter<FavoriteFolder> _favoriteFolderInsertionAdapter;
+
+  final UpdateAdapter<FavoriteFolder> _favoriteFolderUpdateAdapter;
+
+  final DeletionAdapter<FavoriteFolder> _favoriteFolderDeletionAdapter;
+
+  @override
+  Stream<List<FavoriteFolder>?> list(
+    String serverUrl,
+    String userId,
+  ) {
+    return _queryAdapter.queryListStream(
+        'SELECT * FROM favorite_folder WHERE server_url = ?1 AND user_id = ?2 ORDER BY sort ASC, id ASC',
+        mapper: (Map<String, Object?> row) => FavoriteFolder(
+            id: row['id'] as int?,
+            serverUrl: row['server_url'] as String,
+            userId: row['user_id'] as String,
+            name: row['name'] as String,
+            isDefault: (row['is_default'] as int) != 0,
+            sort: row['sort'] as int,
+            createTime: row['create_time'] as int),
+        arguments: [serverUrl, userId],
+        queryableName: 'favorite_folder',
+        isView: false);
+  }
+
+  @override
+  Future<List<FavoriteFolder>?> getAll(
+    String serverUrl,
+    String userId,
+  ) async {
+    return _queryAdapter.queryList(
+        'SELECT * FROM favorite_folder WHERE server_url = ?1 AND user_id = ?2 ORDER BY sort ASC, id ASC',
+        mapper: (Map<String, Object?> row) => FavoriteFolder(id: row['id'] as int?, serverUrl: row['server_url'] as String, userId: row['user_id'] as String, name: row['name'] as String, isDefault: (row['is_default'] as int) != 0, sort: row['sort'] as int, createTime: row['create_time'] as int),
+        arguments: [serverUrl, userId]);
+  }
+
+  @override
+  Future<FavoriteFolder?> findById(int id) async {
+    return _queryAdapter.query(
+        'SELECT * FROM favorite_folder WHERE id = ?1 LIMIT 1',
+        mapper: (Map<String, Object?> row) => FavoriteFolder(
+            id: row['id'] as int?,
+            serverUrl: row['server_url'] as String,
+            userId: row['user_id'] as String,
+            name: row['name'] as String,
+            isDefault: (row['is_default'] as int) != 0,
+            sort: row['sort'] as int,
+            createTime: row['create_time'] as int),
+        arguments: [id]);
+  }
+
+  @override
+  Future<FavoriteFolder?> findDefault(
+    String serverUrl,
+    String userId,
+  ) async {
+    return _queryAdapter.query(
+        'SELECT * FROM favorite_folder WHERE server_url = ?1 AND user_id = ?2 AND is_default = 1 LIMIT 1',
+        mapper: (Map<String, Object?> row) => FavoriteFolder(id: row['id'] as int?, serverUrl: row['server_url'] as String, userId: row['user_id'] as String, name: row['name'] as String, isDefault: (row['is_default'] as int) != 0, sort: row['sort'] as int, createTime: row['create_time'] as int),
+        arguments: [serverUrl, userId]);
+  }
+
+  @override
+  Future<int?> count(
+    String serverUrl,
+    String userId,
+  ) async {
+    return _queryAdapter.query(
+        'SELECT COUNT(id) FROM favorite_folder WHERE server_url = ?1 AND user_id = ?2',
+        mapper: (Map<String, Object?> row) => row.values.first as int,
+        arguments: [serverUrl, userId]);
+  }
+
+  @override
+  Future<int> insertFolder(FavoriteFolder folder) {
+    return _favoriteFolderInsertionAdapter.insertAndReturnId(
+        folder, OnConflictStrategy.abort);
+  }
+
+  @override
+  Future<int> updateFolder(FavoriteFolder folder) {
+    return _favoriteFolderUpdateAdapter.updateAndReturnChangedRows(
+        folder, OnConflictStrategy.abort);
+  }
+
+  @override
+  Future<int> deleteFolder(FavoriteFolder folder) {
+    return _favoriteFolderDeletionAdapter.deleteAndReturnChangedRows(folder);
   }
 }
 
@@ -1092,19 +1332,7 @@ class _$DislikedVideoDao extends DislikedVideoDao {
   ) async {
     return _queryAdapter.query(
         'SELECT * FROM disliked_video WHERE server_url = ?1 AND user_id=?2 AND remote_path=?3 LIMIT 1',
-        mapper: (Map<String, Object?> row) => DislikedVideo(
-            id: row['id'] as int?,
-            serverUrl: row['server_url'] as String,
-            userId: row['user_id'] as String,
-            remotePath: row['remote_path'] as String,
-            name: row['name'] as String,
-            path: row['path'] as String,
-            size: row['size'] as int,
-            sign: row['sign'] as String?,
-            thumb: row['thumb'] as String?,
-            modified: row['modified'] as int,
-            provider: row['provider'] as String,
-            createTime: row['create_time'] as int),
+        mapper: (Map<String, Object?> row) => DislikedVideo(id: row['id'] as int?, serverUrl: row['server_url'] as String, userId: row['user_id'] as String, remotePath: row['remote_path'] as String, name: row['name'] as String, path: row['path'] as String, size: row['size'] as int, sign: row['sign'] as String?, thumb: row['thumb'] as String?, modified: row['modified'] as int, provider: row['provider'] as String, createTime: row['create_time'] as int),
         arguments: [serverUrl, userId, remotePath]);
   }
 
@@ -1207,13 +1435,7 @@ class _$StrmUrlCacheDao extends StrmUrlCacheDao {
   ) async {
     return _queryAdapter.query(
         'SELECT * FROM strm_url_cache WHERE server_url = ?1 AND user_id = ?2 AND path = ?3 LIMIT 1',
-        mapper: (Map<String, Object?> row) => StrmUrlCache(
-            id: row['id'] as int?,
-            serverUrl: row['server_url'] as String,
-            userId: row['user_id'] as String,
-            path: row['path'] as String,
-            url: row['url'] as String,
-            createTime: row['create_time'] as int),
+        mapper: (Map<String, Object?> row) => StrmUrlCache(id: row['id'] as int?, serverUrl: row['server_url'] as String, userId: row['user_id'] as String, path: row['path'] as String, url: row['url'] as String, createTime: row['create_time'] as int),
         arguments: [serverUrl, userId, path]);
   }
 
@@ -1241,12 +1463,6 @@ class _$StrmUrlCacheDao extends StrmUrlCacheDao {
   }
 
   @override
-  Future<int> insertRecord(StrmUrlCache record) {
-    return _strmUrlCacheInsertionAdapter.insertAndReturnId(
-        record, OnConflictStrategy.abort);
-  }
-
-  @override
   Future<int?> count() async {
     return _queryAdapter.query('SELECT COUNT(*) FROM strm_url_cache',
         mapper: (Map<String, Object?> row) => row.values.first as int);
@@ -1267,5 +1483,11 @@ class _$StrmUrlCacheDao extends StrmUrlCacheDao {
             url: row['url'] as String,
             createTime: row['create_time'] as int),
         arguments: [serverUrl, userId]);
+  }
+
+  @override
+  Future<int> insertRecord(StrmUrlCache record) {
+    return _strmUrlCacheInsertionAdapter.insertAndReturnId(
+        record, OnConflictStrategy.abort);
   }
 }

@@ -6,6 +6,7 @@ import 'dart:ui' as ui;
 import 'package:alist/database/alist_database_controller.dart';
 import 'package:alist/database/table/disliked_video.dart';
 import 'package:alist/database/table/favorite.dart';
+import 'package:alist/util/favorite_helper.dart';
 import 'package:alist/database/table/file_viewing_record.dart';
 import 'package:alist/entity/tiktok_play_list_model.dart';
 import 'package:alist/util/constant.dart';
@@ -300,13 +301,13 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
         if (e.value) {
           if (await _database.favoriteDao.findByPath(u.serverUrl, u.username, v.filePath) == null) {
             await _database.dislikedVideoDao.deleteByPath(u.serverUrl, u.username, v.filePath);
-            await _database.favoriteDao.insertRecord(Favorite(
-              isDir: false, serverUrl: u.serverUrl, userId: u.username,
+            final ok = await FavoriteHelper.addFavoriteSilent(
+              isDir: false,
               remotePath: v.filePath, name: v.fileName, path: v.filePath,
               size: v.fileSize ?? 0, sign: v.sign, thumb: v.thumb,
               modified: v.modifiedMilliseconds ?? 0, provider: v.provider ?? '',
-              createTime: DateTime.now().millisecondsSinceEpoch,
-            ));
+            );
+            if (!ok) { v.isLiked = false; if (mounted) setState(() {}); }
           }
         } else {
           await _database.favoriteDao.deleteByPath(u.serverUrl, u.username, v.filePath);

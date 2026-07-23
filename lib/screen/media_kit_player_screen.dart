@@ -5,6 +5,7 @@ import 'package:alist/database/alist_database_controller.dart';
 import 'package:alist/database/table/disliked_video.dart';
 import 'package:alist/screen/disliked_videos_screen.dart';
 import 'package:alist/database/table/favorite.dart';
+import 'package:alist/util/favorite_helper.dart';
 import 'package:alist/screen/video_player_screen.dart';
 import 'package:alist/util/alist_plugin.dart';
 import 'package:alist/util/constant.dart';
@@ -546,12 +547,14 @@ class _MediaKitPlayerScreenState extends State<MediaKitPlayerScreen>
     final v = _videos[_index]; final rp = v["remotePath"] ?? ""; final nm = v["name"] ?? ""; if (rp.isEmpty) return;
     try {
       final user = Get.find<UserController>().user.value;
-      if (_isFavorite) { await _database.favoriteDao.deleteByPath(user.serverUrl, user.username, rp); _showToast('已取消收藏'); }
-      else {
-        await _database.favoriteDao.insertRecord(Favorite(isDir: false, serverUrl: user.serverUrl, userId: user.username, remotePath: rp, name: nm, path: rp, size: int.tryParse(v["size"] ?? "0") ?? 0, sign: v["sign"], thumb: v["thumb"], modified: int.tryParse(v["modifiedMilliseconds"] ?? "0") ?? 0, provider: v["provider"] ?? "", createTime: DateTime.now().millisecondsSinceEpoch));
-        _showToast('已添加到收藏');
+      if (_isFavorite) {
+        await _database.favoriteDao.deleteByPath(user.serverUrl, user.username, rp);
+        _showToast('已取消收藏');
+        if (mounted) setState(() => _isFavorite = false);
+      } else {
+        final success = await FavoriteHelper.addFavorite(context, isDir: false, remotePath: rp, name: nm, path: rp, size: int.tryParse(v["size"] ?? "0") ?? 0, sign: v["sign"], thumb: v["thumb"], modified: int.tryParse(v["modifiedMilliseconds"] ?? "0") ?? 0, provider: v["provider"] ?? "");
+        if (success && mounted) setState(() => _isFavorite = true);
       }
-      if (mounted) setState(() => _isFavorite = !_isFavorite);
     } catch (e) { _showToast('操作失败: $e'); }
   }
 

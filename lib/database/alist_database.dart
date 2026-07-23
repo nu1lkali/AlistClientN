@@ -4,6 +4,7 @@ import 'dart:async';
 
 import 'package:alist/database/dao/disliked_video_dao.dart';
 import 'package:alist/database/dao/favorite_dao.dart';
+import 'package:alist/database/dao/favorite_folder_dao.dart';
 import 'package:alist/database/dao/file_download_record_dao.dart';
 import 'package:alist/database/dao/file_password_dao.dart';
 import 'package:alist/database/dao/file_viewing_record_dao.dart';
@@ -12,6 +13,7 @@ import 'package:alist/database/dao/server_dao.dart';
 import 'package:alist/database/dao/strm_url_cache_dao.dart';
 import 'package:alist/database/table/disliked_video.dart';
 import 'package:alist/database/table/favorite.dart';
+import 'package:alist/database/table/favorite_folder.dart';
 import 'package:alist/database/table/file_download_record.dart';
 import 'package:alist/database/table/file_password.dart';
 import 'package:alist/database/table/file_viewing_record.dart';
@@ -26,13 +28,14 @@ import 'table/video_viewing_record.dart';
 
 part 'alist_database.g.dart'; // the generated code will be there
 
-@Database(version: 9, entities: [
+@Database(version: 10, entities: [
   VideoViewingRecord,
   FileDownloadRecord,
   FilePassword,
   Server,
   FileViewingRecord,
   Favorite,
+  FavoriteFolder,
   SearchHistory,
   DislikedVideo,
   StrmUrlCache,
@@ -49,6 +52,8 @@ abstract class AlistDatabase extends FloorDatabase {
   FileViewingRecordDao get fileViewingRecordDao;
 
   FavoriteDao get favoriteDao;
+
+  FavoriteFolderDao get favoriteFolderDao;
 
   SearchHistoryDao get searchHistoryDao;
 

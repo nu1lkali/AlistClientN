@@ -86,4 +86,8 @@ class AlistConstant {
   static const String securityLockAutoTimeout = 'securityLockAutoTimeout'; // 自动锁定超时(分钟), 0=不自动锁
 
   static const String locale = 'locale';
+
+  // 多收藏夹相关
+  static const String favoriteUseDefaultFolder = 'favoriteUseDefaultFolder'; // 是否使用默认收藏夹
+  static const String favoriteDefaultFolderId = 'favoriteDefaultFolderId'; // 默认收藏夹 ID
 }

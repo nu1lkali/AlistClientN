@@ -5,6 +5,7 @@ import 'dart:math';
 import 'package:alist/database/alist_database_controller.dart';
 import 'package:alist/database/dao/favorite_dao.dart';
 import 'package:alist/database/table/favorite.dart';
+import 'package:alist/util/favorite_helper.dart';
 import 'package:alist/database/table/file_password.dart';
 import 'package:alist/database/table/file_viewing_record.dart';
 import 'package:alist/entity/copy_move_req.dart';
@@ -1822,12 +1823,10 @@ class _FileListScreenState extends State<FileListScreen>
       await favoriteDao.deleteByPath(user.serverUrl, user.username, path);
       SmartDialog.showToast('已取消收藏');
     } else {
-      // 获取当前目录名称
       String dirName = _pageName ?? path;
-      await favoriteDao.insertRecord(Favorite(
+      await FavoriteHelper.addFavorite(
+        context,
         isDir: true,
-        serverUrl: user.serverUrl,
-        userId: user.username,
         remotePath: path,
         name: dirName,
         path: path,
@@ -1836,9 +1835,7 @@ class _FileListScreenState extends State<FileListScreen>
         thumb: '',
         modified: DateTime.now().millisecondsSinceEpoch,
         provider: '',
-        createTime: DateTime.now().millisecondsSinceEpoch,
-      ));
-      SmartDialog.showToast('已收藏当前目录');
+      );
     }
   }
 
@@ -3229,26 +3226,18 @@ class _FileListScreenState extends State<FileListScreen>
     var user = userController.user.value;
 
     if (favorite) {
-      var favoriteId = await favoriteDao.insertRecord(
-        Favorite(
-            isDir: file.isDir,
-            serverUrl: user.serverUrl,
-            userId: user.username,
-            remotePath: file.path,
-            name: file.name,
-            path: file.path,
-            size: file.size ?? 0,
-            sign: file.sign,
-            thumb: file.thumb,
-            modified: file.modifiedMilliseconds,
-            provider: file.provider ?? "",
-            createTime: DateTime.now().millisecondsSinceEpoch),
+      await FavoriteHelper.addFavorite(
+        context,
+        isDir: file.isDir,
+        remotePath: file.path,
+        name: file.name,
+        path: file.path,
+        size: file.size ?? 0,
+        sign: file.sign,
+        thumb: file.thumb,
+        modified: file.modifiedMilliseconds,
+        provider: file.provider ?? "",
       );
-      LogUtil.d("add favorite , id : $favoriteId");
-
-      var find = await favoriteDao.findByPath(
-          user.serverUrl, user.username, file.path);
-      LogUtil.d("find = $find");
     } else {
       favoriteDao.deleteByPath(user.serverUrl, user.username, file.path);
     }

@@ -6,6 +6,7 @@ import 'dart:ui' as ui;
 import 'package:alist/database/alist_database_controller.dart';
 import 'package:alist/database/table/disliked_video.dart';
 import 'package:alist/database/table/favorite.dart';
+import 'package:alist/util/favorite_helper.dart';
 import 'package:alist/database/table/file_viewing_record.dart';
 import 'package:alist/database/table/video_viewing_record.dart';
 import 'package:alist/entity/tiktok_play_list_model.dart';
@@ -736,17 +737,16 @@ class _StrmPlayerScreenState extends State<StrmPlayerScreen>
 
   Future<void> _toggleLike() async {
     final v = _playList.videos[_currentIndex];
-    v.isLiked = !v.isLiked;
-    if (v.isLiked && v.isDisliked) v.isDisliked = false;
+    final wasLiked = v.isLiked;
     try {
       final u = _userController.user.value;
-      if (v.isLiked) {
+      if (!wasLiked) {
+        // 收藏：先清除不喜欢，再添加收藏
         await _database.dislikedVideoDao
             .deleteByPath(u.serverUrl, u.username, v.filePath);
-        await _database.favoriteDao.insertRecord(Favorite(
+        final success = await FavoriteHelper.addFavorite(
+          context,
           isDir: false,
-          serverUrl: u.serverUrl,
-          userId: u.username,
           remotePath: v.filePath,
           name: v.fileName,
           path: v.filePath,
@@ -755,11 +755,16 @@ class _StrmPlayerScreenState extends State<StrmPlayerScreen>
           thumb: v.thumb,
           modified: v.modifiedMilliseconds ?? 0,
           provider: v.provider ?? '',
-          createTime: DateTime.now().millisecondsSinceEpoch,
-        ));
+        );
+        if (success) {
+          v.isLiked = true;
+          if (v.isDisliked) v.isDisliked = false;
+        }
       } else {
+        // 取消收藏
         await _database.favoriteDao
             .deleteByPath(u.serverUrl, u.username, v.filePath);
+        v.isLiked = false;
       }
     } catch (_) {}
     if (mounted) setState(() {});

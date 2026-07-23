@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:alist/database/alist_database.dart';
 import 'package:alist/database/dao/disliked_video_dao.dart';
 import 'package:alist/database/dao/favorite_dao.dart';
+import 'package:alist/database/dao/favorite_folder_dao.dart';
 import 'package:alist/database/dao/file_download_record_dao.dart';
 import 'package:alist/database/dao/file_password_dao.dart';
 import 'package:alist/database/dao/file_viewing_record_dao.dart';
@@ -24,6 +25,7 @@ class AlistDatabaseController extends GetxController {
   late final ServerDao serverDao;
   late final FileViewingRecordDao fileViewingRecordDao;
   late final FavoriteDao favoriteDao;
+  late final FavoriteFolderDao favoriteFolderDao;
   late final SearchHistoryDao searchHistoryDao;
   late final DislikedVideoDao dislikedVideoDao;
   late final StrmUrlCacheDao strmUrlCacheDao;
@@ -92,6 +94,34 @@ class AlistDatabaseController extends GetxController {
         'CREATE TABLE IF NOT EXISTS `strm_url_cache` (`id` INTEGER PRIMARY KEY AUTOINCREMENT, `server_url` TEXT NOT NULL, `user_id` TEXT NOT NULL, `path` TEXT NOT NULL, `url` TEXT NOT NULL, `create_time` INTEGER NOT NULL)');
   });
 
+  // create migration: add favorite_folder table + folder_id column
+  final _migration9to10 = Migration(9, 10, (database) async {
+    await database.execute(
+        'CREATE TABLE IF NOT EXISTS `favorite_folder` (`id` INTEGER PRIMARY KEY AUTOINCREMENT, `server_url` TEXT NOT NULL, `user_id` TEXT NOT NULL, `name` TEXT NOT NULL, `is_default` INTEGER NOT NULL, `sort` INTEGER NOT NULL, `create_time` INTEGER NOT NULL)');
+    await database.execute(
+        'ALTER TABLE `favorite` ADD `folder_id` INTEGER');
+    // 为已有收藏的用户创建默认收藏夹，并将现有收藏归入默认夹
+    final rows = await database.rawQuery(
+        'SELECT DISTINCT server_url, user_id FROM favorite');
+    for (final row in rows) {
+      final serverUrl = row['server_url'] as String;
+      final userId = row['user_id'] as String;
+      final now = DateTime.now().millisecondsSinceEpoch;
+      await database.rawInsert(
+          'INSERT INTO `favorite_folder` (`server_url`, `user_id`, `name`, `is_default`, `sort`, `create_time`) VALUES (?, ?, ?, 1, 0, ?)',
+          [serverUrl, userId, '默认收藏夹', now]);
+      final result = await database.rawQuery(
+          'SELECT id FROM `favorite_folder` WHERE server_url=? AND user_id=? AND is_default=1 LIMIT 1',
+          [serverUrl, userId]);
+      if (result.isNotEmpty) {
+        final folderId = result.first['id'];
+        await database.rawUpdate(
+            'UPDATE `favorite` SET folder_id=? WHERE server_url=? AND user_id=? AND folder_id IS NULL',
+            [folderId, serverUrl, userId]);
+      }
+    }
+  });
+
   Future<void> init() async {
     var dbName = "alist.db";
     if (Platform.isIOS) {
@@ -116,6 +146,7 @@ class AlistDatabaseController extends GetxController {
       _migration6to7,
       _migration7to8,
       _migration8to9,
+      _migration9to10,
     ]).build();
     videoViewingRecordDao = database.videoViewingRecordDao;
     downloadRecordRecordDao = database.downloadRecordRecordDao;
@@ -123,6 +154,7 @@ class AlistDatabaseController extends GetxController {
     serverDao = database.serverDao;
     fileViewingRecordDao = database.fileViewingRecordDao;
     favoriteDao = database.favoriteDao;
+    favoriteFolderDao = database.favoriteFolderDao;
     searchHistoryDao = database.searchHistoryDao;
     dislikedVideoDao = database.dislikedVideoDao;
     strmUrlCacheDao = database.strmUrlCacheDao;

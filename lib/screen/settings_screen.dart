@@ -2,6 +2,8 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:alist/database/alist_database_controller.dart';
+import 'package:alist/database/table/favorite_folder.dart';
+import 'package:alist/util/favorite_helper.dart';
 import 'package:alist/entity/settings_item.dart';
 import 'package:alist/generated/images.dart';
 import 'package:alist/l10n/intl_keys.dart';
@@ -164,6 +166,8 @@ class _SettingsContainerState extends State<_SettingsContainer>
   late final RxBool _enableLocalSubtitle;
   late final RxString _localSubtitlePath;
   late final RxBool _subtitleDownloadToSubtitleDir;
+  late final RxBool _favoriteUseDefaultFolder;
+  late final RxString _favoriteDefaultFolderName;
   late double _tiktokUiOpacity;
 
   @override
@@ -195,6 +199,10 @@ class _SettingsContainerState extends State<_SettingsContainer>
         (SpUtil.getString(AlistConstant.localSubtitlePath, defValue: '') ?? '').obs;
     _subtitleDownloadToSubtitleDir =
         (SpUtil.getBool(AlistConstant.subtitleDownloadToSubtitleDir, defValue: false) ?? false).obs;
+    _favoriteUseDefaultFolder =
+        (SpUtil.getBool(AlistConstant.favoriteUseDefaultFolder, defValue: false) ?? false).obs;
+    _favoriteDefaultFolderName = ''.obs;
+    _loadFavoriteDefaultFolderName();
     _tiktokUiOpacity = SpUtil.getDouble(AlistConstant.tiktokUiOpacity, defValue: 1.0) ?? 1.0;
 
     _serverStreamSubscription =
@@ -222,6 +230,26 @@ class _SettingsContainerState extends State<_SettingsContainer>
             onTap: () => Get.toNamed(NamedRouter.downloadManager)),
         SettingsItemData(icon: Icons.storage_outlined, title: Intl.settingsScreen_item_cacheManagement.tr,
             onTap: () => Get.toNamed(NamedRouter.cacheManager)),
+      ]),
+
+      // -------- 收藏夹 --------
+      SettingsSectionData(title: '收藏夹', icon: Icons.favorite_outline, items: [
+        SettingsItemData(
+            icon: Icons.star_rounded, title: '使用默认收藏夹',
+            subtitle: '开启后收藏时自动归入默认收藏夹，关闭则每次弹窗选择',
+            searchTerms: ['favorite', '收藏', '默认', 'folder'],
+            type: SettingsItemType.switchTile,
+            switchValue: () => _favoriteUseDefaultFolder.value,
+            switchOnChanged: (v) {
+              SpUtil.putBool(AlistConstant.favoriteUseDefaultFolder, v);
+              _favoriteUseDefaultFolder.value = v;
+            }),
+        SettingsItemData(
+            icon: Icons.folder_special_rounded, title: '默认收藏夹',
+            subtitle: _favoriteDefaultFolderName.value.isEmpty ? '未设置，点击选择' : _favoriteDefaultFolderName.value,
+            searchTerms: ['favorite', '收藏', '默认', 'folder'],
+            switchEnabled: () => _favoriteUseDefaultFolder.value,
+            onTap: () => _showDefaultFolderPickerDialog(context)),
       ]),
 
       // -------- 网络与预加载 --------
@@ -1403,6 +1431,121 @@ class _SettingsContainerState extends State<_SettingsContainer>
               }
             },
             child: const Text('保存'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _loadFavoriteDefaultFolderName() async {
+    final folderId = SpUtil.getInt(AlistConstant.favoriteDefaultFolderId);
+    if (folderId == null) {
+      _favoriteDefaultFolderName.value = '';
+      return;
+    }
+    final db = Get.find<AlistDatabaseController>();
+    final folder = await db.favoriteFolderDao.findById(folderId);
+    if (folder != null) {
+      _favoriteDefaultFolderName.value = folder.name;
+    } else {
+      _favoriteDefaultFolderName.value = '';
+    }
+  }
+
+  void _showDefaultFolderPickerDialog(BuildContext context) async {
+    final user = Get.find<UserController>().user.value;
+    final db = Get.find<AlistDatabaseController>();
+    var folders = await db.favoriteFolderDao.getAll(user.serverUrl, user.username) ?? [];
+    if (folders.isEmpty) {
+      final defaultFolder = await FavoriteHelper.ensureDefaultFolder();
+      folders = [defaultFolder];
+    }
+
+    if (!mounted) return;
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('选择默认收藏夹'),
+        content: SizedBox(
+          width: double.maxFinite,
+          child: ListView.builder(
+            shrinkWrap: true,
+            itemCount: folders.length,
+            itemBuilder: (ctx, index) {
+              final folder = folders[index];
+              final currentId = SpUtil.getInt(AlistConstant.favoriteDefaultFolderId);
+              final isSelected = folder.id == currentId;
+              return RadioListTile<int>(
+                value: folder.id!,
+                groupValue: currentId,
+                title: Text(folder.name + (folder.isDefault ? '（默认）' : '')),
+                onChanged: (id) {
+                  SpUtil.putInt(AlistConstant.favoriteDefaultFolderId, id!);
+                  SpUtil.putBool(AlistConstant.favoriteUseDefaultFolder, true);
+                  _favoriteUseDefaultFolder.value = true;
+                  _favoriteDefaultFolderName.value = folder.name;
+                  Navigator.pop(ctx);
+                  SmartDialog.showToast('已设置默认收藏夹: ${folder.name}');
+                },
+              );
+            },
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('取消'),
+          ),
+          TextButton.icon(
+            onPressed: () async {
+              Navigator.pop(ctx);
+              final name = await _showCreateFavoriteFolderDialog(context);
+              if (name != null && name.isNotEmpty) {
+                final now = DateTime.now().millisecondsSinceEpoch;
+                final id = await db.favoriteFolderDao.insertFolder(
+                  FavoriteFolder(
+                    serverUrl: user.serverUrl,
+                    userId: user.username,
+                    name: name,
+                    isDefault: false,
+                    sort: folders.length,
+                    createTime: now,
+                  ),
+                );
+                SpUtil.putInt(AlistConstant.favoriteDefaultFolderId, id);
+                SpUtil.putBool(AlistConstant.favoriteUseDefaultFolder, true);
+                _favoriteUseDefaultFolder.value = true;
+                _favoriteDefaultFolderName.value = name;
+                SmartDialog.showToast('已创建并设为默认: $name');
+              }
+            },
+            icon: const Icon(Icons.add),
+            label: const Text('新建'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<String?> _showCreateFavoriteFolderDialog(BuildContext context) {
+    final controller = TextEditingController();
+    return showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('新建收藏夹'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          decoration: const InputDecoration(hintText: '收藏夹名称'),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, null),
+            child: const Text('取消'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, controller.text.trim()),
+            child: const Text('确定'),
           ),
         ],
       ),

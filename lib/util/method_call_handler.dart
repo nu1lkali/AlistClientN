@@ -5,6 +5,7 @@ import 'package:alist/util/subtitle/subtitle_controller.dart';
 import 'package:alist/screen/disliked_videos_screen.dart';
 import 'package:alist/database/table/disliked_video.dart';
 import 'package:alist/database/table/favorite.dart';
+import 'package:alist/util/favorite_helper.dart';
 import 'package:alist/database/table/file_viewing_record.dart';
 import 'package:alist/database/table/video_viewing_record.dart';
 import 'package:alist/entity/file_remove_req.dart';
@@ -224,21 +225,18 @@ class MethodCallHandler {
           await favoriteDao.deleteByPath(user.serverUrl, user.username, path);
           return "false"; // Return false to indicate unfavorited
         } else {
-          // Add to favorites
-          await favoriteDao.insertRecord(Favorite(
+          // Add to favorites (原生侧静默添加，用默认夹)
+          await FavoriteHelper.addFavoriteSilent(
             isDir: false,
-            serverUrl: user.serverUrl,
-            userId: user.username,
             remotePath: path,
-            path: path,
             name: name,
+            path: path,
             size: int.tryParse(size) ?? 0,
             sign: null,
             thumb: null,
             modified: 0,
             provider: provider ?? "",
-            createTime: DateTime.now().millisecondsSinceEpoch,
-          ));
+          );
           return "true"; // Return true to indicate favorited
         }
 

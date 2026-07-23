@@ -5,6 +5,7 @@ import 'dart:ui' as ui;
 
 import 'package:alist/database/alist_database_controller.dart';
 import 'package:alist/database/table/favorite.dart';
+import 'package:alist/util/favorite_helper.dart';
 import 'package:alist/l10n/intl_keys.dart';
 import 'package:alist/util/image_utils.dart';
 import 'package:alist/util/alist_plugin.dart';
@@ -545,24 +546,21 @@ class GalleryController extends GetxController {
       SmartDialog.showToast('已取消收藏');
     } else {
       // 添加收藏
-      await _databaseController.favoriteDao.insertRecord(
-        Favorite(
-          isDir: false,
-          serverUrl: user.serverUrl,
-          userId: user.username,
-          remotePath: file.remotePath,
-          path: file.remotePath,
-          name: file.name,
-          size: file.size ?? 0,
-          sign: null,
-          thumb: null,
-          modified: 0,
-          provider: "",
-          createTime: DateTime.now().millisecondsSinceEpoch,
-        ),
+      final success = await FavoriteHelper.addFavorite(
+        Get.context,
+        isDir: false,
+        remotePath: file.remotePath,
+        name: file.name,
+        path: file.remotePath,
+        size: file.size ?? 0,
+        sign: null,
+        thumb: null,
+        modified: 0,
+        provider: "",
       );
-      isFavorite.value = true;
-      SmartDialog.showToast('已添加到收藏');
+      if (success) {
+        isFavorite.value = true;
+      }
     }
   }
 

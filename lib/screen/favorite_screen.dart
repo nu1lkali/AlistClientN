@@ -4,7 +4,9 @@ import 'dart:math';
 
 import 'package:alist/database/alist_database_controller.dart';
 import 'package:alist/database/table/favorite.dart';
+import 'package:alist/database/table/favorite_folder.dart';
 import 'package:alist/database/table/file_viewing_record.dart';
+import 'package:alist/util/favorite_helper.dart';
 import 'package:alist/entity/file_list_resp_entity.dart';
 import 'package:alist/entity/tiktok_play_list_model.dart';
 import 'package:alist/l10n/intl_keys.dart';
@@ -30,7 +32,7 @@ import 'package:alist/util/strm_parser.dart';
 import 'package:alist/util/string_utils.dart';
 import 'package:alist/util/user_controller.dart';
 import 'package:alist/util/video_player_util.dart';
-import 'package:alist/widget/alist_scaffold.dart';
+import 'package:alist/widget/favorite_folder_panel.dart';
 import 'package:alist/widget/file_details_dialog.dart';
 import 'package:alist/widget/file_list_item_view.dart';
 import 'package:dio/dio.dart';
@@ -59,6 +61,12 @@ class _FavoriteScreenState extends State<FavoriteScreen>
   StreamSubscription? _userStreamSubscription;
   User? _currentUser;
 
+  // 多收藏夹状态
+  int? _selectedFolderId; // null = 全部收藏
+  String _selectedFolderName = '全部收藏';
+  bool _isLeftPanelCollapsed = false;
+  final _scaffoldKey = GlobalKey<ScaffoldState>();
+
   @override
   void initState() {
     super.initState();
@@ -68,6 +76,8 @@ class _FavoriteScreenState extends State<FavoriteScreen>
           _currentUser?.username != event.username) {
         _list.value = [];
         _currentUser = event;
+        _selectedFolderId = null;
+        _selectedFolderName = '全部收藏';
         _recordListSubscription?.cancel();
         _queryRecents();
       }
@@ -86,32 +96,79 @@ class _FavoriteScreenState extends State<FavoriteScreen>
   @override
   Widget build(BuildContext context) {
     super.build(context);
-    return AlistScaffold(
-      appbarTitle: Text(Intl.screenName_favorite.tr),
-      appbarActions: [
-        IconButton(
-          icon: const Icon(Icons.image_outlined),
-          tooltip: '随机打开图片',
-          onPressed: _randomOpenImage,
+    final bgColor = Theme.of(context).colorScheme.surface;
+    final isWide = MediaQuery.of(context).size.width >= 600;
+
+    return Scaffold(
+      key: _scaffoldKey,
+      backgroundColor: bgColor,
+      appBar: AppBar(
+        automaticallyImplyLeading: false,
+        backgroundColor: bgColor,
+        toolbarHeight: kToolbarHeight + 8,
+        title: Text(_selectedFolderName),
+        titleSpacing: 0,
+        leading: IconButton(
+          icon: Icon(isWide
+              ? (_isLeftPanelCollapsed ? Icons.menu_open : Icons.view_column)
+              : Icons.menu),
+          tooltip: isWide ? '折叠/展开收藏夹' : '收藏夹',
+          onPressed: () {
+            if (isWide) {
+              setState(() => _isLeftPanelCollapsed = !_isLeftPanelCollapsed);
+            } else {
+              _scaffoldKey.currentState?.openDrawer();
+            }
+          },
         ),
-        IconButton(
-          icon: const Icon(Icons.play_circle_outline),
-          tooltip: '随机播放视频',
-          onPressed: _randomPlayVideo,
-        ),
-        IconButton(
-          icon: const Icon(Icons.delete_sweep_rounded),
-          tooltip: '清空收藏',
-          onPressed: _confirmClearAll,
-        ),
-      ],
-      body: Obx(
-        () => !_loading.value && _list.isEmpty
-            ? Center(
-                child: Text(Intl.recentsScreen_noRecord.tr),
-              )
-            : _fileListView(),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.image_outlined),
+            tooltip: '随机打开图片',
+            onPressed: _randomOpenImage,
+          ),
+          IconButton(
+            icon: const Icon(Icons.play_circle_outline),
+            tooltip: '随机播放视频',
+            onPressed: _randomPlayVideo,
+          ),
+          IconButton(
+            icon: const Icon(Icons.delete_sweep_rounded),
+            tooltip: '清空当前收藏夹',
+            onPressed: _confirmClearAll,
+          ),
+        ],
       ),
+      drawer: isWide
+          ? null
+          : Drawer(
+              child: FavoriteFolderPanel(
+                selectedFolderId: _selectedFolderId,
+                onFolderSelected: _onFolderSelected,
+              ),
+            ),
+      body: SafeArea(
+        child: isWide
+            ? Row(
+                children: [
+                  if (!_isLeftPanelCollapsed)
+                    FavoriteFolderPanel(
+                      selectedFolderId: _selectedFolderId,
+                      onFolderSelected: _onFolderSelected,
+                    ),
+                  Expanded(child: _buildFileList()),
+                ],
+              )
+            : _buildFileList(),
+      ),
+    );
+  }
+
+  Widget _buildFileList() {
+    return Obx(
+      () => !_loading.value && _list.isEmpty
+          ? Center(child: Text(Intl.recentsScreen_noRecord.tr))
+          : _fileListView(),
     );
   }
 
@@ -166,15 +223,46 @@ class _FavoriteScreenState extends State<FavoriteScreen>
 
   void _queryRecents() {
     var user = _userController.user.value;
-    _recordListSubscription = _databaseController.favoriteDao
-        .list(user.serverUrl, user.username)
-        .listen((list) {
+    _recordListSubscription?.cancel();
+    Stream<List<Favorite>?> stream;
+    if (_selectedFolderId == null) {
+      // 全部收藏
+      stream = _databaseController.favoriteDao
+          .list(user.serverUrl, user.username);
+    } else {
+      // 按收藏夹筛选
+      stream = _databaseController.favoriteDao
+          .listByFolder(user.serverUrl, user.username, _selectedFolderId!);
+    }
+    _recordListSubscription = stream.listen((list) {
       var newList = list ?? [];
       var originalList = _list.value;
       _tryQueryThumbs(originalList, newList);
       _list.value = newList;
       _loading.value = false;
     });
+  }
+
+  void _onFolderSelected(int? folderId) {
+    _selectedFolderId = folderId;
+    if (folderId == null) {
+      _selectedFolderName = '全部收藏';
+    } else {
+      // 查找收藏夹名称
+      _databaseController.favoriteFolderDao.findById(folderId).then((folder) {
+        if (folder != null) {
+          setState(() => _selectedFolderName = folder.name);
+        }
+      });
+    }
+    setState(() {});
+    _list.value = [];
+    _loading.value = true;
+    _queryRecents();
+    // 窄屏下选择后关闭抽屉
+    if (MediaQuery.of(context).size.width < 600) {
+      _scaffoldKey.currentState?.closeDrawer();
+    }
   }
 
   void _onFileTap(BuildContext context, Favorite file, bool fromDialog) {
@@ -348,6 +436,14 @@ class _FavoriteScreenState extends State<FavoriteScreen>
                     onTap: () {
                       Navigator.pop(context);
                       FileUtils.copyFileLink(record.path, record.sign);
+                    },
+                  ),
+                  ListTile(
+                    leading: const Icon(Icons.drive_file_move_rounded),
+                    title: const Text('移动到收藏夹'),
+                    onTap: () {
+                      Navigator.pop(context);
+                      _showMoveToFolderDialog(record);
                     },
                   ),
                   ListTile(
@@ -758,7 +854,8 @@ class _FavoriteScreenState extends State<FavoriteScreen>
               modified: value.modified,
               provider: value.provider,
               createTime: value.createTime,
-              isDir: value.isDir);
+              isDir: value.isDir,
+              folderId: value.folderId);
           needUpdateRecords.add(newRecord);
         }
       }
@@ -805,14 +902,17 @@ class _FavoriteScreenState extends State<FavoriteScreen>
 
   void _confirmClearAll() {
     if (_list.isEmpty) {
-      SmartDialog.showToast('收藏夹为空');
+      SmartDialog.showToast('当前收藏夹为空');
       return;
     }
+    final target = _selectedFolderName;
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('清空收藏夹'),
-        content: Text('确定要清空全部 ${_list.length} 条收藏吗？此操作不可撤销。'),
+        title: Text('清空「$target」'),
+        content: _selectedFolderId == null
+            ? Text('确定要清空全部 ${_list.length} 条收藏吗？此操作不可撤销。')
+            : Text('确定要清空「$target」中的 ${_list.length} 条收藏吗？此操作不可撤销。'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx),
@@ -833,10 +933,64 @@ class _FavoriteScreenState extends State<FavoriteScreen>
   void _clearAllFavorites() async {
     try {
       final u = _userController.user.value;
-      await _databaseController.favoriteDao.deleteAllByUser(u.serverUrl, u.username);
-      SmartDialog.showToast('已清空全部收藏');
+      if (_selectedFolderId == null) {
+        await _databaseController.favoriteDao
+            .deleteAllByUser(u.serverUrl, u.username);
+      } else {
+        await _databaseController.favoriteDao
+            .deleteByFolder(_selectedFolderId!);
+      }
+      SmartDialog.showToast('已清空');
     } catch (e) {
       SmartDialog.showToast('清空失败: $e');
     }
+  }
+
+  void _showMoveToFolderDialog(Favorite record) async {
+    final user = _userController.user.value;
+    var folders = await _databaseController.favoriteFolderDao
+            .getAll(user.serverUrl, user.username) ??
+        [];
+    if (folders.isEmpty) {
+      final defaultFolder = await FavoriteHelper.ensureDefaultFolder();
+      folders = [defaultFolder];
+    }
+    if (!mounted) return;
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('移动到收藏夹'),
+        content: SizedBox(
+          width: double.maxFinite,
+          child: ListView.builder(
+            shrinkWrap: true,
+            itemCount: folders.length,
+            itemBuilder: (ctx, index) {
+              final folder = folders[index];
+              final isCurrent = folder.id == record.folderId;
+              return ListTile(
+                leading: Icon(folder.isDefault
+                    ? Icons.star_rounded
+                    : Icons.folder_rounded),
+                title: Text(folder.name +
+                    (isCurrent ? '（当前）' : '')),
+                enabled: !isCurrent,
+                onTap: () async {
+                  Navigator.pop(ctx);
+                  await FavoriteHelper.moveFavoriteToFolder(
+                      record, folder.id!);
+                },
+              );
+            },
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('取消'),
+          ),
+        ],
+      ),
+    );
   }
 }
