@@ -246,10 +246,26 @@ class _SettingsContainerState extends State<_SettingsContainer>
             }),
         SettingsItemData(
             icon: Icons.folder_special_rounded, title: '默认收藏夹',
-            subtitle: _favoriteDefaultFolderName.value.isEmpty ? '未设置，点击选择' : _favoriteDefaultFolderName.value,
             searchTerms: ['favorite', '收藏', '默认', 'folder'],
-            switchEnabled: () => _favoriteUseDefaultFolder.value,
-            onTap: () => _showDefaultFolderPickerDialog(context)),
+            type: SettingsItemType.custom,
+            customBuilder: (context, scheme, isDark) {
+              final enabled = _favoriteUseDefaultFolder.value;
+              return Obx(() => ListTile(
+                leading: Icon(Icons.folder_special_rounded,
+                    color: enabled ? scheme.primary : scheme.outline),
+                title: Text('默认收藏夹',
+                    style: TextStyle(color: enabled ? scheme.onSurface : scheme.outline)),
+                subtitle: Text(
+                  _favoriteDefaultFolderName.value.isEmpty
+                      ? '未设置，点击选择'
+                      : _favoriteDefaultFolderName.value,
+                  style: TextStyle(color: scheme.onSurfaceVariant),
+                ),
+                trailing: Icon(Icons.chevron_right, color: scheme.outline),
+                enabled: enabled,
+                onTap: enabled ? () => _showDefaultFolderPickerDialog(context) : null,
+              ));
+            }),
       ]),
 
       // -------- 网络与预加载 --------

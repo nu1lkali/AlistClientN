@@ -1,7 +1,9 @@
 import 'package:alist/database/alist_database_controller.dart';
 import 'package:alist/database/table/favorite_folder.dart';
+import 'package:alist/util/constant.dart';
 import 'package:alist/util/favorite_helper.dart';
 import 'package:alist/util/user_controller.dart';
+import 'package:flustars/flustars.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_smart_dialog/flutter_smart_dialog.dart';
 import 'package:get/get.dart';
@@ -90,11 +92,47 @@ class _FavoriteFolderPanelState extends State<FavoriteFolderPanel> {
   Widget _buildFolderItem(FavoriteFolder folder) {
     final isSelected = widget.selectedFolderId == folder.id;
     final scheme = Theme.of(context).colorScheme;
-    return _buildItem(
-      icon: folder.isDefault ? Icons.star_rounded : Icons.folder_rounded,
-      iconColor: folder.isDefault ? Colors.amber : null,
-      title: folder.name,
-      isSelected: isSelected,
+    final configDefaultId = SpUtil.getInt(AlistConstant.favoriteDefaultFolderId);
+    final isConfigDefault = folder.id == configDefaultId;
+
+    return ListTile(
+      leading: Icon(
+        folder.isDefault ? Icons.star_rounded : Icons.folder_rounded,
+        size: 22,
+        color: folder.isDefault ? Colors.amber : scheme.primary,
+      ),
+      title: Row(
+        children: [
+          Flexible(
+            child: Text(
+              folder.name,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                color: isSelected ? scheme.primary : null,
+              ),
+            ),
+          ),
+          if (isConfigDefault) ...[
+            const SizedBox(width: 6),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+              decoration: BoxDecoration(
+                color: Colors.amber.withOpacity(0.15),
+                borderRadius: BorderRadius.circular(4),
+                border: Border.all(color: Colors.amber, width: 0.8),
+              ),
+              child: const Text(
+                '默认',
+                style: TextStyle(fontSize: 10, color: Colors.amber, height: 1.4),
+              ),
+            ),
+          ],
+        ],
+      ),
+      selected: isSelected,
+      selectedTileColor: scheme.primaryContainer.withOpacity(0.3),
       onTap: () => widget.onFolderSelected(folder.id),
       onLongPress: () => _showFolderMenu(folder),
     );
