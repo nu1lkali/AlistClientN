@@ -47,12 +47,17 @@ class _FavoriteFolderPanelState extends State<FavoriteFolderPanel> {
     final scheme = Theme.of(context).colorScheme;
     return Container(
       width: 260,
-      color: scheme.surfaceVariant,
+      decoration: BoxDecoration(
+        color: scheme.surfaceVariant,
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
+      ),
       child: Column(
         children: [
+          // 状态栏间距（Drawer 模式下生效，宽屏 SafeArea 下为 0）
+          SizedBox(height: MediaQuery.of(context).padding.top),
           // 标题
           Container(
-            padding: const EdgeInsets.fromLTRB(20, 20, 12, 16),
+            padding: const EdgeInsets.fromLTRB(16, 12, 8, 12),
             decoration: BoxDecoration(
               color: scheme.primary.withOpacity(0.06),
               border: Border(
@@ -61,15 +66,15 @@ class _FavoriteFolderPanelState extends State<FavoriteFolderPanel> {
             ),
             child: Row(
               children: [
-                Icon(Icons.create_new_folder_rounded, size: 20, color: scheme.primary),
-                const SizedBox(width: 8),
-                Text('收藏夹', style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                Icon(Icons.bookmark_rounded, size: 22, color: scheme.primary),
+                const SizedBox(width: 10),
+                Text('收藏夹', style: Theme.of(context).textTheme.titleLarge?.copyWith(
                   fontWeight: FontWeight.w600,
                   color: scheme.onSurface,
                 )),
                 const Spacer(),
                 IconButton(
-                  icon: const Icon(Icons.add_circle_outline, size: 22),
+                  icon: Icon(Icons.add_circle_outline, size: 22, color: scheme.primary),
                   tooltip: '新建收藏夹',
                   onPressed: _showCreateDialog,
                 ),
