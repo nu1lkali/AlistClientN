@@ -102,14 +102,22 @@ class _FavoriteFolderPanelState extends State<FavoriteFolderPanel> {
   Widget _buildFolderItem(FavoriteFolder folder) {
     final isSelected = widget.selectedFolderId == folder.id;
     final scheme = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     final configDefaultId = SpUtil.getInt(AlistConstant.favoriteDefaultFolderId);
     final isConfigDefault = folder.id == configDefaultId;
+
+    // 使用主题感知的"默认"标识颜色：暗色模式用金黄色，浅色模式用深橙色保证对比度
+    final defaultBadgeColor = isDark ? const Color(0xFFFFCA28) : const Color(0xFFE65100);
+    final defaultBadgeBg = isDark
+        ? const Color(0xFFFFCA28).withOpacity(0.15)
+        : const Color(0xFFFFF3E0);
+    final defaultIconColor = isDark ? const Color(0xFFFFCA28) : const Color(0xFFE65100);
 
     return ListTile(
       leading: Icon(
         folder.isDefault ? Icons.star_rounded : Icons.folder_rounded,
         size: 22,
-        color: folder.isDefault ? Colors.amber : scheme.primary,
+        color: folder.isDefault ? defaultIconColor : scheme.primary,
       ),
       title: Row(
         children: [
@@ -129,13 +137,13 @@ class _FavoriteFolderPanelState extends State<FavoriteFolderPanel> {
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
               decoration: BoxDecoration(
-                color: Colors.amber.withOpacity(0.15),
+                color: defaultBadgeBg,
                 borderRadius: BorderRadius.circular(4),
-                border: Border.all(color: Colors.amber, width: 0.8),
+                border: Border.all(color: defaultBadgeColor, width: 0.8),
               ),
-              child: const Text(
+              child: Text(
                 '默认',
-                style: TextStyle(fontSize: 10, color: Colors.amber, height: 1.4),
+                style: TextStyle(fontSize: 10, color: defaultBadgeColor, height: 1.4),
               ),
             ),
           ],

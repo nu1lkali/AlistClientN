@@ -1505,19 +1505,27 @@ class PlayerActivity : AppCompatActivity(), GSYVideoProgressListener {
     }
 
     private fun showFavoriteFolderPicker(video: VideoItem) {
-        FlutterMethods.getFavoriteFoldersForNative { foldersJson ->
+        FlutterMethods.getFavoriteFoldersForNative { jsonStr ->
             runOnUiThread {
                 try {
-                    val folders = GsonUtils.parseRawListOfMaps(foldersJson)
+                    val response = GsonUtils.parseRawMap(jsonStr)
+                    @Suppress("UNCHECKED_CAST")
+                    val folders = (response["folders"] as? List<Map<String, Any?>>) ?: emptyList()
+                    val configuredId = (response["configuredDefaultId"] as? Double)?.toInt()
+
                     if (folders.isEmpty()) {
                         SmartToast.show(this@PlayerActivity, "暂无收藏夹")
                         return@runOnUiThread
                     }
 
-                    val folderNames = folders.map { it["name"] as? String ?: "" }.toTypedArray()
+                    val folderNames = folders.map { folder ->
+                        val name = folder["name"] as? String ?: ""
+                        val id = (folder["id"] as? Double)?.toInt()
+                        if (id != null && id == configuredId) "$name ★" else name
+                    }.toTypedArray()
                     val folderIds = folders.map { (it["id"] as? Double)?.toInt() ?: 0 }
 
-                    androidx.appcompat.app.AlertDialog.Builder(this@PlayerActivity)
+                    val builder = androidx.appcompat.app.AlertDialog.Builder(this@PlayerActivity)
                         .setTitle("选择收藏夹")
                         .setItems(folderNames) { _, which ->
                             val selectedId = folderIds.getOrNull(which) ?: return@setItems
@@ -1542,7 +1550,13 @@ class PlayerActivity : AppCompatActivity(), GSYVideoProgressListener {
                             showCreateFavoriteFolderDialog(video)
                         }
                         .setNegativeButton("取消", null)
-                        .show()
+
+                    // 如果有配置的默认收藏夹，添加一个快捷"直接收藏到默认夹"按钮
+                    if (configuredId != null) {
+                        builder.setMessage("注：★ 标记为设置页配置的默认收藏夹")
+                    }
+
+                    builder.show()
                 } catch (e: Exception) {
                     SmartToast.show(this@PlayerActivity, "加载收藏夹失败")
                 }

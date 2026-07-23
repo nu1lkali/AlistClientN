@@ -202,16 +202,25 @@ class HeicViewerActivity : AppCompatActivity() {
                             toast("已取消收藏")
                         }
                         "need_picker" -> {
-                            // 未启用默认收藏夹 → 使用第一个收藏夹（默认夹）作为后备
+                            // 未启用默认收藏夹 → 使用配置的默认夹（如果存在）或第一个收藏夹作为后备
                             val video = makeVideoItem(currentIndex)
-                            FlutterMethods.getFavoriteFoldersForNative { foldersJson ->
+                            FlutterMethods.getFavoriteFoldersForNative { jsonStr ->
                                 runOnUiThread {
                                     try {
-                                        val folders = GsonUtils.parseRawListOfMaps(foldersJson)
-                                        val firstId = (folders.firstOrNull()?.get("id") as? Double)?.toInt()
-                                        if (firstId != null) {
+                                        val response = GsonUtils.parseRawMap(jsonStr)
+                                        @Suppress("UNCHECKED_CAST")
+                                        val folders = (response["folders"] as? List<Map<String, Any?>>) ?: emptyList()
+                                        val configuredId = (response["configuredDefaultId"] as? Double)?.toInt()
+
+                                        // 优先使用配置的默认夹，其次用第一个收藏夹
+                                        var targetId: Int? = configuredId
+                                        if (targetId == null) {
+                                            targetId = (folders.firstOrNull()?.get("id") as? Double)?.toInt()
+                                        }
+
+                                        if (targetId != null) {
                                             FlutterMethods.addFavoriteToFolderForNative(
-                                                video.remotePath, video.name, video.size ?: "0", video.provider, firstId
+                                                video.remotePath, video.name, video.size ?: "0", video.provider, targetId
                                             ) { success ->
                                                 runOnUiThread {
                                                     if (success) {

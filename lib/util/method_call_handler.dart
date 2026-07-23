@@ -256,12 +256,17 @@ class MethodCallHandler {
           final defaultFolder = await FavoriteHelper.ensureDefaultFolder();
           folders.add(defaultFolder);
         }
+        final configuredId = FavoriteHelper.getConfiguredDefaultFolderId();
         final list = folders.map((f) => {
           "id": f.id,
           "name": f.name,
           "isDefault": f.isDefault,
         }).toList();
-        return jsonEncode(list);
+        final result = {
+          "folders": list,
+          "configuredDefaultId": configuredId,
+        };
+        return jsonEncode(result);
 
       case "addFavoriteToFolderForNative":
         String favPath = call.arguments["path"];
