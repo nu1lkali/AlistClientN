@@ -52,10 +52,21 @@ class _FavoriteFolderPanelState extends State<FavoriteFolderPanel> {
         children: [
           // 标题
           Container(
-            padding: const EdgeInsets.fromLTRB(16, 16, 8, 8),
+            padding: const EdgeInsets.fromLTRB(20, 20, 12, 16),
+            decoration: BoxDecoration(
+              color: scheme.primary.withOpacity(0.06),
+              border: Border(
+                bottom: BorderSide(color: scheme.outlineVariant.withOpacity(0.3), width: 0.5),
+              ),
+            ),
             child: Row(
               children: [
-                Text('收藏夹', style: Theme.of(context).textTheme.titleMedium),
+                Icon(Icons.create_new_folder_rounded, size: 20, color: scheme.primary),
+                const SizedBox(width: 8),
+                Text('收藏夹', style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                  fontWeight: FontWeight.w600,
+                  color: scheme.onSurface,
+                )),
                 const Spacer(),
                 IconButton(
                   icon: const Icon(Icons.add_circle_outline, size: 22),
@@ -65,7 +76,6 @@ class _FavoriteFolderPanelState extends State<FavoriteFolderPanel> {
               ],
             ),
           ),
-          const Divider(height: 1),
           // 列表
           Expanded(
             child: ListView(

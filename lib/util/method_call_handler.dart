@@ -225,8 +225,9 @@ class MethodCallHandler {
           await favoriteDao.deleteByPath(user.serverUrl, user.username, path);
           return "false"; // Return false to indicate unfavorited
         } else {
-          // Add to favorites (原生侧静默添加，用默认夹)
-          await FavoriteHelper.addFavoriteSilent(
+          // Add to favorites (根据开关决定弹窗还是直接收藏)
+          bool success = await FavoriteHelper.addFavorite(
+            Get.context,
             isDir: false,
             remotePath: path,
             name: name,
@@ -237,7 +238,7 @@ class MethodCallHandler {
             modified: 0,
             provider: provider ?? "",
           );
-          return "true"; // Return true to indicate favorited
+          return success ? "true" : "false";
         }
 
       case "checkFavoriteStatus":

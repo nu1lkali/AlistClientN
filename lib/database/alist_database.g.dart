@@ -1172,6 +1172,23 @@ class _$FavoriteFolderDao extends FavoriteFolderDao {
   }
 
   @override
+  Future<void> clearDefault(
+    String serverUrl,
+    String userId,
+  ) async {
+    await _queryAdapter.queryNoReturn(
+        'UPDATE favorite_folder SET is_default = 0 WHERE server_url = ?1 AND user_id = ?2',
+        arguments: [serverUrl, userId]);
+  }
+
+  @override
+  Future<void> setDefault(int id) async {
+    await _queryAdapter.queryNoReturn(
+        'UPDATE favorite_folder SET is_default = 1 WHERE id = ?1',
+        arguments: [id]);
+  }
+
+  @override
   Future<int> insertFolder(FavoriteFolder folder) {
     return _favoriteFolderInsertionAdapter.insertAndReturnId(
         folder, OnConflictStrategy.abort);

@@ -278,6 +278,12 @@ class FavoriteHelper {
 
   /// 设为默认收藏夹（同时更新设置）
   static Future<void> setAsDefaultFolder(FavoriteFolder folder) async {
+    final user = _userController.user.value;
+    // 先清除所有夹的默认标记
+    await _db.favoriteFolderDao.clearDefault(user.serverUrl, user.username);
+    // 设置新默认夹
+    await _db.favoriteFolderDao.setDefault(folder.id!);
+    // 更新 SpUtil
     SpUtil.putBool(AlistConstant.favoriteUseDefaultFolder, true);
     SpUtil.putInt(AlistConstant.favoriteDefaultFolderId, folder.id!);
     SmartDialog.showToast('已设置「${folder.name}」为默认收藏夹');

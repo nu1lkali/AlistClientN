@@ -26,4 +26,10 @@ abstract class FavoriteFolderDao {
 
   @Query("SELECT COUNT(id) FROM favorite_folder WHERE server_url = :serverUrl AND user_id = :userId")
   Future<int?> count(String serverUrl, String userId);
+
+  @Query("UPDATE favorite_folder SET is_default = 0 WHERE server_url = :serverUrl AND user_id = :userId")
+  Future<void> clearDefault(String serverUrl, String userId);
+
+  @Query("UPDATE favorite_folder SET is_default = 1 WHERE id = :id")
+  Future<void> setDefault(int id);
 }
