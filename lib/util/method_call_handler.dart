@@ -5,6 +5,7 @@ import 'package:alist/util/subtitle/subtitle_controller.dart';
 import 'package:alist/screen/disliked_videos_screen.dart';
 import 'package:alist/database/table/disliked_video.dart';
 import 'package:alist/database/table/favorite.dart';
+import 'package:alist/database/table/favorite_folder.dart';
 import 'package:alist/util/favorite_helper.dart';
 import 'package:alist/database/table/file_viewing_record.dart';
 import 'package:alist/database/table/video_viewing_record.dart';
@@ -224,8 +225,8 @@ class MethodCallHandler {
           // Remove from favorites
           await favoriteDao.deleteByPath(user.serverUrl, user.username, path);
           return "false"; // Return false to indicate unfavorited
-        } else {
-          // Add to favorites (根据开关决定弹窗还是直接收藏)
+        } else if (FavoriteHelper.isUseDefaultFolderEnabled()) {
+          // 启用了默认收藏夹 → 直接收藏
           bool success = await FavoriteHelper.addFavorite(
             Get.context,
             isDir: false,
@@ -239,7 +240,86 @@ class MethodCallHandler {
             provider: provider ?? "",
           );
           return success ? "true" : "false";
+        } else {
+          // 未启用默认夹 → 通知原生端弹出原生 Dialog 选择收藏夹
+          return "need_picker";
         }
+
+      case "getFavoriteFoldersForNative":
+        final AlistDatabaseController db = Get.find();
+        final UserController uc = Get.find();
+        final u = uc.user.value;
+        var folders = await db.favoriteFolderDao.getAll(
+          u.serverUrl, u.username) ?? [];
+        // 确保至少有默认夹
+        if (folders.isEmpty) {
+          final defaultFolder = await FavoriteHelper.ensureDefaultFolder();
+          folders.add(defaultFolder);
+        }
+        final list = folders.map((f) => {
+          "id": f.id,
+          "name": f.name,
+          "isDefault": f.isDefault,
+        }).toList();
+        return jsonEncode(list);
+
+      case "addFavoriteToFolderForNative":
+        String favPath = call.arguments["path"];
+        String favName = call.arguments["name"];
+        String favSize = call.arguments["size"];
+        String? favProvider = call.arguments["provider"];
+        int folderId = call.arguments["folderId"];
+
+        final AlistDatabaseController favDb = Get.find();
+        final UserController favUc = Get.find();
+        final favUser = favUc.user.value;
+        final favDao = favDb.favoriteDao;
+
+        // Check if already favorited
+        var favExisting = await favDao.findByPath(
+          favUser.serverUrl, favUser.username, favPath);
+        if (favExisting != null) {
+          return "false";
+        }
+
+        final favNow = DateTime.now().millisecondsSinceEpoch;
+        await favDao.insertRecord(Favorite(
+          isDir: false,
+          serverUrl: favUser.serverUrl,
+          userId: favUser.username,
+          remotePath: favPath,
+          name: favName,
+          path: favPath,
+          size: int.tryParse(favSize) ?? 0,
+          sign: null,
+          thumb: null,
+          modified: 0,
+          provider: favProvider ?? "",
+          createTime: favNow,
+          folderId: folderId,
+        ));
+        return "true";
+
+      case "createFavoriteFolderForNative":
+        String folderName = call.arguments["name"];
+        final AlistDatabaseController createDb = Get.find();
+        final UserController createUc = Get.find();
+        final createUser = createUc.user.value;
+        final existingFolders = await createDb.favoriteFolderDao.getAll(
+          createUser.serverUrl, createUser.username) ?? [];
+
+        final createNow = DateTime.now().millisecondsSinceEpoch;
+        final newId = await createDb.favoriteFolderDao.insertFolder(
+          FavoriteFolder(
+            serverUrl: createUser.serverUrl,
+            userId: createUser.username,
+            name: folderName,
+            isDefault: false,
+            sort: existingFolders.length,
+            createTime: createNow,
+          ),
+        );
+        return jsonEncode({"id": newId, "name": folderName});
 
       case "checkFavoriteStatus":
         String path = call.arguments["path"];

@@ -251,8 +251,7 @@ class _SettingsContainerState extends State<_SettingsContainer>
             customBuilder: (context, scheme, isDark) {
               final enabled = _favoriteUseDefaultFolder.value;
               return Obx(() => ListTile(
-                leading: Icon(Icons.folder_special_rounded,
-                    color: enabled ? scheme.primary : scheme.outline),
+                leading: _leadingIcon(scheme, isDark, Icons.folder_special_rounded),
                 title: Text('默认收藏夹',
                     style: TextStyle(color: enabled ? scheme.onSurface : scheme.outline)),
                 subtitle: Text(

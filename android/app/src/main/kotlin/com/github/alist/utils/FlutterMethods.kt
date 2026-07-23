@@ -135,7 +135,7 @@ object FlutterMethods {
         )
     }
 
-    fun toggleFavorite(video: VideoItem, callback: (Boolean) -> Unit) {
+    fun toggleFavorite(video: VideoItem, callback: (String) -> Unit) {
         channel.invokeMethod(
             "toggleFavorite",
             mutableMapOf(
@@ -146,15 +146,14 @@ object FlutterMethods {
             ),
             object : MethodChannel.Result {
                 override fun success(result: Any?) {
-                    // result is "true" or "false" string from Flutter
-                    val isFavorite = result == "true" || result == true
-                    callback(isFavorite)
+                    // Flutter returns "true", "false", or "need_picker"
+                    callback(result as? String ?: "false")
                 }
                 override fun error(p0: String, p1: String?, p2: Any?) {
-                    callback(false)
+                    callback("false")
                 }
                 override fun notImplemented() {
-                    callback(false)
+                    callback("false")
                 }
             }
         )
@@ -208,6 +207,80 @@ object FlutterMethods {
                 "index" to index,
                 "headers" to (headersStr ?: "")
             )
+        )
+    }
+
+    /**
+     * 获取收藏夹列表（供原生端显示 Dialog）
+     * callback 返回 JSON 字符串：[{"id": 1, "name": "默认", "isDefault": true}, ...]
+     */
+    fun getFavoriteFoldersForNative(callback: (String) -> Unit) {
+        channel.invokeMethod("getFavoriteFoldersForNative", null, object : MethodChannel.Result {
+            override fun success(result: Any?) {
+                callback(result as? String ?: "[]")
+            }
+            override fun error(p0: String, p1: String?, p2: Any?) {
+                callback("[]")
+            }
+            override fun notImplemented() {
+                callback("[]")
+            }
+        })
+    }
+
+    /**
+     * 将视频直接收藏到指定文件夹（供原生端使用）
+     */
+    fun addFavoriteToFolderForNative(
+        path: String,
+        name: String,
+        size: String,
+        provider: String?,
+        folderId: Int,
+        callback: (Boolean) -> Unit
+    ) {
+        val args = HashMap<String, Any?>()
+        args["path"] = path
+        args["name"] = name
+        args["size"] = size
+        args["provider"] = provider ?: ""
+        args["folderId"] = folderId
+        channel.invokeMethod(
+            "addFavoriteToFolderForNative",
+            args,
+            object : MethodChannel.Result {
+                override fun success(result: Any?) {
+                    callback(result == "true" || result == true)
+                }
+                override fun error(p0: String, p1: String?, p2: Any?) {
+                    callback(false)
+                }
+                override fun notImplemented() {
+                    callback(false)
+                }
+            }
+        )
+    }
+
+    /**
+     * 创建新收藏夹（供原生端使用）
+     * callback 返回 JSON：{"id": 1, "name": "新建收藏夹"}
+     */
+    fun createFavoriteFolderForNative(name: String, callback: (String?) -> Unit) {
+        channel.invokeMethod(
+            "createFavoriteFolderForNative",
+            mutableMapOf("name" to name),
+            object : MethodChannel.Result {
+                override fun success(result: Any?) {
+                    callback(result as? String)
+                }
+                override fun error(p0: String, p1: String?, p2: Any?) {
+                    callback(null)
+                }
+                override fun notImplemented() {
+                    callback(null)
+                }
+            }
         )
     }
 }

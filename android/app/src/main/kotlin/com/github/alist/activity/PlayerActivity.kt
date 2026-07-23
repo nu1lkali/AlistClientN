@@ -1476,14 +1476,126 @@ class PlayerActivity : AppCompatActivity(), GSYVideoProgressListener {
     private fun toggleFavorite() {
         if (videos.isEmpty()) return
         val video = videos[index]
-        
-        FlutterMethods.toggleFavorite(video, fun(isFavorite: Boolean) {
+
+        FlutterMethods.toggleFavorite(video, fun(result: String) {
             runOnUiThread {
-                updateFavoriteIcon(isFavorite)
-                val message = if (isFavorite) "已添加到收藏" else "已取消收藏"
-                SmartToast.show(this@PlayerActivity, message)
+                when (result) {
+                    "true" -> {
+                        updateFavoriteIcon(true)
+                        SmartToast.show(this@PlayerActivity, "已添加到收藏")
+                    }
+                    "false" -> {
+                        updateFavoriteIcon(false)
+                        SmartToast.show(this@PlayerActivity, "已取消收藏")
+                    }
+                    "need_picker" -> {
+                        // 需要弹出收藏夹选择 Dialog（未启用默认收藏夹）
+                        showFavoriteFolderPicker(video)
+                    }
+                    else -> {
+                        // 兼容旧版 boolean 返回值
+                        val isFavorite = result == "true" || result.toBooleanStrictOrNull() == true
+                        updateFavoriteIcon(isFavorite)
+                        val message = if (isFavorite) "已添加到收藏" else "已取消收藏"
+                        SmartToast.show(this@PlayerActivity, message)
+                    }
+                }
             }
         })
+    }
+
+    private fun showFavoriteFolderPicker(video: VideoItem) {
+        FlutterMethods.getFavoriteFoldersForNative { foldersJson ->
+            runOnUiThread {
+                try {
+                    val folders = GsonUtils.parseRawListOfMaps(foldersJson)
+                    if (folders.isEmpty()) {
+                        SmartToast.show(this@PlayerActivity, "暂无收藏夹")
+                        return@runOnUiThread
+                    }
+
+                    val folderNames = folders.map { it["name"] as? String ?: "" }.toTypedArray()
+                    val folderIds = folders.map { (it["id"] as? Double)?.toInt() ?: 0 }
+
+                    androidx.appcompat.app.AlertDialog.Builder(this@PlayerActivity)
+                        .setTitle("选择收藏夹")
+                        .setItems(folderNames) { _, which ->
+                            val selectedId = folderIds.getOrNull(which) ?: return@setItems
+                            FlutterMethods.addFavoriteToFolderForNative(
+                                video.remotePath,
+                                video.name,
+                                video.size ?: "0",
+                                video.provider,
+                                selectedId
+                            ) { success ->
+                                runOnUiThread {
+                                    if (success) {
+                                        updateFavoriteIcon(true)
+                                        SmartToast.show(this@PlayerActivity, "已收藏")
+                                    } else {
+                                        SmartToast.show(this@PlayerActivity, "收藏失败")
+                                    }
+                                }
+                            }
+                        }
+                        .setNeutralButton("新建收藏夹") { _, _ ->
+                            showCreateFavoriteFolderDialog(video)
+                        }
+                        .setNegativeButton("取消", null)
+                        .show()
+                } catch (e: Exception) {
+                    SmartToast.show(this@PlayerActivity, "加载收藏夹失败")
+                }
+            }
+        }
+    }
+
+    private fun showCreateFavoriteFolderDialog(video: VideoItem) {
+        val input = android.widget.EditText(this).apply {
+            hint = "收藏夹名称"
+            setSingleLine()
+        }
+        val padding = (16 * resources.displayMetrics.density).toInt()
+        input.setPadding(padding, padding, padding, padding)
+
+        androidx.appcompat.app.AlertDialog.Builder(this)
+            .setTitle("新建收藏夹")
+            .setView(input)
+            .setPositiveButton("确定") { _, _ ->
+                val name = input.text.toString().trim()
+                if (name.isEmpty()) {
+                    SmartToast.show(this, "名称不能为空")
+                    return@setPositiveButton
+                }
+                FlutterMethods.createFavoriteFolderForNative(name) { newFolderJson ->
+                    runOnUiThread {
+                        try {
+                            val newFolder = GsonUtils.parseRawMap(newFolderJson ?: "")
+                            val newId = (newFolder["id"] as? Double)?.toInt() ?: return@runOnUiThread
+                            FlutterMethods.addFavoriteToFolderForNative(
+                                video.remotePath,
+                                video.name,
+                                video.size ?: "0",
+                                video.provider,
+                                newId
+                            ) { success ->
+                                runOnUiThread {
+                                    if (success) {
+                                        updateFavoriteIcon(true)
+                                        SmartToast.show(this@PlayerActivity, "已收藏到「${name}」")
+                                    } else {
+                                        SmartToast.show(this@PlayerActivity, "收藏失败")
+                                    }
+                                }
+                            }
+                        } catch (e: Exception) {
+                            SmartToast.show(this@PlayerActivity, "创建收藏夹失败")
+                        }
+                    }
+                }
+            }
+            .setNegativeButton("取消", null)
+            .show()
     }
 
     private fun checkFavoriteStatus() {

@@ -33,6 +33,7 @@ import com.github.chrisbanes.photoview.PhotoView
 import com.github.alist.bean.VideoItem
 import com.github.alist.clientn.R
 import com.github.alist.utils.FlutterMethods
+import com.github.alist.utils.GsonUtils
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -189,10 +190,53 @@ class HeicViewerActivity : AppCompatActivity() {
 
     private fun toggleFavorite() {
         try {
-            FlutterMethods.toggleFavorite(makeVideoItem(currentIndex)) { isFavorite ->
+            FlutterMethods.toggleFavorite(makeVideoItem(currentIndex)) { result ->
                 runOnUiThread {
-                    updateFavoriteIcon(isFavorite)
-                    toast(if (isFavorite) "已添加到收藏" else "已取消收藏")
+                    when (result) {
+                        "true" -> {
+                            updateFavoriteIcon(true)
+                            toast("已添加到收藏")
+                        }
+                        "false" -> {
+                            updateFavoriteIcon(false)
+                            toast("已取消收藏")
+                        }
+                        "need_picker" -> {
+                            // 未启用默认收藏夹 → 使用第一个收藏夹（默认夹）作为后备
+                            val video = makeVideoItem(currentIndex)
+                            FlutterMethods.getFavoriteFoldersForNative { foldersJson ->
+                                runOnUiThread {
+                                    try {
+                                        val folders = GsonUtils.parseRawListOfMaps(foldersJson)
+                                        val firstId = (folders.firstOrNull()?.get("id") as? Double)?.toInt()
+                                        if (firstId != null) {
+                                            FlutterMethods.addFavoriteToFolderForNative(
+                                                video.remotePath, video.name, video.size ?: "0", video.provider, firstId
+                                            ) { success ->
+                                                runOnUiThread {
+                                                    if (success) {
+                                                        updateFavoriteIcon(true)
+                                                        toast("已添加到收藏")
+                                                    } else {
+                                                        toast("收藏失败")
+                                                    }
+                                                }
+                                            }
+                                        } else {
+                                            toast("暂无收藏夹，请在设置中创建")
+                                        }
+                                    } catch (_: Exception) {
+                                        toast("收藏失败")
+                                    }
+                                }
+                            }
+                        }
+                        else -> {
+                            val isFavorite = result == "true"
+                            updateFavoriteIcon(isFavorite)
+                            toast(if (isFavorite) "已添加到收藏" else "已取消收藏")
+                        }
+                    }
                 }
             }
         } catch (_: Exception) { toast("操作失败") }

@@ -24,4 +24,14 @@ object GsonUtils {
     fun toJsonString(jsonObj: Any): String {
         return gson.toJson(jsonObj)
     }
+
+    fun parseRawListOfMaps(jsonText: String): List<Map<String, Any?>> {
+        val resultType = TypeToken.getParameterized(List::class.java, TypeToken.getParameterized(Map::class.java, String::class.java, Any::class.java).type).type
+        return gson.fromJson(jsonText, resultType) as List<Map<String, Any?>>
+    }
+
+    fun parseRawMap(jsonText: String): Map<String, Any?> {
+        val resultType = TypeToken.getParameterized(Map::class.java, String::class.java, Any::class.java).type
+        return gson.fromJson(jsonText, resultType) as Map<String, Any?>
+    }
 }
