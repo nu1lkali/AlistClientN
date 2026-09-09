@@ -184,11 +184,23 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
     });
   }
 
-  // —— 水平滑动：进度调节 ——
+  // —— 水平滑动：进度调节 / 边缘返回 ——
+  // 屏幕最左/右边缘热区内的横滑优先当作“返回上一级”（兼容系统侧滑返回习惯），
+  // 其余位置横滑才是拖动进度条。
+  static const double _edgeBackZone = 42.0; // 左右边缘热区宽度（逻辑像素）
+  static const double _edgeBackTrigger = 64.0; // 触发返回所需的最小向内位移
+  double? _horizontalStartDx;
+  bool _edgeBackCandidate = false;
+
   void _onHorizontalDragStart(DragStartDetails details) {
     final bottomInset = MediaQuery.of(context).viewPadding.bottom;
     final bottomThreshold = bottomInset > 0 ? bottomInset : _systemGestureBottomMargin;
     if (details.globalPosition.dy > _screenHeight - bottomThreshold) return;
+    _horizontalStartDx = details.globalPosition.dx;
+    final w = _screenWidth;
+    _edgeBackCandidate = (_horizontalStartDx! <= _edgeBackZone) ||
+        (_horizontalStartDx! >= w - _edgeBackZone);
+    if (_edgeBackCandidate) return; // 让给“返回”手势
     _seekStartX = details.globalPosition.dx;
     _seekStartPosition = _pos;
     _isSeeking = true;
@@ -198,6 +210,16 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
   }
 
   void _onHorizontalDragUpdate(DragUpdateDetails details) {
+    if (_edgeBackCandidate) {
+      final dx = details.globalPosition.dx - _horizontalStartDx!;
+      final fromLeft = _horizontalStartDx! <= _edgeBackZone;
+      // 从左侧边缘向右滑 / 从右侧边缘向左滑 => 返回上一级
+      final inwardReached = fromLeft ? dx > _edgeBackTrigger : -dx > _edgeBackTrigger;
+      if (inwardReached) {
+        _handleEdgeBack();
+      }
+      return;
+    }
     if (!_isSeeking) return;
     final dx = details.globalPosition.dx - _seekStartX;
     final totalMs = _dur.inMilliseconds.toDouble();
@@ -211,11 +233,25 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
   }
 
   void _onHorizontalDragEnd(DragEndDetails details) {
+    if (_edgeBackCandidate) {
+      // 未达到触发阈值：既未返回也未进入进度调节
+      _edgeBackCandidate = false;
+      _horizontalStartDx = null;
+      return;
+    }
     if (!_isSeeking) return;
     _controllers[_currentIndex]?.seekTo(_seekTarget);
     if (_wasPlayingBeforeSeek) _controllers[_currentIndex]?.play();
     _startTimer();
     setState(() => _isSeeking = false);
+  }
+
+  /// 边缘滑动手势触发：退出播放器返回上一级。
+  void _handleEdgeBack() {
+    _edgeBackCandidate = false;
+    _horizontalStartDx = null;
+    if (!mounted) return;
+    Navigator.of(context).pop();
   }
 
   @override

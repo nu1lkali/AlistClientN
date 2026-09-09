@@ -178,8 +178,8 @@ class _StrmPlayerScreenState extends State<StrmPlayerScreen>
     _ignoreCurrentGesture = e.position.dy > _screenHeight - bottomThreshold;
     if (_ignoreCurrentGesture) return;
 
-    // 左右边缘 24dp 安全边距：避免与系统返回手势冲突
-    final edgeSafeZone = 24.0;
+    // 左右边缘 40dp 安全边距：避免与系统返回手势冲突
+    final edgeSafeZone = 40.0;
     final dx = e.position.dx;
     if (dx < edgeSafeZone || dx > _screenWidth - edgeSafeZone) {
       _ignoreCurrentGesture = true;

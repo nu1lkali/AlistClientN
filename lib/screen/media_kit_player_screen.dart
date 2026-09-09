@@ -70,6 +70,8 @@ class _MediaKitPlayerScreenState extends State<MediaKitPlayerScreen>
   Duration _seekTarget = Duration.zero;
   Duration _seekStartPos = Duration.zero;
   double _horizontalDragStartX = 0;
+  // 边缘返回候选：非 null 表示本次横滑从屏幕左右边缘热区起手，不进入 seek
+  double? _edgeBackStartX;
   bool _isSwitching = false;
   late final AnimationController _playlistAnimationController;
   late final Animation<Offset> _playlistSlideAnimation;
@@ -736,14 +738,28 @@ class _MediaKitPlayerScreenState extends State<MediaKitPlayerScreen>
               onVerticalDragStart: _onVerticalDragStart, onVerticalDragUpdate: _onVerticalDragUpdate, onVerticalDragEnd: _onVerticalDragEnd,
               onDoubleTap: _onDoubleTap, onTap: _toggleControls,
               onHorizontalDragStart: (d) {
-                // Ignore drags starting within 24px of screen edges (for system back gesture)
                 final dx = d.localPosition.dx;
-                if (dx < 24 || dx > _screenWidth - 24) return;
+                // 屏幕左右边缘热区内的横滑交给“返回”（EdgeBack 候选），不进入 seek；
+                // 其余位置横滑才是拖动进度
+                if (dx < 40 || dx > _screenWidth - 40) {
+                  _edgeBackStartX = dx;
+                  return;
+                }
                 _horizontalDragStartX = dx;
                 _seekStartPos = _position;
                 _seeking = true;
               },
               onHorizontalDragUpdate: (d) {
+                if (_edgeBackStartX != null) {
+                  final fromLeft = _edgeBackStartX! <= 40;
+                  final dx = d.localPosition.dx - _edgeBackStartX!;
+                  // 从左侧边缘向右滑 / 从右侧边缘向左滑 => 退出（复用 WillPopScope 语义）
+                  if ((fromLeft ? dx : -dx) > 56) {
+                    _edgeBackStartX = null;
+                    Navigator.of(context).maybePop();
+                  }
+                  return;
+                }
                 if (_duration == Duration.zero || !_seeking) return;
                 final dx = d.localPosition.dx - _horizontalDragStartX;
                 final rangeMs =
@@ -753,7 +769,14 @@ class _MediaKitPlayerScreenState extends State<MediaKitPlayerScreen>
                 if (t.isNegative) t = Duration.zero; if (t > _duration) t = _duration;
                 setState(() { _seekTarget = t; });
               },
-              onHorizontalDragEnd: (_) { if (_seeking) { _player.seek(_seekTarget); setState(() => _seeking = false); } },
+              onHorizontalDragEnd: (_) {
+                if (_edgeBackStartX != null) {
+                  // 未达触发阈值：既未返回也未进入 seek
+                  _edgeBackStartX = null;
+                  return;
+                }
+                if (_seeking) { _player.seek(_seekTarget); setState(() => _seeking = false); }
+              },
               behavior: HitTestBehavior.opaque,
             )),
             if (_isDoubleTapSeekingLeft) _DoubleTapSeekIndicator(isForward: false, seekAmount: _doubleTapSeekAmount.abs()),
