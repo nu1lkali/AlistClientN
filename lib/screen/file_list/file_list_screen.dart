@@ -1601,12 +1601,16 @@ class _FileListScreenState extends State<FileListScreen>
                 onPressed: () =>
                     setState(() => _toolbarExpanded = !_toolbarExpanded),
               ),
-              // Emby 随机播放（首页根目录显示；从选中的 Emby 媒体库随机抽取视频）
+              // Emby 随机播放（首页根目录显示）：单击=按当前媒体库随机播放，长按=先选媒体库再播放
               if (path == '/')
-                IconButton(
-                  tooltip: 'Emby 随机播放',
-                  icon: const Icon(Icons.shuffle_rounded),
-                  onPressed: () => startEmbyRandomPlay(context),
+                GestureDetector(
+                  onLongPress: () =>
+                      startEmbyRandomPlayWithLibraryPick(context),
+                  child: IconButton(
+                    tooltip: 'Emby 随机播放（长按可选媒体库）',
+                    icon: const Icon(Icons.shuffle_rounded),
+                    onPressed: () => startEmbyRandomPlay(context),
+                  ),
                 ),
               // ⋮ 菜单保持不动
               _menuMoreIcon(),
