@@ -102,6 +102,7 @@ Future<void> startEmbyRandomPlay(BuildContext context) async {
       videos: list,
       initialIndex: 0,
       recordHistory: false,
+      fromEmby: true,
     ),
   );
 }

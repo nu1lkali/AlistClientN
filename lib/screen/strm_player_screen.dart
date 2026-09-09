@@ -10,6 +10,7 @@ import 'package:alist/util/favorite_helper.dart';
 import 'package:alist/database/table/file_viewing_record.dart';
 import 'package:alist/database/table/video_viewing_record.dart';
 import 'package:alist/entity/tiktok_play_list_model.dart';
+import 'package:alist/util/file_title.dart';
 import 'package:alist/util/alist_plugin.dart';
 import 'package:alist/util/constant.dart';
 import 'package:alist/util/video_engine.dart';
@@ -32,7 +33,6 @@ import 'package:video_player/video_player.dart';
 import 'package:volume_controller/volume_controller.dart';
 import 'package:screen_brightness/screen_brightness.dart';
 import 'package:wakelock/wakelock.dart';
-import 'dart:io';
 
 class StrmPlayerScreen extends StatefulWidget {
   const StrmPlayerScreen({super.key});
@@ -1648,10 +1648,8 @@ class _StrmPlayerScreenState extends State<StrmPlayerScreen>
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Builder(builder: (_) {
-                        String dn = v.fileName;
-                        final di = dn.lastIndexOf('.');
-                        if (di > 0) dn = dn.substring(0, di);
-                        if (dn.length > 30) dn = '${dn.substring(0, 27)}...';
+                        // 仅剥离常见视频扩展名（含域名/多点的名称不会被误截），超长交给 ellipsis 截断
+                        final dn = stripKnownVideoExtension(v.fileName);
                         return Text(dn,
                             style: const TextStyle(
                                 color: Colors.white,
@@ -1972,10 +1970,10 @@ class _StrmPlayerScreenState extends State<StrmPlayerScreen>
     final filteredVideos = _playlistFilter.isEmpty
         ? _sortedVideos
         : _sortedVideos.where((v) {
-            final nameWithoutExt = v.fileName.contains('.')
-                ? v.fileName.substring(0, v.fileName.lastIndexOf('.'))
-                : v.fileName;
-            return nameWithoutExt.toLowerCase().contains(_playlistFilter.toLowerCase());
+            // 仅剥常见视频扩展名后匹配，多点/含域名名称（如 www.98t.la@xxx）不会被误截
+            final nameForMatch =
+                stripKnownVideoExtension(v.fileName).toLowerCase();
+            return nameForMatch.contains(_playlistFilter.toLowerCase());
           }).toList();
     final drawerWidth = MediaQuery.of(context).size.width * 0.7;
 

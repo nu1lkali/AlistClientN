@@ -9,6 +9,7 @@ import 'package:alist/database/table/favorite.dart';
 import 'package:alist/util/favorite_helper.dart';
 import 'package:alist/database/table/file_viewing_record.dart';
 import 'package:alist/entity/tiktok_play_list_model.dart';
+import 'package:alist/util/file_title.dart';
 import 'package:alist/util/constant.dart';
 import 'package:alist/util/file_utils.dart';
 import 'package:alist/util/log_utils.dart' as log;
@@ -543,6 +544,8 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
 
   // ═══════════════ Gesture: Single Tap (immediate) + Double Tap ═══════════════
   void _onDoubleTap(TapDownDetails d) {
+    // Emby 随机播放来源无 AList 账号可收藏，双击仅作播放暂停外的轻量反馈（不触发点赞）
+    if (_playList.fromEmby) return;
     if (mounted) setState(() => _doubleTapIcons.add(d.globalPosition));
     final v = _playList.videos[_currentIndex];
     v.isLiked = !v.isLiked;
@@ -700,8 +703,11 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
             const SizedBox(height: 16),
             const Text('视频信息', style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
             const SizedBox(height: 16),
-            _row('文件名', v.fileName), _row('文件大小', v.formattedSize), _row('文件路径', v.filePath),
-            _row('修改时间', v.formattedModified), _row('Provider', v.provider ?? '未知'),
+            _row('文件名', v.fileName), _row('文件大小', v.formattedSize),
+            // Emby 直链来源：文件路径展示播放直链 URL（切换视频自动跟随当前项）
+            _row('文件路径', _playList.fromEmby ? (v.videoUrl ?? v.filePath) : v.filePath),
+            if (!_playList.fromEmby) _row('修改时间', v.formattedModified),
+            _row('Provider', v.provider ?? '未知'),
             _row('文件签名', v.sign ?? '无'), _row('播放位置', '${_currentIndex + 1} / ${_playList.videos.length}'),
             const SizedBox(height: 16),
           ]),
@@ -934,32 +940,72 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
     final bottomPad = MediaQuery.of(context).padding.bottom;
     final bottomOffset = _isLandscape ? (bottomPad + 70) : 160.0;
     final maxH = screenH - topPad - bottomOffset - 20;
+
+    // 依当前状态收集按钮（Emby 来源隐藏收藏/踩），按钮间固定间距、底部紧凑排列
+    final buttons = <Widget>[];
+    if (_isLandscape) {
+      buttons.add(_btn(
+          icon: _isPlaying ? Icons.pause_rounded : Icons.play_arrow_rounded,
+          label: _isPlaying ? '暂停' : '播放',
+          color: Colors.white,
+          onTap: _togglePlayPause));
+    }
+    if (!_playList.fromEmby) {
+      buttons.add(_btn(
+          icon: v.isLiked ? Icons.favorite : Icons.favorite_border,
+          label: v.isLiked ? '已收藏' : '收藏',
+          color: v.isLiked ? Colors.red : Colors.white,
+          onTap: _toggleLike));
+      buttons.add(_btn(
+          icon: v.isDisliked ? Icons.thumb_down : Icons.thumb_down_outlined,
+          label: v.isDisliked ? '已踩' : '踩',
+          color: v.isDisliked ? Colors.blue : Colors.white,
+          onTap: _toggleDislike));
+    }
+    if (!_isLandscape) {
+      buttons.add(_btn(
+          icon: _loopMode == 2
+              ? Icons.repeat_one
+              : _loopMode == 1
+                  ? Icons.stop_rounded
+                  : Icons.repeat,
+          label: ['自动下一个', '播完即停止', '单视频循环'][_loopMode],
+          color: _loopMode != 0 ? Colors.amber : Colors.white,
+          onTap: _toggleLoop));
+    }
+    if (_isLandscape) {
+      buttons.add(_btn(
+          icon: Icons.stay_current_portrait,
+          label: '竖屏',
+          color: Colors.white,
+          onTap: _toggleOrientation));
+      buttons.add(_btn(
+          icon: Icons.camera_alt_outlined,
+          label: '截图',
+          color: Colors.white,
+          onTap: _takeScreenshot));
+    }
+    buttons.add(_btn(
+        icon: Icons.info_outline,
+        label: '信息',
+        color: Colors.white,
+        onTap: _showInfo));
+
+    final spaced = <Widget>[];
+    for (var i = 0; i < buttons.length; i++) {
+      if (i > 0) spaced.add(const SizedBox(height: 16));
+      spaced.add(buttons[i]);
+    }
+    spaced.add(const SizedBox(height: 4));
+
     return Positioned(right: 12, bottom: bottomOffset,
       child: Opacity(opacity: _uiOpacity, child: SizedBox(
         height: maxH.clamp(0.0, 500.0),
-        child: Column(mainAxisAlignment: MainAxisAlignment.spaceEvenly, children: [
-          if (_isLandscape)
-            _btn(icon: _isPlaying ? Icons.pause_rounded : Icons.play_arrow_rounded,
-              label: _isPlaying ? '暂停' : '播放', color: Colors.white, onTap: _togglePlayPause),
-          _btn(icon: v.isLiked ? Icons.favorite : Icons.favorite_border,
-            label: v.isLiked ? '已收藏' : '收藏', color: v.isLiked ? Colors.red : Colors.white, onTap: _toggleLike),
-          _btn(icon: v.isDisliked ? Icons.thumb_down : Icons.thumb_down_outlined,
-            label: v.isDisliked ? '已踩' : '踩', color: v.isDisliked ? Colors.blue : Colors.white, onTap: _toggleDislike),
-          if (!_isLandscape)
-            _btn(icon: _loopMode == 2
-                ? Icons.repeat_one
-                : _loopMode == 1
-                    ? Icons.stop_rounded
-                    : Icons.repeat,
-              label: ['自动下一个', '播完即停止', '单视频循环'][_loopMode],
-              color: _loopMode != 0 ? Colors.amber : Colors.white, onTap: _toggleLoop),
-          if (_isLandscape) ...[
-            _btn(icon: _isLandscape ? Icons.stay_current_portrait : Icons.stay_current_landscape,
-              label: _isLandscape ? '竖屏' : '横屏', color: Colors.white, onTap: _toggleOrientation),
-            _btn(icon: Icons.camera_alt_outlined, label: '截图', color: Colors.white, onTap: _takeScreenshot),
-          ],
-          _btn(icon: Icons.info_outline, label: '信息', color: Colors.white, onTap: _showInfo),
-        ]),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          mainAxisAlignment: MainAxisAlignment.end,
+          children: spaced,
+        ),
       )),
     );
   }
@@ -1012,10 +1058,8 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
           Expanded(
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               Builder(builder: (_) {
-                String dn = v.fileName;
-                final di = dn.lastIndexOf('.');
-                if (di > 0) dn = dn.substring(0, di);
-                if (dn.length > 30) dn = '${dn.substring(0, 27)}...';
+                // 仅剥离常见视频扩展名（含域名/多点的名称不会被误截），超长交给 ellipsis 截断
+                final dn = stripKnownVideoExtension(v.fileName);
                 return Text(dn, style: const TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.w600),
                   maxLines: 1, overflow: TextOverflow.ellipsis);
               }),
@@ -1027,8 +1071,17 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
                   const Text('  |  ',
                       style: TextStyle(color: Colors.white30, fontSize: 11)),
                 ],
-                Text('${v.formattedSize}  |  ${v.filePath}',
-                  style: const TextStyle(color: Colors.white70, fontSize: 11), maxLines: 1, overflow: TextOverflow.ellipsis),
+                // Emby 直链来源的 filePath 与文件名重复，只显示大小；其余显示 大小 | 路径
+                Expanded(
+                  child: Text(
+                    _playList.fromEmby
+                        ? '${v.formattedSize}'
+                        : '${v.formattedSize}  |  ${v.filePath}',
+                    style: const TextStyle(color: Colors.white70, fontSize: 11),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
               ]),
             ]),
           ),

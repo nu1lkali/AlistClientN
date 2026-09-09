@@ -10,10 +10,14 @@ class TikTokPlayListModel {
   /// 是否记录观看历史（单文件入口为true，收集N个视频入口为false）
   final bool recordHistory;
 
+  /// 是否来自 Emby 随机播放（隐藏收藏/踩等依赖 AList 账号的操作，信息里展示直链 URL）
+  final bool fromEmby;
+
   TikTokPlayListModel({
     required this.videos,
     this.initialIndex = 0,
     this.recordHistory = false,
+    this.fromEmby = false,
   });
 }
 

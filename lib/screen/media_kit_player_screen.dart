@@ -9,6 +9,7 @@ import 'package:alist/util/favorite_helper.dart';
 import 'package:alist/screen/video_player_screen.dart';
 import 'package:alist/util/alist_plugin.dart';
 import 'package:alist/util/constant.dart';
+import 'package:alist/util/file_title.dart';
 import 'package:alist/util/subtitle/subtitle.dart';
 import 'package:flustars/flustars.dart';
 import 'package:alist/util/user_controller.dart';
@@ -878,8 +879,9 @@ class _MediaKitPlayerScreenState extends State<MediaKitPlayerScreen>
         ? _videos.asMap().entries.toList()
         : _videos.asMap().entries.where((e) {
             final name = e.value["name"] ?? "";
-            final nameWithoutExt = name.contains('.') ? name.substring(0, name.lastIndexOf('.')) : name;
-            return nameWithoutExt.toLowerCase().contains(_playlistFilter.toLowerCase());
+            // 仅剥常见视频扩展名后匹配，多点/含域名名称（如 www.98t.la@xxx）不会被误截
+            final nameForMatch = stripKnownVideoExtension(name).toLowerCase();
+            return nameForMatch.contains(_playlistFilter.toLowerCase());
           }).toList();
     return Stack(children: <Widget>[
       GestureDetector(onTap: _hidePlaylist, child: Container(color: Colors.black54)),
