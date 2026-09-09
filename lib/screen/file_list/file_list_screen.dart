@@ -1602,12 +1602,12 @@ class _FileListScreenState extends State<FileListScreen>
                     setState(() => _toolbarExpanded = !_toolbarExpanded),
               ),
               // Emby 随机播放（首页根目录显示）：单击=按当前媒体库随机播放，长按=先选媒体库再播放
+              // 注意：不能给 IconButton 配 tooltip——tooltip 自身抢占长按手势，导致选库 Dialog 无法弹出
               if (path == '/')
                 GestureDetector(
                   onLongPress: () =>
                       startEmbyRandomPlayWithLibraryPick(context),
                   child: IconButton(
-                    tooltip: 'Emby 随机播放（长按可选媒体库）',
                     icon: const Icon(Icons.shuffle_rounded),
                     onPressed: () => startEmbyRandomPlay(context),
                   ),
