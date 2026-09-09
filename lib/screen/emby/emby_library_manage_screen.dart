@@ -614,7 +614,6 @@ class _EmbyLibraryEditDialogState extends State<EmbyLibraryEditDialog> {
                 decoration: const InputDecoration(
                   labelText: 'ParentId（媒体库 Id）',
                   hintText: '如：1115732',
-                  helperText: '也可以点下方按钮，从服务器反查该 Id 对应的名称',
                   border: OutlineInputBorder(),
                   isDense: true,
                 ),
