@@ -43,6 +43,7 @@ import 'package:alist/util/file_utils.dart';
 import 'package:alist/util/search_filter_helper.dart';
 import 'package:alist/util/focus_node_utils.dart';
 import 'package:alist/util/log_utils.dart';
+import 'package:alist/util/emby_random_play.dart';
 import 'package:alist/util/lru_path_cache.dart';
 import 'package:alist/util/markdown_utils.dart';
 import 'package:alist/util/named_router.dart';
@@ -1600,6 +1601,13 @@ class _FileListScreenState extends State<FileListScreen>
                 onPressed: () =>
                     setState(() => _toolbarExpanded = !_toolbarExpanded),
               ),
+              // Emby 随机播放（首页根目录显示；从选中的 Emby 媒体库随机抽取视频）
+              if (path == '/')
+                IconButton(
+                  tooltip: 'Emby 随机播放',
+                  icon: const Icon(Icons.shuffle_rounded),
+                  onPressed: () => startEmbyRandomPlay(context),
+                ),
               // ⋮ 菜单保持不动
               _menuMoreIcon(),
             ],

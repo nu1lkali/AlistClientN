@@ -33,6 +33,8 @@ import 'package:alist/screen/video_player_screen.dart';
 import 'package:alist/screen/tiktok_player_page.dart';
 import 'package:alist/screen/strm_player_screen.dart';
 import 'package:alist/screen/linked_deletion_settings_screen.dart';
+import 'package:alist/screen/emby/emby_library_manage_screen.dart';
+import 'package:alist/screen/emby/emby_server_manage_screen.dart';
 import 'package:alist/screen/web_screen.dart';
 import 'package:alist/util/constant.dart';
 import 'package:alist/util/named_router.dart';
@@ -144,6 +146,16 @@ class AlistRouter {
     GetPage(
       name: NamedRouter.linkedDeletionSettings,
       page: () => const LinkedDeletionSettingsScreen(),
+    ),
+    // Emby 随机播放：服务器管理
+    GetPage(
+      name: NamedRouter.embyServerManage,
+      page: () => const EmbyServerManageScreen(),
+    ),
+    // Emby 随机播放：媒体库管理
+    GetPage(
+      name: NamedRouter.embyLibraryManage,
+      page: () => const EmbyLibraryManageScreen(),
     ),
   ];
 }

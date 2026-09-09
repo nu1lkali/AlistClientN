@@ -118,6 +118,7 @@ windows/**/*.[Cc]ache
 
 # Other local metadata
 .claude/
+.reasonix/
 .history/
 .svn/
 .FullName

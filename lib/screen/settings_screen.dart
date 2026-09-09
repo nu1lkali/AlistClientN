@@ -4,12 +4,15 @@ import 'dart:io';
 import 'package:alist/database/alist_database_controller.dart';
 import 'package:alist/database/table/favorite_folder.dart';
 import 'package:alist/util/favorite_helper.dart';
+import 'package:alist/entity/emby_config.dart';
 import 'package:alist/entity/settings_item.dart';
 import 'package:alist/generated/images.dart';
 import 'package:alist/l10n/intl_keys.dart';
 import 'package:alist/main.dart';
+import 'package:alist/screen/emby/emby_config_dialogs.dart';
 import 'package:alist/screen/iptv/model/iptv_channel.dart';
 import 'package:alist/util/constant.dart';
+import 'package:alist/util/emby_config_manager.dart';
 import 'package:alist/util/global.dart';
 import 'package:alist/util/security_lock_controller.dart';
 import 'package:alist/util/subtitle/subtitle_matcher.dart';
@@ -528,6 +531,40 @@ class _SettingsContainerState extends State<_SettingsContainer>
             }),
       ]),
 
+      // -------- Emby 随机播放 --------
+      SettingsSectionData(
+          title: 'Emby 随机播放',
+          icon: Icons.movie_filter_outlined,
+          items: [
+            SettingsItemData(
+                icon: Icons.dns_outlined,
+                title: 'Emby 服务器管理',
+                subtitle: _embyServerSummary(),
+                searchTerms: ['emby', 'server', '服务器', '随机播放', '密钥', 'api', '连接'],
+                onTap: () => Get.toNamed(NamedRouter.embyServerManage)),
+            SettingsItemData(
+                icon: Icons.video_library_outlined,
+                title: '媒体库管理',
+                subtitle: _embyLibrarySummary(),
+                searchTerms: [
+                  'emby', 'library', '媒体库', 'parentid', '库', '随机播放', '短视频'
+                ],
+                onTap: () => Get.toNamed(NamedRouter.embyLibraryManage)),
+            SettingsItemData(
+                icon: Icons.format_list_numbered_rounded,
+                title: '每次随机数量',
+                subtitle: '从媒体库随机抽取 1~${EmbyRandomSettings.maxLimit} 个视频',
+                trailingText: '${EmbyConfigManager.randomLimit} 个',
+                searchTerms: ['emby', 'limit', '数量', '随机', '个数', 'count'],
+                onTap: () => showEmbyLimitDialog(context)),
+            SettingsItemData(
+                icon: Icons.help_outline_rounded,
+                title: '使用说明',
+                subtitle: 'Emby 随机播放配置与使用教程',
+                searchTerms: ['emby', 'help', '使用说明', '帮助', '教程', '随机播放'],
+                onTap: () => showEmbyHelpDialog(context)),
+          ]),
+
       // -------- 关于 --------
       SettingsSectionData(title: '关于', icon: Icons.info_outline, items: [
         SettingsItemData(icon: Icons.privacy_tip_outlined, title: Intl.settingsScreen_item_privacyPolicy.tr,
@@ -550,6 +587,24 @@ class _SettingsContainerState extends State<_SettingsContainer>
             }),
       ]),
     ];
+  }
+
+  // ==================== Emby 随机播放摘要（订阅配置变更） ====================
+
+  String _embyServerSummary() {
+    EmbyConfigManager.revision.value; // 读取即订阅，配置变化时联动刷新
+    final s = EmbyConfigManager.selectedServer;
+    if (s == null) return '未配置，点击添加 Emby 服务器';
+    final name = s.remark.isNotEmpty ? s.remark : s.serverOrigin;
+    return '主服务器：$name';
+  }
+
+  String _embyLibrarySummary() {
+    EmbyConfigManager.revision.value;
+    final l = EmbyConfigManager.selectedLibrary;
+    if (l == null) return '未配置，点击添加媒体库';
+    final name = l.remark.isNotEmpty ? l.remark : l.parentId;
+    return '随机播放媒体库：$name';
   }
 
   @override
