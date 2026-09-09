@@ -15,6 +15,29 @@ class EmbyApiException implements Exception {
   String toString() => message;
 }
 
+/// Emby 媒体库条目（来自 GET /Users/{userId}/Views）。
+class EmbyMediaLibrary {
+  final String id;
+  final String name;
+
+  /// 库类型：movies / tvshows / music / mixed / homevideos / books ...
+  final String? collectionType;
+
+  const EmbyMediaLibrary({
+    required this.id,
+    required this.name,
+    this.collectionType,
+  });
+
+  static EmbyMediaLibrary fromJson(Map<String, dynamic> json) {
+    return EmbyMediaLibrary(
+      id: json['Id']?.toString() ?? '',
+      name: json['Name']?.toString() ?? '',
+      collectionType: json['CollectionType']?.toString(),
+    );
+  }
+}
+
 /// Emby API 网络层（对标 cs.py）。
 ///
 /// 特点：
@@ -22,6 +45,8 @@ class EmbyApiException implements Exception {
 ///   请求头注入 X-Emby-Token，切换服务器后无需重启 App；
 /// - 服务器未缓存 userId 时先 GET /Users 取返回列表第一个 Id；
 /// - GET /Users/{userId}/Items 携带选中媒体库 parentId 随机抽取；
+/// - GET /Users/{userId}/Views 拉取全部媒体库（供设置页选择，无需手工查 Id）；
+/// - GET /Users/{userId}/Items/{itemId} 按媒体库 Id 反查名称；
 /// - 为每个 Item 拼接 {protocol}://{baseUrl}/Videos/{id}/stream 播放直链。
 class EmbyApi {
   EmbyApi._();
@@ -81,11 +106,7 @@ class EmbyApi {
     final dio = _newDio();
 
     // 第一步：获取 userId（有缓存直接使用；无缓存则 GET /Users 取第一个 Id）
-    var userId = server.userId;
-    if (userId == null || userId.isEmpty) {
-      userId = await _fetchFirstUserId(dio, origin, server.apiKey);
-      EmbyConfigManager.updateServerUserId(server.id, userId);
-    }
+    final userId = await _ensureUserId(dio, server);
 
     // 第二步：随机拉取媒体库视频
     final items = await _fetchRandomItems(
@@ -117,6 +138,72 @@ class EmbyApi {
         modifiedMilliseconds: null,
       );
     }).toList();
+  }
+
+  /// 拉取当前用户可见的全部媒体库（GET /Users/{userId}/Views）。
+  ///
+  /// 返回所有媒体库的 Id / Name / CollectionType，供设置页渲染列表让用户直接勾选。
+  /// 失败抛出 [EmbyApiException]。
+  static Future<List<EmbyMediaLibrary>> fetchMediaLibraries(
+      EmbyServerConfig server) async {
+    final dio = _newDio();
+    final origin = server.serverOrigin;
+    final userId = await _ensureUserId(dio, server);
+    final url = '$origin/Users/$userId/Views';
+    try {
+      final resp = await dio.get<dynamic>(
+        url,
+        options: Options(headers: {'X-Emby-Token': server.apiKey}),
+      );
+      final data = resp.data;
+      if (data is Map && data['Items'] is List) {
+        return (data['Items'] as List)
+            .whereType<Map<String, dynamic>>()
+            .map((e) => EmbyMediaLibrary.fromJson(e))
+            .where((e) => e.id.isNotEmpty && e.name.isNotEmpty)
+            .toList();
+      }
+      throw EmbyApiException('服务器返回的数据格式异常（缺少 Items 字段）');
+    } on DioException catch (e) {
+      throw EmbyApiException(_describeDioError(e, url, isUsersPath: false));
+    }
+  }
+
+  /// 按媒体库 Id（parentId）反查媒体库名称（GET /Users/{userId}/Items/{itemId}）。
+  ///
+  /// 用于手动填写 ParentId 后自动补全备注名。失败时抛出 [EmbyApiException]。
+  static Future<String> fetchMediaLibraryName(
+      EmbyServerConfig server, String parentId) async {
+    final dio = _newDio();
+    final origin = server.serverOrigin;
+    final userId = await _ensureUserId(dio, server);
+    final encodedId = Uri.encodeComponent(parentId);
+    final url = '$origin/Users/$userId/Items/$encodedId';
+    try {
+      final resp = await dio.get<dynamic>(
+        url,
+        options: Options(headers: {'X-Emby-Token': server.apiKey}),
+      );
+      final data = resp.data;
+      if (data is Map && data['Name'] != null) {
+        return data['Name'].toString();
+      }
+      throw EmbyApiException('未找到该媒体库，请检查 ParentId 是否正确');
+    } on DioException catch (e) {
+      throw EmbyApiException(_describeDioError(e, url, isUsersPath: false));
+    }
+  }
+
+  /// 确保拿到 userId：有缓存直接返回；无缓存则 GET /Users 取列表第一个 Id 并回写缓存。
+  static Future<String> _ensureUserId(
+      Dio dio, EmbyServerConfig server) async {
+    var userId = server.userId;
+    if (userId == null || userId.isEmpty) {
+      userId =
+          await _fetchFirstUserId(dio, server.serverOrigin, server.apiKey);
+      EmbyConfigManager.updateServerUserId(server.id, userId);
+    }
+    return userId;
   }
 
   /// GET /Users 取返回列表第一个 Id。
