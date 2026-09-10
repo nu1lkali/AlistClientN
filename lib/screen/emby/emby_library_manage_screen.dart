@@ -1,5 +1,6 @@
 import 'package:alist/entity/emby_config.dart';
 import 'package:alist/net/emby_api.dart';
+import 'package:alist/screen/emby/emby_form_sheet.dart';
 import 'package:alist/util/emby_config_manager.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
@@ -49,17 +50,30 @@ class _EmbyLibraryManageScreenState extends State<EmbyLibraryManageScreen> {
           children: [
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
-              child: Text(
-                '点击右上角下载图标，从当前 Emby 主服务器拉取全部媒体库直接点选添加；'
-                '也可手动新增。点列表项选中随机播放目标。',
-                style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
-              ),
+              child: Obx(() {
+                EmbyConfigManager.revision.value;
+                final server = EmbyConfigManager.selectedServer;
+                final serverName = server == null
+                    ? '未配置'
+                    : (server.remark.isNotEmpty
+                        ? server.remark
+                        : server.serverOrigin);
+                return Text(
+                  '当前服务器：$serverName\n'
+                  '媒体库与服务器绑定，切换主服务器时列表随之切换；'
+                  '点右上角下载图标可拉取该服务器的媒体库。',
+                  style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
+                );
+              }),
             ),
             Expanded(child: Obx(() {
               // 订阅配置变更
               EmbyConfigManager.revision.value;
-              final libraries = EmbyConfigManager.loadLibraries();
-              if (libraries.isEmpty) return _buildEmpty(scheme);
+              final server = EmbyConfigManager.selectedServer;
+              final libraries = EmbyConfigManager.librariesOf(server?.id);
+              if (libraries.isEmpty) {
+                return _buildEmpty(scheme, server == null);
+              }
               final selectedId = EmbyConfigManager.selectedLibraryId;
               return ListView.builder(
                 padding: const EdgeInsets.all(12),
@@ -74,17 +88,22 @@ class _EmbyLibraryManageScreenState extends State<EmbyLibraryManageScreen> {
     );
   }
 
-  Widget _buildEmpty(ColorScheme scheme) {
+  Widget _buildEmpty(ColorScheme scheme, bool noServer) {
     return Center(
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(Icons.video_library_outlined,
+          Icon(noServer ? Icons.dns_outlined : Icons.video_library_outlined,
               size: 64, color: scheme.outlineVariant),
           const SizedBox(height: 12),
-          Text('还没有配置媒体库', style: TextStyle(color: scheme.outline)),
+          Text(noServer ? '还没有配置服务器' : '当前服务器还没有媒体库',
+              style: TextStyle(color: scheme.outline)),
           const SizedBox(height: 4),
-          Text('点右上角下载图标从服务器拉取，或点 + 手动添加',
+          Text(
+              noServer
+                  ? '请先在「Emby 服务器管理」中添加并选中主服务器'
+                  : '点右上角下载图标从服务器拉取，或点 + 手动添加',
+              textAlign: TextAlign.center,
               style: TextStyle(fontSize: 12, color: scheme.outlineVariant)),
         ],
       ),
@@ -201,14 +220,14 @@ class _EmbyLibraryManageScreenState extends State<EmbyLibraryManageScreen> {
     EmbyConfigManager.upsertLibrary(draft);
   }
 
-  Future<void> _confirmDelete(EmbyLibraryConfig lib) async {
+Future<void> _confirmDelete(EmbyLibraryConfig lib) async {
     final remark = lib.remark.isNotEmpty ? lib.remark : lib.parentId;
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: const Text('删除媒体库'),
-        content: Text('确定删除媒体库「$remark」吗？\n删除后不可恢复。'),
+        title: const Text('移除媒体库'),
+        content: Text('确定将媒体库「$remark」从应用中移除吗？\n此操作仅删除本地配置，不会影响远程服务器上的媒体库。'),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(false),
@@ -223,7 +242,7 @@ class _EmbyLibraryManageScreenState extends State<EmbyLibraryManageScreen> {
               shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(8)),
             ),
-            child: const Text('删除'),
+            child: const Text('移除'),
           ),
         ],
       ),
@@ -232,7 +251,7 @@ class _EmbyLibraryManageScreenState extends State<EmbyLibraryManageScreen> {
       EmbyConfigManager.deleteLibrary(lib.id);
     }
   }
-
+  
   /// 从当前选中的 Emby 主服务器拉取全部媒体库，弹出选择对话框。
   Future<void> _pickFromServer() async {
     final server = EmbyConfigManager.selectedServer;
@@ -328,8 +347,9 @@ class _LibraryPickerDialogState extends State<_LibraryPickerDialog> {
   String? _error;
   int _addedCount = 0;
 
-  /// 已在本地配置中的 parentId（含本次会话刚添加的，去重）
-  late final Set<String> _localIds = EmbyConfigManager.loadLibraries()
+  /// 当前服务器下已在本地配置中的 parentId（含本次会话刚添加的，去重）
+  late final Set<String> _localIds = EmbyConfigManager
+      .librariesOf(widget.server.id)
       .map((e) => e.parentId)
       .toSet();
 
@@ -358,8 +378,10 @@ class _LibraryPickerDialogState extends State<_LibraryPickerDialog> {
   }
 
   void _add(EmbyMediaLibrary lib) {
+    // 媒体库归属当前拉取所用的服务器
     EmbyConfigManager.upsertLibrary(EmbyLibraryConfig(
       id: EmbyConfigManager.newId(),
+      serverId: widget.server.id,
       remark: lib.name,
       parentId: lib.id,
     ));
@@ -534,6 +556,8 @@ class _EmbyLibraryEditDialogState extends State<EmbyLibraryEditDialog> {
     }
     Navigator.of(context).pop(EmbyLibraryConfig(
       id: widget.existing?.id ?? EmbyConfigManager.newId(),
+      // 编辑时保留原归属；新增时为空，由管理器归属当前主服务器
+      serverId: widget.existing?.serverId ?? '',
       remark: _remarkCtrl.text.trim(),
       parentId: parentId,
     ));
@@ -587,111 +611,131 @@ class _EmbyLibraryEditDialogState extends State<EmbyLibraryEditDialog> {
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final isNew = widget.existing == null;
-    return AlertDialog(
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-      title: Text(isNew ? '新增媒体库' : '编辑媒体库'),
-      content: SizedBox(
-        width: double.maxFinite,
-        child: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              TextField(
-                controller: _remarkCtrl,
-                decoration: const InputDecoration(
-                  labelText: '备注名（可选）',
-                  hintText: '如：电影库、短视频',
-                  border: OutlineInputBorder(),
-                  isDense: true,
-                ),
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: _parentIdCtrl,
-                keyboardType: TextInputType.text,
-                autocorrect: false,
-                decoration: const InputDecoration(
-                  labelText: 'ParentId（媒体库 Id）',
-                  hintText: '如：1115732',
-                  border: OutlineInputBorder(),
-                  isDense: true,
-                ),
-              ),
-              const SizedBox(height: 10),
-              OutlinedButton.icon(
-                onPressed: _queryingName ? null : _queryNameFromServer,
-                style: OutlinedButton.styleFrom(
-                  foregroundColor: scheme.primary,
-                  side: BorderSide(color: scheme.primary.withOpacity(0.5)),
-                  shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(8)),
-                ),
-                icon: _queryingName
-                    ? const SizedBox(
-                        width: 14,
-                        height: 14,
-                        child: CircularProgressIndicator(strokeWidth: 2))
-                    : const Icon(Icons.search_rounded, size: 18),
-                label: Text(_queryingName ? '查询中...' : '从服务器查询名称'),
-              ),
-              if (_queryNameOk != null) ...[
-                const SizedBox(height: 8),
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Icon(Icons.check_circle_rounded,
-                        size: 16, color: Colors.green.shade600),
-                    const SizedBox(width: 6),
-                    Expanded(
-                      child: Text(_queryNameOk!,
-                          style: TextStyle(
-                              fontSize: 12,
-                              color: Colors.green.shade600,
-                              height: 1.4)),
-                    ),
-                  ],
-                ),
-              ],
-              if (_queryNameErr != null) ...[
-                const SizedBox(height: 8),
-                Text(_queryNameErr!,
-                    style: TextStyle(fontSize: 12, color: scheme.error)),
-              ],
-              if (_fieldError != null) ...[
-                const SizedBox(height: 8),
-                Text(_fieldError!,
-                    style: TextStyle(fontSize: 12, color: scheme.error)),
-              ],
-            ],
+    return buildEmbyFormSheet(
+      context,
+      icon: isNew ? Icons.video_library_outlined : Icons.edit_rounded,
+      title: isNew ? '新增媒体库' : '编辑媒体库',
+      children: [
+        TextField(
+          controller: _remarkCtrl,
+          textInputAction: TextInputAction.next,
+          decoration: InputDecoration(
+            labelText: '备注名（可选）',
+            hintText: '如：电影库、短视频',
+            prefixIcon: const Icon(Icons.label_outline_rounded, size: 20),
+            border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+            isDense: true,
           ),
         ),
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.of(context).pop(),
-          child: Text('取消', style: TextStyle(color: scheme.onSurfaceVariant)),
+        const SizedBox(height: 14),
+        TextField(
+          controller: _parentIdCtrl,
+          keyboardType: TextInputType.text,
+          textInputAction: TextInputAction.done,
+          autocorrect: false,
+          decoration: InputDecoration(
+            labelText: 'ParentId（媒体库 Id）',
+            hintText: '如：1115732',
+            prefixIcon: const Icon(Icons.tag_rounded, size: 20),
+            border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+            isDense: true,
+          ),
         ),
-        FilledButton(
-          onPressed: _submit,
-          style: FilledButton.styleFrom(
-              shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(8))),
-          child: const Text('保存'),
+        const SizedBox(height: 6),
+        Text('也可在「媒体库管理」用右上角下载按钮从服务器一键拉取',
+            style: TextStyle(fontSize: 11, color: scheme.outline)),
+        const SizedBox(height: 12),
+ OutlinedButton.icon(
+          onPressed: _queryingName ? null : _queryNameFromServer,
+          style: OutlinedButton.styleFrom(
+            backgroundColor: Colors.green.shade50,
+            foregroundColor: Colors.green.shade700,
+            side: BorderSide(color: Colors.green.shade300),
+            shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(10)),
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          ),
+          icon: _queryingName
+              ? SizedBox(
+                  width: 14,
+                  height: 14,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: Colors.green.shade700,
+                  ),
+                )
+              : const Icon(Icons.search_rounded, size: 18),
+          label: Text(_queryingName ? '查询中...' : '从服务器查询名称'),
         ),
+        if (_queryNameOk != null) ...[
+          const SizedBox(height: 10),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Icon(Icons.check_circle_rounded,
+                  size: 16, color: Colors.green.shade600),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(_queryNameOk!,
+                    style: TextStyle(
+                        fontSize: 12,
+                        color: Colors.green.shade600,
+                        height: 1.4)),
+              ),
+            ],
+          ),
+        ],
+        if (_queryNameErr != null) ...[
+          const SizedBox(height: 10),
+          Text(_queryNameErr!,
+              style: TextStyle(fontSize: 12, color: scheme.error)),
+        ],
+        if (_fieldError != null) ...[
+          const SizedBox(height: 10),
+          Text(_fieldError!,
+              style: TextStyle(fontSize: 12, color: scheme.error)),
+        ],
       ],
+      footer: Row(
+        children: [
+          Expanded(
+            child: FilledButton.tonal(
+              onPressed: () => Navigator.of(context).pop(),
+              style: FilledButton.styleFrom(
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10)),
+              ),
+              child: const Text('取消'),
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: FilledButton(
+              onPressed: _submit,
+              style: FilledButton.styleFrom(
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10)),
+              ),
+              child: const Text('保存'),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
 
-/// 便捷入口：弹出媒体库编辑对话框，保存成功后执行 [onSaved]。
+/// 便捷入口：以底部表单弹出媒体库编辑，保存成功后执行 [onSaved]。
 Future<void> showEmbyLibraryEditDialog(
   BuildContext context, {
   EmbyLibraryConfig? existing,
   required void Function(EmbyLibraryConfig draft) onSaved,
 }) async {
-  final draft = await showDialog<EmbyLibraryConfig>(
+  final draft = await showModalBottomSheet<EmbyLibraryConfig>(
     context: context,
+    isScrollControlled: true,
+    useSafeArea: true,
+    backgroundColor: Colors.transparent,
     builder: (_) => EmbyLibraryEditDialog(existing: existing),
   );
   if (draft != null) onSaved(draft);

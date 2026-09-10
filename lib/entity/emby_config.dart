@@ -4,7 +4,8 @@
 /// - [EmbyServerConfig]：一个 Emby 服务器配置项（备注、协议、地址端口、API Key）。
 ///   [userId] 为可选缓存字段：首次请求时通过 GET /Users 取到列表第一个 Id 后写回，
 ///   后续随机播放可直接使用，避免每次重复请求。
-/// - [EmbyLibraryConfig]：一个媒体库配置项（备注、parentId），用于随机抽取的作用域。
+/// - [EmbyLibraryConfig]：一个媒体库配置项（备注、parentId），**归属于某个服务器**
+///   （[serverId]），切换主服务器时列表与选中项随之切换。
 library;
 
 class EmbyServerConfig {
@@ -80,10 +81,13 @@ class EmbyServerConfig {
   }
 }
 
-/// Emby 媒体库（多媒体库）配置项。
+/// Emby 媒体库（多媒体库）配置项，归属于某个服务器（[serverId]）。
 class EmbyLibraryConfig {
   /// 本地唯一标识
   final String id;
+
+  /// 归属的服务器配置 id（媒体库与服务器绑定）
+  final String serverId;
 
   /// 备注名（如：电影库、短视频）
   final String remark;
@@ -93,15 +97,21 @@ class EmbyLibraryConfig {
 
   const EmbyLibraryConfig({
     required this.id,
+    this.serverId = '',
     required this.remark,
     required this.parentId,
   });
 
   bool get isValid => parentId.trim().isNotEmpty;
 
-  EmbyLibraryConfig copyWith({String? remark, String? parentId}) {
+  EmbyLibraryConfig copyWith({
+    String? serverId,
+    String? remark,
+    String? parentId,
+  }) {
     return EmbyLibraryConfig(
       id: id,
+      serverId: serverId ?? this.serverId,
       remark: remark ?? this.remark,
       parentId: parentId ?? this.parentId,
     );
@@ -109,6 +119,7 @@ class EmbyLibraryConfig {
 
   Map<String, dynamic> toJson() => {
         'id': id,
+        'serverId': serverId,
         'remark': remark,
         'parentId': parentId,
       };
@@ -116,6 +127,7 @@ class EmbyLibraryConfig {
   factory EmbyLibraryConfig.fromJson(Map<String, dynamic> json) {
     return EmbyLibraryConfig(
       id: json['id'] as String,
+      serverId: (json['serverId'] as String?) ?? '',
       remark: (json['remark'] as String?) ?? '',
       parentId: (json['parentId'] as String?) ?? '',
     );
@@ -131,5 +143,5 @@ class EmbyRandomSettings {
   static const int minLimit = 1;
 
   /// 允许的最大值
-  static const int maxLimit = 50;
+  static const int maxLimit = 100;
 }

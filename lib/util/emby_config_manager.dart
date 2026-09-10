@@ -8,10 +8,12 @@ import 'package:get/get.dart';
 ///
 /// 使用 SharedPreferences（SpUtil 封装）做本地持久化：
 /// - 服务器列表（多服务器，含备注/protocol/baseUrl/apiKey/缓存 userId）
-/// - 媒体库列表（多媒体库，含备注/parentId）
+/// - 媒体库列表（**每条媒体库归属于某个服务器** serverId，含备注/parentId）
 /// - 当前选中的服务器 id 与媒体库 id
 /// - 每次随机抽取数量 limit
 ///
+/// 服务器与媒体库联动：切换主服务器时，媒体库列表/选中目标随之切换；
+/// 删除服务器时会一并删除归属它的媒体库。
 /// 所有读写均为同步内存操作 + 异步落盘（SpUtil 内部处理），
 /// 切换服务器后无需重启 App，下一次随机播放请求即生效。
 class EmbyConfigManager {
@@ -62,13 +64,25 @@ class EmbyConfigManager {
     final selectedId = selectedServerId;
     if (selectedId == null || selectedId.isEmpty) {
       _selectServerId(servers.last.id);
+      _ensureLibrarySelectionForServer(servers.last.id);
     }
   }
 
-  /// 删除服务器；若删除的是当前选中项，则自动选中剩余第一个。
+  /// 删除服务器：一并删除归属它的媒体库；若删的是当前选中项则切换到剩余第一个。
   static void deleteServer(String id) {
+    // 1) 删除归属该服务器的媒体库
+    final libs = _loadLibrariesRaw();
+    final kept = libs.where((e) => e.serverId != id).toList();
+    if (kept.length != libs.length) {
+      SpUtil.putString(
+          _keyLibraries, jsonEncode(kept.map((e) => e.toJson()).toList()));
+    }
+
+    // 2) 删除服务器本体
     final servers = loadServers()..removeWhere((e) => e.id == id);
     saveServers(servers);
+
+    // 3) 修正选中项
     if (selectedServerId == id) {
       if (servers.isNotEmpty) {
         _selectServerId(servers.first.id);
@@ -77,14 +91,18 @@ class EmbyConfigManager {
         _notify();
       }
     }
+    _ensureLibrarySelectionForServer(selectedServer?.id);
   }
 
   /// 当前选中服务器的本地 id（可能指向已不存在的项，使用前请取 [selectedServer]）
   static String? get selectedServerId =>
       SpUtil.getString(_keySelectedServerId, defValue: '');
 
+  /// 切换主服务器：媒体库的选中目标随之切换（若原目标不属于新服务器）。
   static void selectServer(String id) {
-    if (loadServers().any((e) => e.id == id)) _selectServerId(id);
+    if (!loadServers().any((e) => e.id == id)) return;
+    _selectServerId(id);
+    _ensureLibrarySelectionForServer(id);
   }
 
   static void _selectServerId(String id) {
@@ -125,7 +143,8 @@ class EmbyConfigManager {
 
   // ───────────────────── 媒体库 ─────────────────────
 
-  static List<EmbyLibraryConfig> loadLibraries() {
+  /// 原始媒体库列表（不做迁移）。
+  static List<EmbyLibraryConfig> _loadLibrariesRaw() {
     final raw = SpUtil.getString(_keyLibraries, defValue: '');
     if (raw == null || raw.isEmpty) return [];
     try {
@@ -138,6 +157,43 @@ class EmbyConfigManager {
     }
   }
 
+  static bool _libraryMigrationDone = false;
+
+  /// 历史数据迁移：早期版本媒体库没有 serverId，统一归属到当前主服务器
+  /// （只有一个服务器时即为它），避免升级后媒体库"消失"。
+  static void _ensureLibraryServerIds() {
+    if (_libraryMigrationDone) return;
+    _libraryMigrationDone = true;
+    final libs = _loadLibrariesRaw();
+    if (libs.isEmpty) return;
+    if (libs.every((e) => e.serverId.isNotEmpty)) return;
+
+    final target = selectedServer?.id ??
+        (loadServers().isNotEmpty ? loadServers().first.id : '');
+    if (target.isEmpty) return;
+
+    final migrated = libs
+        .map((e) => e.serverId.isEmpty ? e.copyWith(serverId: target) : e)
+        .toList();
+    SpUtil.putString(
+        _keyLibraries, jsonEncode(migrated.map((e) => e.toJson()).toList()));
+  }
+
+  /// 全部媒体库（含各服务器）。
+  static List<EmbyLibraryConfig> loadLibraries() {
+    _ensureLibraryServerIds();
+    return _loadLibrariesRaw();
+  }
+
+  /// 指定服务器下的媒体库（[serverId] 为空时返回全部，兼容无归属的历史数据）。
+  static List<EmbyLibraryConfig> librariesOf(String? serverId) {
+    final all = loadLibraries();
+    if (serverId == null || serverId.isEmpty) return all;
+    return all
+        .where((e) => e.serverId == serverId || e.serverId.isEmpty)
+        .toList();
+  }
+
   static void saveLibraries(List<EmbyLibraryConfig> libraries) {
     SpUtil.putString(
         _keyLibraries, jsonEncode(libraries.map((e) => e.toJson()).toList()));
@@ -145,18 +201,25 @@ class EmbyConfigManager {
   }
 
   /// 新增或覆盖媒体库；新增时若当前无选中则自动选中。
+  ///
+  /// [library] 的 serverId 为空时会归属当前主服务器。
   static void upsertLibrary(EmbyLibraryConfig library) {
+    var lib = library;
+    if (lib.serverId.isEmpty) {
+      final sid = selectedServer?.id;
+      if (sid != null && sid.isNotEmpty) lib = lib.copyWith(serverId: sid);
+    }
     final libraries = loadLibraries();
-    final idx = libraries.indexWhere((e) => e.id == library.id);
+    final idx = libraries.indexWhere((e) => e.id == lib.id);
     if (idx >= 0) {
-      libraries[idx] = library;
+      libraries[idx] = lib;
     } else {
-      libraries.add(library);
+      libraries.add(lib);
     }
     saveLibraries(libraries);
     final selectedId = selectedLibraryId;
     if (selectedId == null || selectedId.isEmpty) {
-      _selectLibraryId(libraries.last.id);
+      _selectLibraryId(lib.id);
     }
   }
 
@@ -164,8 +227,9 @@ class EmbyConfigManager {
     final libraries = loadLibraries()..removeWhere((e) => e.id == id);
     saveLibraries(libraries);
     if (selectedLibraryId == id) {
-      if (libraries.isNotEmpty) {
-        _selectLibraryId(libraries.first.id);
+      final remaining = librariesOf(selectedServer?.id);
+      if (remaining.isNotEmpty) {
+        _selectLibraryId(remaining.first.id);
       } else {
         SpUtil.remove(_keySelectedLibraryId);
         _notify();
@@ -185,16 +249,35 @@ class EmbyConfigManager {
     _notify();
   }
 
-  /// 当前参与随机播放的媒体库；无配置或选中失效时回退到第一个。
+  /// 保证"当前服务器"下有一个选中的媒体库：若当前选中项不属于该服务器，
+  /// 则自动切到该服务器的第一个媒体库；该服务器没有媒体库时清空选中。
+  static void _ensureLibrarySelectionForServer(String? serverId) {
+    final libs = librariesOf(serverId);
+    final current = selectedLibraryId;
+    if (libs.isEmpty) {
+      if (current != null && current.isNotEmpty) {
+        SpUtil.remove(_keySelectedLibraryId);
+        _notify();
+      }
+      return;
+    }
+    if (current == null || current.isEmpty ||
+        !libs.any((e) => e.id == current)) {
+      _selectLibraryId(libs.first.id);
+    }
+  }
+
+  /// 当前参与随机播放的媒体库（限定在当前主服务器范围内；
+  /// 无配置或选中失效时回退为该服务器的第一个）。
   static EmbyLibraryConfig? get selectedLibrary {
-    final libraries = loadLibraries();
-    if (libraries.isEmpty) return null;
+    final libs = librariesOf(selectedServer?.id);
+    if (libs.isEmpty) return null;
     final id = selectedLibraryId;
     if (id != null && id.isNotEmpty) {
-      final match = libraries.where((e) => e.id == id);
+      final match = libs.where((e) => e.id == id);
       if (match.isNotEmpty) return match.first;
     }
-    return libraries.first;
+    return libs.first;
   }
 
   // ───────────────────── 随机数量 ─────────────────────
@@ -217,7 +300,7 @@ class EmbyConfigManager {
 
   /// 归一化 baseUrl：去除可能的协议前缀与首尾空格/斜杠。
   static String normalizeBaseUrl(String input) {
-    var s = (input ?? '').trim();
+    var s = input.trim();
     s = s.replaceFirst(RegExp(r'^https?://', caseSensitive: false), '');
     while (s.endsWith('/')) {
       s = s.substring(0, s.length - 1);

@@ -119,9 +119,11 @@ Future<void> startEmbyRandomPlayWithLibraryPick(BuildContext context) async {
     return;
   }
 
-  final libraries = EmbyConfigManager.loadLibraries();
+  // 只列当前主服务器下的媒体库（媒体库与服务器绑定）
+  final libraries = EmbyConfigManager.librariesOf(server.id);
   if (libraries.isEmpty) {
-    _showSnack(context, '还没有媒体库，请先在「媒体库管理」中添加（可一键从服务器拉取）');
+    _showSnack(context,
+        '当前服务器还没有媒体库，请到「媒体库管理」用下载图标从服务器拉取');
     return;
   }
 
@@ -181,7 +183,8 @@ Future<void> startEmbyRandomPlayWithLibraryPick(BuildContext context) async {
     },
   );
 
-  if (picked == null || !context.mounted) return;
+  if (picked == null) return;
+  if (!context.mounted) return;
 
   // 持久化选中目标：设置页“媒体库管理”列表与随机播放目标同步更新
   EmbyConfigManager.selectLibrary(picked.id);

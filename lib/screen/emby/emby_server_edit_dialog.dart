@@ -1,14 +1,16 @@
 import 'package:alist/entity/emby_config.dart';
 import 'package:alist/net/emby_api.dart';
+import 'package:alist/screen/emby/emby_form_sheet.dart';
 import 'package:alist/util/emby_config_manager.dart';
 import 'package:flutter/material.dart';
 
-/// 服务器新增/编辑对话框。
+/// 服务器新增/编辑表单（底部弹窗）。
 ///
 /// 字段：备注名、协议（http/https 分段选择）、baseUrl（地址与端口）、
 /// apiKey（支持密码掩码切换）。内置“测试连接”，使用表单当前值
 /// 实时向 Emby 发起 GET /Users 并就地反馈结果。
 ///
+/// 通过 [buildEmbyFormSheet] 承载：键盘弹出时整体上移而非被压缩变形。
 /// 保存成功后通过 [Navigator.pop] 返回构造好的 [EmbyServerConfig]。
 class EmbyServerEditDialog extends StatefulWidget {
   /// 为 null 表示新增，否则为编辑模式
@@ -107,114 +109,161 @@ class _EmbyServerEditDialogState extends State<EmbyServerEditDialog> {
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final isNew = widget.existing == null;
-    return AlertDialog(
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-      title: Text(isNew ? '新增 Emby 服务器' : '编辑 Emby 服务器'),
-      content: SingleChildScrollView(
-        child: SizedBox(
-          width: double.maxFinite,
+
+    return buildEmbyFormSheet(
+      context,
+      icon: isNew ? Icons.dns_rounded : Icons.edit_rounded,
+      title: isNew ? '新增 Emby 服务器' : '编辑 Emby 服务器',
+      children: [
+        TextField(
+          controller: _remarkCtrl,
+          textInputAction: TextInputAction.next,
+          decoration: InputDecoration(
+            labelText: '备注名（可选）',
+            hintText: '如：家里 NAS、客厅影音',
+            prefixIcon: const Icon(Icons.label_outline_rounded, size: 20),
+            border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+            isDense: true,
+          ),
+        ),
+        const SizedBox(height: 14),
+        Container(
+          decoration: BoxDecoration(
+            border: Border.all(color: scheme.outline.withOpacity(0.3)),
+            borderRadius: BorderRadius.circular(12),
+          ),
+          clipBehavior: Clip.antiAlias, // 完美裁剪圆角，解决缺角问题
           child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              TextField(
-                controller: _remarkCtrl,
-                decoration: const InputDecoration(
-                  labelText: '备注名（可选）',
-                  hintText: '如：家里 NAS、客厅影音',
-                  border: OutlineInputBorder(),
-                  isDense: true,
+              Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                decoration: BoxDecoration(
+                  color: scheme.surfaceVariant.withOpacity(0.5),
+                ),
+                child: Row(
+                  children: [
+                    Text('连接协议',
+                        style: TextStyle(
+                            fontSize: 12, color: scheme.onSurfaceVariant)),
+                    const Spacer(),
+                    SegmentedButton<String>(
+                      segments: const [
+                        ButtonSegment(value: 'http', label: Text('HTTP')),
+                        ButtonSegment(value: 'https', label: Text('HTTPS')),
+                      ],
+                      selected: {_protocol},
+                      onSelectionChanged: (s) =>
+                          setState(() => _protocol = s.first),
+                      style: ButtonStyle(
+                        visualDensity: VisualDensity.compact,
+                        textStyle: MaterialStateProperty.all(
+                            const TextStyle(fontSize: 12)),
+                      ),
+                    ),
+                  ],
                 ),
               ),
-              const SizedBox(height: 12),
-              SegmentedButton<String>(
-                segments: const [
-                  ButtonSegment(
-                      value: 'http',
-                      icon: Icon(Icons.lock_open_outlined),
-                      label: Text('http://')),
-                  ButtonSegment(
-                      value: 'https',
-                      icon: Icon(Icons.lock_outline),
-                      label: Text('https://')),
-                ],
-                selected: {_protocol},
-                onSelectionChanged: (s) => setState(() => _protocol = s.first),
-              ),
-              const SizedBox(height: 12),
+              const Divider(height: 1, thickness: 1),
               TextField(
                 controller: _baseUrlCtrl,
                 keyboardType: TextInputType.url,
+                textInputAction: TextInputAction.next,
                 autocorrect: false,
-                decoration: const InputDecoration(
+                decoration: InputDecoration(
                   labelText: '服务器地址与端口',
                   hintText: '192.168.2.124:8097',
-                  helperText: '无需填写协议前缀（http:// 或 https://）',
-                  border: OutlineInputBorder(),
+                  prefixIcon: const Icon(Icons.link_rounded, size: 20),
+                  border: InputBorder.none,
+                  enabledBorder: InputBorder.none,
+                  focusedBorder: InputBorder.none,
+                  contentPadding: const EdgeInsets.all(12),
                   isDense: true,
                 ),
               ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: _apiKeyCtrl,
-                obscureText: _obscureKey,
-                autocorrect: false,
-                enableSuggestions: false,
-                decoration: InputDecoration(
-                  labelText: 'API Key（密钥）',
-                  hintText: 'Emby 设置 → 高级 → API 密钥',
-                  border: const OutlineInputBorder(),
-                  isDense: true,
-                  suffixIcon: IconButton(
-                    icon: Icon(_obscureKey
-                        ? Icons.visibility_off_outlined
-                        : Icons.visibility_outlined),
-                    onPressed: () => setState(() => _obscureKey = !_obscureKey),
-                  ),
-                ),
-              ),
-              if (widget.existing?.userId != null &&
-                  (widget.existing?.userId ?? '').isNotEmpty) ...[
-                const SizedBox(height: 6),
-                Text(
-                  '已缓存用户 Id：${widget.existing!.userId}\n修改地址或密钥后将自动重新获取',
-                  style: TextStyle(fontSize: 11, color: scheme.outline),
-                ),
-              ],
-              if (_fieldError != null) ...[
-                const SizedBox(height: 8),
-                Text(_fieldError!,
-                    style: TextStyle(fontSize: 12, color: scheme.error)),
-              ],
-              const SizedBox(height: 16),
-              _buildTestButton(scheme),
-              if (_testOkMessage != null) ...[
-                const SizedBox(height: 8),
-                _resultRow(Icons.check_circle_rounded,
-                    Colors.green.shade600, _testOkMessage!),
-              ],
-              if (_testErrMessage != null) ...[
-                const SizedBox(height: 8),
-                _resultRow(Icons.error_rounded, scheme.error, _testErrMessage!),
-              ],
             ],
           ),
         ),
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.of(context).pop(),
-          child: Text('取消',
-              style: TextStyle(color: scheme.onSurfaceVariant)),
+        const SizedBox(height: 6),
+        Text('地址不要带 http:// 前缀，填「主机:端口」即可',
+            style: TextStyle(fontSize: 11, color: scheme.outline)),
+        const SizedBox(height: 14),
+        TextField(
+          controller: _apiKeyCtrl,
+          obscureText: _obscureKey,
+          textInputAction: TextInputAction.done,
+          autocorrect: false,
+          enableSuggestions: false,
+          decoration: InputDecoration(
+            labelText: 'API Key（密钥）',
+            hintText: 'Emby 控制台 API Key',
+            prefixIcon: const Icon(Icons.key_rounded, size: 20),
+            border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+            isDense: true,
+            suffixIcon: IconButton(
+              icon: Icon(
+                  _obscureKey
+                      ? Icons.visibility_off_outlined
+                      : Icons.visibility_outlined,
+                  size: 20),
+              onPressed: () => setState(() => _obscureKey = !_obscureKey),
+            ),
+          ),
         ),
-        FilledButton(
-          onPressed: _submit,
-          style: FilledButton.styleFrom(
-              shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(8))),
-          child: const Text('保存'),
-        ),
+        if (widget.existing?.userId != null &&
+            (widget.existing?.userId ?? '').isNotEmpty) ...[
+          const SizedBox(height: 8),
+          Text('已缓存用户 ID，修改地址或密钥后将自动重新获取',
+              style: TextStyle(fontSize: 11, color: scheme.outline)),
+        ],
+        if (_fieldError != null) ...[
+          const SizedBox(height: 10),
+          Text(_fieldError!,
+              style: TextStyle(fontSize: 12, color: scheme.error)),
+        ],
       ],
+      footer: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          if (_testOkMessage != null) ...[
+            _resultRow(Icons.check_circle_rounded, Colors.green.shade600,
+                _testOkMessage!),
+            const SizedBox(height: 8),
+          ],
+          if (_testErrMessage != null) ...[
+            _resultRow(Icons.error_rounded, scheme.error, _testErrMessage!),
+            const SizedBox(height: 8),
+          ],
+          _buildTestButton(scheme),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              Expanded(
+                child: FilledButton.tonal(
+                  onPressed: () => Navigator.of(context).pop(),
+                  style: FilledButton.styleFrom(
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10)),
+                  ),
+                  child: const Text('取消'),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: FilledButton(
+                  onPressed: _submit,
+                  style: FilledButton.styleFrom(
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10)),
+                  ),
+                  child: const Text('保存'),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
     );
   }
 
@@ -224,7 +273,8 @@ class _EmbyServerEditDialogState extends State<EmbyServerEditDialog> {
       style: OutlinedButton.styleFrom(
         foregroundColor: scheme.primary,
         side: BorderSide(color: scheme.primary.withOpacity(0.5)),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+        padding: const EdgeInsets.symmetric(vertical: 12),
       ),
       icon: _testing
           ? const SizedBox(
@@ -251,14 +301,17 @@ class _EmbyServerEditDialogState extends State<EmbyServerEditDialog> {
   }
 }
 
-/// 便捷入口：弹出服务器编辑对话框，保存成功后执行 [onSaved]。
+/// 便捷入口：以底部表单弹出服务器编辑，保存成功后执行 [onSaved]。
 Future<void> showEmbyServerEditDialog(
   BuildContext context, {
   EmbyServerConfig? existing,
   required void Function(EmbyServerConfig draft) onSaved,
 }) async {
-  final draft = await showDialog<EmbyServerConfig>(
+  final draft = await showModalBottomSheet<EmbyServerConfig>(
     context: context,
+    isScrollControlled: true,
+    useSafeArea: true,
+    backgroundColor: Colors.transparent,
     builder: (_) => EmbyServerEditDialog(existing: existing),
   );
   if (draft != null) onSaved(draft);

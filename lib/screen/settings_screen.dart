@@ -15,6 +15,7 @@ import 'package:alist/util/constant.dart';
 import 'package:alist/util/emby_config_manager.dart';
 import 'package:alist/util/global.dart';
 import 'package:alist/util/security_lock_controller.dart';
+import 'package:alist/util/settings_backup.dart';
 import 'package:alist/util/subtitle/subtitle_matcher.dart';
 import 'package:alist/util/subtitle/subtitle_settings.dart';
 import 'package:alist/util/log_utils.dart';
@@ -128,11 +129,23 @@ class _SettingsScreenState extends State<SettingsScreen> {
               onPressed: _exitSearch,
               child: const Text('取消', style: TextStyle(fontSize: 15)),
             )
-          else
+          else ...[
             IconButton(
+              tooltip: '导出配置（JSON 备份）',
+              icon: const Icon(Icons.file_download_outlined),
+              onPressed: () => exportSettings(context),
+            ),
+            IconButton(
+              tooltip: '导入配置（从备份恢复）',
+              icon: const Icon(Icons.file_upload_outlined),
+              onPressed: () => importSettings(context),
+            ),
+            IconButton(
+              tooltip: '搜索设置',
               icon: const Icon(Icons.search_rounded),
               onPressed: _enterSearch,
             ),
+          ],
         ],
         body: _SettingsContainer(searchQuery: _searchQuery.value),
       );

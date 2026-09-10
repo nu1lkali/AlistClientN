@@ -2,7 +2,7 @@ import 'package:alist/entity/emby_config.dart';
 import 'package:alist/util/emby_config_manager.dart';
 import 'package:flutter/material.dart';
 
-/// 弹出“每次随机数量”设置对话框（滑块 + 数字显示，1~50）。
+/// 弹出“每次随机数量”设置对话框（滑块 + 数字显示，1~100）。
 Future<void> showEmbyLimitDialog(BuildContext context) async {
   final scheme = Theme.of(context).colorScheme;
   await showDialog<void>(
@@ -123,7 +123,7 @@ const String _helpContent = '''
 支持维护多个媒体库并添加备注，点击列表项选择“当前要参与随机播放的目标媒体库”。
 
 【三、每次随机数量】
-在「Emby 随机播放」分组中点击「每次随机数量」，可设置 1~50 个（默认 10 个）。
+在「Emby 随机播放」分组中点击「每次随机数量」，可设置 1~100 个（默认 10 个）。
 
 【四、开始随机播放】
 回到首页（文件列表页），点击右上角「随机播放」图标按钮：
@@ -133,6 +133,6 @@ const String _helpContent = '''
 · 成功后自动进入“视界流”开始播放；失败会弹出友好提示。
 
 【注意事项】
-· 播放使用 Emby 静态直链（…/Videos/{id}/stream），需保证手机与 Emby 服务器网络可达；
+· 播放使用 Emby 静态直链（…/Videos/{id}/stream），需保证此应用与 Emby 服务器网络可达；
 · https 若使用自签名证书可能导致播放失败，建议使用有效证书或改用 http。
 ''';
