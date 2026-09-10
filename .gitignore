@@ -122,3 +122,4 @@ windows/**/*.[Cc]ache
 .history/
 .svn/
 .FullName
+cs.py
