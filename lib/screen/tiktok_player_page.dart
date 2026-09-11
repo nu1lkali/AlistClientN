@@ -8,7 +8,10 @@ import 'package:alist/database/table/disliked_video.dart';
 import 'package:alist/database/table/favorite.dart';
 import 'package:alist/util/favorite_helper.dart';
 import 'package:alist/database/table/file_viewing_record.dart';
+import 'package:alist/entity/emby_config.dart';
 import 'package:alist/entity/tiktok_play_list_model.dart';
+import 'package:alist/net/emby_api.dart';
+import 'package:alist/util/emby_config_manager.dart';
 import 'package:alist/util/file_title.dart';
 import 'package:alist/util/constant.dart';
 import 'package:alist/util/file_utils.dart';
@@ -66,6 +69,13 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
 
   final Map<int, bool> _pendingFav = {};
   final Map<int, bool> _pendingDislike = {};
+
+  // ── Emby 收藏 / 不喜欢（fromEmby 入口）：进入时一次性拉取，O(1) 查询 ──
+  final Set<String> _embyFavoriteIds = {};
+  final Set<String> _embyDislikeIds = {}; // 本地“不喜欢”标记的 Emby itemId
+  bool _embyFavLoaded = false;
+  final Set<int> _embyFavBusy = {}; // 正在请求的索引（点击防抖，收藏/踩共用）
+  EmbyServerConfig? _embyServer;
 
   Duration _pos = Duration.zero;
   Duration _dur = Duration.zero;
@@ -275,6 +285,7 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
     _safeInitCtrl(_currentIndex);
     _preloadNearby(_currentIndex);
     _loadStates(_currentIndex);
+    if (_playList.fromEmby) _loadEmbyFavorites();
     _startTimer();
   }
 
@@ -411,6 +422,12 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
   // ═══════════════ State Query ═══════════════
   Future<void> _loadStates(int idx) async {
     if (idx < 0 || idx >= _playList.videos.length || !mounted) return;
+    // Emby 来源的收藏 / 不喜欢状态由内存集合统一维护（不查 AList 本地库）
+    if (_playList.fromEmby) {
+      _applyEmbyState(idx);
+      if (mounted) setState(() {});
+      return;
+    }
     try {
       final v = _playList.videos[idx];
       final u = _userController.user.value;
@@ -418,6 +435,183 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
       v.isDisliked = (await _database.dislikedVideoDao.findByPath(u.serverUrl, u.username, v.filePath)) != null;
       if (mounted) setState(() {});
     } catch (_) {}
+  }
+
+  // ═══════════════ Emby Favorite / Dislike ═══════════════
+
+  /// 把内存中的收藏 / 不喜欢集合同步到某个视频项的 UI 状态（O(1)）。
+  void _applyEmbyState(int idx) {
+    if (idx < 0 || idx >= _playList.videos.length) return;
+    final v = _playList.videos[idx];
+    final id = v.embyItemId;
+    if (id == null || id.isEmpty) return;
+    // 收藏集合尚未加载完成时不改写，避免把乐观更新/未知状态清零
+    if (!_embyFavLoaded) return;
+    v.isLiked = _embyFavoriteIds.contains(id);
+    v.isDisliked = _embyDislikeIds.contains(id);
+  }
+
+  /// 进入播放器时只请求一次收藏 Id；同时从本地库读取 Emby 不喜欢标记。
+  ///
+  /// 之后切换视频时通过 set 查询状态（O(1)），避免逐条请求打爆服务器。
+  Future<void> _loadEmbyFavorites() async {
+    final server = _embyServer ?? EmbyConfigManager.selectedServer;
+    if (server == null || !server.isValid) return;
+    _embyServer = server;
+    try {
+      // 本地“不喜欢”记录（纯本地查询，无网络开销）
+      await _loadEmbyDislikeIds(server);
+      final ids = await EmbyApi.fetchFavoriteIds(server);
+      if (!mounted) return;
+      _embyFavoriteIds
+        ..clear()
+        ..addAll(ids);
+      _embyFavLoaded = true;
+      _applyEmbyState(_currentIndex);
+      if (mounted) setState(() {});
+    } catch (e) {
+      // 收藏状态拉取失败不影响播放，仅记录
+      log.Log.e('loadEmbyFavorites: $e');
+    }
+  }
+
+  /// 读取本地 disliked_video 表中该 Emby 服务器的不喜欢记录（provider='Emby'）。
+  Future<void> _loadEmbyDislikeIds(EmbyServerConfig server) async {
+    try {
+      final rows = await _database.dislikedVideoDao
+          .list(server.id, EmbyDislikeMark.userId)
+          .first;
+      _embyDislikeIds
+        ..clear()
+        ..addAll((rows ?? []).map((e) => e.remotePath));
+    } catch (e) {
+      log.Log.e('loadEmbyDislikeIds: $e');
+    }
+  }
+
+  /// Emby 收藏切换（爱心）：乐观更新 → 调接口 → 用服务端状态校正；失败回滚。
+  Future<void> _toggleEmbyFavorite() async {
+    final idx = _currentIndex;
+    if (idx < 0 || idx >= _playList.videos.length) return;
+    final v = _playList.videos[idx];
+    final itemId = v.embyItemId;
+    if (itemId == null || itemId.isEmpty) return;
+    if (_embyFavBusy.contains(idx)) return; // 防抖：同一条目请求未回来前忽略重复点击
+
+    final server = _embyServer ?? EmbyConfigManager.selectedServer;
+    if (server == null || !server.isValid) return;
+
+    final target = !v.isLiked; // 目标状态
+    _embyFavBusy.add(idx);
+    // 乐观更新
+    v.isLiked = target;
+    if (target) _embyFavoriteIds.add(itemId);
+    if (mounted) setState(() {});
+    try {
+      final confirmed = await EmbyApi.setFavorite(server, itemId,
+          favorite: target);
+      if (confirmed) {
+        _embyFavoriteIds.add(itemId);
+      } else {
+        _embyFavoriteIds.remove(itemId);
+      }
+      v.isLiked = confirmed;
+      if (mounted) setState(() {});
+    } on EmbyApiException catch (e) {
+      // 回滚
+      v.isLiked = !target;
+      if (target) {
+        _embyFavoriteIds.remove(itemId);
+      } else {
+        _embyFavoriteIds.add(itemId);
+      }
+      if (mounted) {
+        setState(() {});
+        SmartDialog.showToast(e.message);
+      }
+    } catch (e) {
+      v.isLiked = !target;
+      if (target) {
+        _embyFavoriteIds.remove(itemId);
+      } else {
+        _embyFavoriteIds.add(itemId);
+      }
+      if (mounted) {
+        setState(() {});
+        SmartDialog.showToast('操作失败：$e');
+      }
+    } finally {
+      _embyFavBusy.remove(idx);
+    }
+  }
+
+  /// Emby “踩”（不喜欢）：写入/移除本地的“不喜欢列表”记录（不请求服务器）。
+  ///
+  /// 与收藏互斥：踩下时若已收藏，会同步取消 Emby 收藏。
+  /// 真正的“删除媒体”动作在「不喜欢列表」中执行（DELETE /Items?Ids=）。
+  Future<void> _toggleEmbyDislike() async {
+    final idx = _currentIndex;
+    if (idx < 0 || idx >= _playList.videos.length) return;
+    final v = _playList.videos[idx];
+    final itemId = v.embyItemId;
+    if (itemId == null || itemId.isEmpty) return;
+    if (_embyFavBusy.contains(idx)) return; // 防抖（与收藏共用）
+
+    final server = _embyServer ?? EmbyConfigManager.selectedServer;
+    if (server == null || !server.isValid) return;
+
+    final target = !v.isDisliked;
+    _embyFavBusy.add(idx);
+    try {
+      if (target) {
+        // 与收藏互斥：踩下时取消 Emby 收藏
+        if (v.isLiked) {
+          v.isLiked = false;
+          _embyFavoriteIds.remove(itemId);
+          try {
+            await EmbyApi.setFavorite(server, itemId, favorite: false);
+          } catch (e) {
+            log.Log.e('unfavorite-on-dislike: $e');
+          }
+        }
+        // 写本地不喜欢记录（provider 标记 Emby 来源，remote_path 存 itemId）
+        final exists = await _database.dislikedVideoDao
+            .findByPath(server.id, EmbyDislikeMark.userId, itemId);
+        if (exists == null) {
+          await _database.dislikedVideoDao.insertRecord(DislikedVideo(
+            serverUrl: server.id,
+            userId: EmbyDislikeMark.userId,
+            remotePath: itemId,
+            name: v.fileName,
+            path: v.fileName,
+            size: v.fileSize ?? 0,
+            sign: null,
+            thumb: v.thumb,
+            modified: v.modifiedMilliseconds ?? 0,
+            provider: EmbyDislikeMark.provider,
+            createTime: DateTime.now().millisecondsSinceEpoch,
+          ));
+        }
+        _embyDislikeIds.add(itemId);
+        v.isDisliked = true;
+      } else {
+        await _database.dislikedVideoDao
+            .deleteByPath(server.id, EmbyDislikeMark.userId, itemId);
+        _embyDislikeIds.remove(itemId);
+        v.isDisliked = false;
+      }
+      if (mounted) setState(() {});
+      SmartDialog.showToast(target ? '已加入不喜欢列表' : '已取消不喜欢');
+    } catch (e) {
+      // 回滚
+      v.isDisliked = !target;
+      if (mounted) {
+        setState(() {});
+        SmartDialog.showToast('操作失败：$e');
+      }
+    } finally {
+      _embyFavBusy.remove(idx);
+    }
   }
 
   Future<void> _recordViewing(int idx) async {
@@ -580,8 +774,12 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
 
   // ═══════════════ Gesture: Single Tap (immediate) + Double Tap ═══════════════
   void _onDoubleTap(TapDownDetails d) {
-    // Emby 随机播放来源无 AList 账号可收藏，双击仅作播放暂停外的轻量反馈（不触发点赞）
-    if (_playList.fromEmby) return;
+    // Emby 来源：双击 = 爱心特效 + 切换 Emby 收藏
+    if (_playList.fromEmby) {
+      if (mounted) setState(() => _doubleTapIcons.add(d.globalPosition));
+      _toggleEmbyFavorite();
+      return;
+    }
     if (mounted) setState(() => _doubleTapIcons.add(d.globalPosition));
     final v = _playList.videos[_currentIndex];
     v.isLiked = !v.isLiked;
@@ -653,6 +851,11 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
   }
 
   void _toggleLike() {
+    // Emby 来源：爱心按钮走 Emby 收藏接口
+    if (_playList.fromEmby) {
+      _toggleEmbyFavorite();
+      return;
+    }
     final v = _playList.videos[_currentIndex];
     v.isLiked = !v.isLiked;
     if (v.isLiked && v.isDisliked) v.isDisliked = false;
@@ -662,6 +865,11 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
   }
 
   void _toggleDislike() {
+    // Emby 来源：踩 = 写入本地“不喜欢列表”（与 Emby 收藏互斥）
+    if (_playList.fromEmby) {
+      _toggleEmbyDislike();
+      return;
+    }
     final v = _playList.videos[_currentIndex];
     v.isDisliked = !v.isDisliked;
     if (v.isDisliked && v.isLiked) v.isLiked = false;
@@ -977,7 +1185,8 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
     final bottomOffset = _isLandscape ? (bottomPad + 70) : 160.0;
     final maxH = screenH - topPad - bottomOffset - 20;
 
-    // 依当前状态收集按钮（Emby 来源隐藏收藏/踩），按钮间固定间距、底部紧凑排列
+    // 依当前状态收集按钮（Emby 来源：爱心=Emby 收藏接口、踩=加入本地“不喜欢列表”），
+    // 按钮间固定间距、底部紧凑排列
     final buttons = <Widget>[];
     if (_isLandscape) {
       buttons.add(_btn(
@@ -986,7 +1195,19 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
           color: Colors.white,
           onTap: _togglePlayPause));
     }
-    if (!_playList.fromEmby) {
+    if (_playList.fromEmby) {
+      // Emby 入口：爱心=Emby 收藏接口；踩=加入本地“不喜欢列表”（删除动作在列表内）
+      buttons.add(_btn(
+          icon: v.isLiked ? Icons.favorite : Icons.favorite_border,
+          label: v.isLiked ? '已收藏' : '收藏',
+          color: v.isLiked ? Colors.red : Colors.white,
+          onTap: _toggleEmbyFavorite));
+      buttons.add(_btn(
+          icon: v.isDisliked ? Icons.thumb_down : Icons.thumb_down_outlined,
+          label: v.isDisliked ? '已踩' : '踩',
+          color: v.isDisliked ? Colors.blue : Colors.white,
+          onTap: _toggleEmbyDislike));
+    } else {
       buttons.add(_btn(
           icon: v.isLiked ? Icons.favorite : Icons.favorite_border,
           label: v.isLiked ? '已收藏' : '收藏',

@@ -192,6 +192,92 @@ Future<void> startEmbyRandomPlayWithLibraryPick(BuildContext context) async {
   await startEmbyRandomPlay(context);
 }
 
+/// 首页「随机播放收藏」：从 Emby 收藏中随机抽取一批视频进入“视界流”。
+///
+/// GET /Users/{userId}/Items?Filters=IsFavorite&SortBy=Random&Recursive=true
+///   &IncludeItemTypes=Video,Movie&Limit={limit}
+/// 收藏为空或请求失败时以 SnackBar 友好提示。
+Future<void> startEmbyFavoriteRandomPlay(BuildContext context) async {
+  final server = EmbyConfigManager.selectedServer;
+  if (server == null || !server.isValid) {
+    _showSnack(context,
+        '请先在「设置 → Emby 随机播放 → 服务器管理」配置并选中主服务器');
+    return;
+  }
+
+  // 加载提示框
+  showDialog<void>(
+    context: context,
+    barrierDismissible: false,
+    builder: (_) => WillPopScope(
+      onWillPop: () async => false,
+      child: AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const SizedBox(
+              width: 28,
+              height: 28,
+              child: CircularProgressIndicator(strokeWidth: 3),
+            ),
+            const SizedBox(height: 18),
+            const Text('正在随机抽取收藏视频...',
+                style: TextStyle(fontSize: 15, fontWeight: FontWeight.w500)),
+            const SizedBox(height: 8),
+            Text(
+                server.remark.isNotEmpty ? server.remark : server.serverOrigin,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                    fontSize: 12,
+                    color: Theme.of(context).colorScheme.outline)),
+          ],
+        ),
+      ),
+    ),
+  );
+
+  List<TikTokVideoItem>? videos;
+  String? errorText;
+  try {
+    videos = await EmbyApi.fetchFavoriteVideos(server: server);
+  } on EmbyApiException catch (e) {
+    errorText = e.message;
+  } catch (e) {
+    errorText = '随机播放收藏失败：$e';
+  }
+
+  // 关闭加载框
+  if (context.mounted) {
+    Navigator.of(context, rootNavigator: true).pop();
+  }
+
+  if (errorText != null) {
+    if (context.mounted) _showSnack(context, errorText);
+    return;
+  }
+
+  final list = videos ?? const <TikTokVideoItem>[];
+  if (list.isEmpty) {
+    if (context.mounted) {
+      _showSnack(context, '收藏列表为空，请先在 Emby 中收藏一些视频');
+    }
+    return;
+  }
+
+  Get.toNamed(
+    NamedRouter.tiktokPlayer,
+    arguments: TikTokPlayListModel(
+      videos: list,
+      initialIndex: 0,
+      recordHistory: false,
+      fromEmby: true,
+    ),
+  );
+}
+
 Widget _libraryRadio(
   EmbyLibraryConfig lib,
   String Function() groupValue,

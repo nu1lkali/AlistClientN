@@ -1612,6 +1612,12 @@ class _FileListScreenState extends State<FileListScreen>
                     onPressed: () => startEmbyRandomPlay(context),
                   ),
                 ),
+              // Emby 随机播放收藏（从收藏中随机抽取）
+              if (path == '/')
+                IconButton(
+                  icon: const Icon(Icons.favorite_rounded),
+                  onPressed: () => startEmbyFavoriteRandomPlay(context),
+                ),
               // ⋮ 菜单保持不动
               _menuMoreIcon(),
             ],

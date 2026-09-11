@@ -15,6 +15,20 @@ class EmbyApiException implements Exception {
   String toString() => message;
 }
 
+/// “不喜欢列表”中标记 Emby 来源记录时使用的占位值。
+///
+/// 复用 disliked_video 表的既有列（不新增列、无需数据库迁移）：
+/// - provider = [provider] 标记为 Emby 来源；
+/// - server_url 存 Emby 服务器配置 id；
+/// - user_id = [userId] 占位（与 AList 用户名区分）；
+/// - remote_path 存 Emby 媒体项 Id。
+class EmbyDislikeMark {
+  EmbyDislikeMark._();
+
+  static const String provider = 'Emby';
+  static const String userId = 'emby';
+}
+
 /// Emby 媒体库条目（来自 GET /Users/{userId}/Views）。
 class EmbyMediaLibrary {
   final String id;
@@ -38,7 +52,7 @@ class EmbyMediaLibrary {
   }
 }
 
-/// Emby API 网络层（对标 cs.py）。
+/// Emby API 网络层（对标 cs.py / emby.py）。
 ///
 /// 特点：
 /// - 每次请求前实时读取传入的服务器配置（protocol/baseUrl/apiKey），
@@ -47,6 +61,9 @@ class EmbyMediaLibrary {
 /// - GET /Users/{userId}/Items 携带选中媒体库 parentId 随机抽取；
 /// - GET /Users/{userId}/Views 拉取全部媒体库（供设置页选择，无需手工查 Id）；
 /// - GET /Users/{userId}/Items/{itemId} 按媒体库 Id 反查名称；
+/// - GET /Users/{userId}/Items?Filters=IsFavorite 一次拉取全部收藏 Id（O(1) 状态查询）；
+/// - POST / DELETE /Users/{userId}/FavoriteItems/{itemId} 收藏 / 取消收藏；
+/// - DELETE /Items/{itemId} 删除媒体（媒体库 + 物理文件，需管理员权限）；
 /// - 为每个 Item 拼接 {protocol}://{baseUrl}/Videos/{id}/stream 播放直链。
 class EmbyApi {
   EmbyApi._();
@@ -54,11 +71,17 @@ class EmbyApi {
   static const Duration _connectTimeout = Duration(seconds: 10);
   static const Duration _receiveTimeout = Duration(seconds: 20);
 
+  /// 收藏 Id 查询的分页大小
+  static const int _favoritePageSize = 500;
+
   static Dio _newDio() => Dio(BaseOptions(
         connectTimeout: _connectTimeout,
         receiveTimeout: _receiveTimeout,
         responseType: ResponseType.json,
       ));
+
+  static Options _authOptions(String apiKey) =>
+      Options(headers: {'X-Emby-Token': apiKey});
 
   /// 服务器连通性测试：向 Emby 发起 GET /Users。
   ///
@@ -69,7 +92,7 @@ class EmbyApi {
     try {
       final resp = await _newDio().get<dynamic>(
         url,
-        options: Options(headers: {'X-Emby-Token': server.apiKey}),
+        options: _authOptions(server.apiKey),
       );
       final data = resp.data;
       final users = (data is List) ? data : <dynamic>[];
@@ -99,9 +122,7 @@ class EmbyApi {
     required EmbyLibraryConfig library,
     int? limit,
   }) async {
-    final count =
-        (limit ?? EmbyConfigManager.randomLimit).clamp(
-            EmbyRandomSettings.minLimit, EmbyRandomSettings.maxLimit);
+    final count = _clampLimit(limit);
     final origin = server.serverOrigin;
     final dio = _newDio();
 
@@ -109,13 +130,18 @@ class EmbyApi {
     final userId = await _ensureUserId(dio, server);
 
     // 第二步：随机拉取媒体库视频
-    final items = await _fetchRandomItems(
+    final items = await _fetchItems(
       dio,
-      origin: origin,
-      apiKey: server.apiKey,
+      server: server,
       userId: userId,
-      parentId: library.parentId,
-      limit: count,
+      queryParameters: {
+        'ParentId': library.parentId,
+        'SortBy': 'Random',
+        'Recursive': 'true',
+        'IncludeItemTypes': 'Video,Movie',
+        'Fields': 'Path,Overview,MediaSources',
+        'Limit': count,
+      },
     );
     if (items.isEmpty) {
       throw EmbyApiException(
@@ -124,21 +150,202 @@ class EmbyApi {
     }
 
     // 第三步：拼接播放直链并构造播放器数据
-    return items.map((item) {
-      final itemId = item['Id']?.toString() ?? '';
-      final name = item['Name']?.toString() ?? '未命名视频';
-      final streamUrl = _buildStreamUrl(origin, itemId, server.apiKey);
-      return TikTokVideoItem(
-        id: streamUrl,
-        fileName: name,
-        videoUrl: streamUrl,
-        filePath: name,
-        thumb: _buildPrimaryImageUrl(origin, itemId, server.apiKey),
-        provider: null,
-        modifiedMilliseconds: null,
-      );
-    }).toList();
+    return items
+        .map((item) => _toVideoItem(item, origin, server.apiKey))
+        .toList();
   }
+
+  /// 收藏视频随机列表（首页“随机播放收藏”）。
+  ///
+  /// GET /Users/{userId}/Items?Filters=IsFavorite&SortBy=Random&Recursive=true
+  ///   &IncludeItemTypes=Video,Movie&Limit={limit}
+  /// 失败抛出 [EmbyApiException]（调用方据此提示）。
+  static Future<List<TikTokVideoItem>> fetchFavoriteVideos({
+    required EmbyServerConfig server,
+    int? limit,
+  }) async {
+    final count = _clampLimit(limit);
+    final origin = server.serverOrigin;
+    final dio = _newDio();
+    final userId = await _ensureUserId(dio, server);
+
+    final items = await _fetchItems(
+      dio,
+      server: server,
+      userId: userId,
+      queryParameters: {
+        'Filters': 'IsFavorite',
+        'SortBy': 'Random',
+        'Recursive': 'true',
+        'IncludeItemTypes': 'Video,Movie',
+        'Fields': 'Path,Overview,MediaSources',
+        'Limit': count,
+      },
+    );
+    return items
+        .map((item) => _toVideoItem(item, origin, server.apiKey))
+        .toList();
+  }
+
+  /// 一次性拉取当前用户的全部收藏媒体 Id（GET /Users/{userId}/Items?Filters=IsFavorite）。
+  ///
+  /// 供“视界流”进入时构建 HashSet 做 **O(1)** 收藏状态查询，
+  /// 避免为队列中每个视频单独请求（打爆服务器）。内部自动分页。
+  /// 失败抛出 [EmbyApiException]。
+  static Future<Set<String>> fetchFavoriteIds(EmbyServerConfig server) async {
+    final dio = _newDio();
+    final userId = await _ensureUserId(dio, server);
+    final url = '${server.serverOrigin}/Users/$userId/Items';
+    final ids = <String>{};
+    var startIndex = 0;
+
+    while (true) {
+      final Map<String, dynamic> data;
+      try {
+        final resp = await dio.get<dynamic>(
+          url,
+          queryParameters: {
+            'Filters': 'IsFavorite',
+            'Recursive': 'true',
+            'IncludeItemTypes': 'Video,Movie',
+            'Fields': 'Id',
+            'StartIndex': startIndex,
+            'Limit': _favoritePageSize,
+            'SortBy': 'SortName',
+          },
+          options: _authOptions(server.apiKey),
+        );
+        data = (resp.data is Map)
+            ? Map<String, dynamic>.from(resp.data as Map)
+            : <String, dynamic>{};
+      } on DioException catch (e) {
+        throw EmbyApiException(_describeDioError(e, url, isUsersPath: false));
+      }
+
+      final rawItems = data['Items'];
+      final items =
+          (rawItems is List) ? rawItems.whereType<Map>().toList() : <Map>[];
+      for (final item in items) {
+        final id = item['Id']?.toString() ?? '';
+        if (id.isNotEmpty) ids.add(id);
+      }
+
+      final total = (data['TotalRecordCount'] is int)
+          ? data['TotalRecordCount'] as int
+          : ids.length;
+      startIndex += items.length;
+      if (items.isEmpty ||
+          items.length < _favoritePageSize ||
+          startIndex >= total) {
+        break;
+      }
+    }
+    return ids;
+  }
+
+  /// 收藏 / 取消收藏（POST 或 DELETE /Users/{userId}/FavoriteItems/{itemId}）。
+  ///
+  /// 返回服务端确认后的 `IsFavorite`（响应体为 UserData，或包裹在 UserData 字段中）；
+  /// 服务端未回显状态时按请求意图返回。失败抛出 [EmbyApiException]。
+  static Future<bool> setFavorite(
+    EmbyServerConfig server,
+    String itemId, {
+    required bool favorite,
+  }) async {
+    final dio = _newDio();
+    final userId = await _ensureUserId(dio, server);
+    final encodedId = Uri.encodeComponent(itemId);
+    final url = '${server.serverOrigin}/Users/$userId/FavoriteItems/$encodedId';
+    try {
+      final resp = favorite
+          ? await dio.post<dynamic>(url, options: _authOptions(server.apiKey))
+          : await dio.delete<dynamic>(url, options: _authOptions(server.apiKey));
+      final data = resp.data;
+      if (data is Map) {
+        if (data['IsFavorite'] is bool) {
+          return data['IsFavorite'] as bool;
+        }
+        final userData = data['UserData'];
+        if (userData is Map && userData['IsFavorite'] is bool) {
+          return userData['IsFavorite'] as bool;
+        }
+      }
+      return favorite; // 服务端未回显状态时按请求意图
+    } on DioException catch (e) {
+      throw EmbyApiException(_describeDioError(e, url, isUsersPath: false));
+    }
+  }
+
+  /// 批量删除媒体项：`DELETE /Items?Ids={id1,id2,...}`（官方 deleteItems 接口）。
+  ///
+  /// 从媒体库移除并删除服务器磁盘文件；需要**管理员权限**的 API Key，
+  /// 否则服务端返回 403。失败抛出 [EmbyApiException]（消息面向用户）。
+  static Future<void> deleteItems(
+      EmbyServerConfig server, List<String> itemIds) async {
+    if (itemIds.isEmpty) return;
+    final dio = _newDio();
+    final url = '${server.serverOrigin}/Items';
+    try {
+      final resp = await dio.delete<dynamic>(
+        url,
+        queryParameters: {'Ids': itemIds.join(',')},
+        options: _authOptions(server.apiKey),
+      );
+      final code = resp.statusCode ?? 200;
+      if (code >= 400) {
+        throw EmbyApiException('删除失败：HTTP $code');
+      }
+    } on DioException catch (e) {
+      if (e.response?.statusCode == 404) {
+        // 兼容：部分版本不支持批量接口，单条时回退 DELETE /Items/{Id}
+        if (itemIds.length == 1) {
+          await _deleteItemByPath(server, itemIds.first);
+          return;
+        }
+        throw EmbyApiException(
+            '删除失败（404）：未找到删除接口或媒体项，请确认服务器版本与媒体 Id');
+      }
+      throw EmbyApiException(_describeDeleteError(e, url));
+    }
+  }
+
+  /// 删除单个媒体项（[deleteItems] 的单条包装）。
+  static Future<void> deleteItem(EmbyServerConfig server, String itemId) =>
+      deleteItems(server, [itemId]);
+
+  /// 单条删除的兼容路径：`DELETE /Items/{itemId}`。
+  static Future<void> _deleteItemByPath(
+      EmbyServerConfig server, String itemId) async {
+    final dio = _newDio();
+    final encodedId = Uri.encodeComponent(itemId);
+    final url = '${server.serverOrigin}/Items/$encodedId';
+    try {
+      final resp =
+          await dio.delete<dynamic>(url, options: _authOptions(server.apiKey));
+      final code = resp.statusCode ?? 204;
+      if (code >= 400) {
+        throw EmbyApiException('删除失败：HTTP $code');
+      }
+    } on DioException catch (e) {
+      throw EmbyApiException(_describeDeleteError(e, url));
+    }
+  }
+
+  /// 删除接口的错误描述（403 权限 / 401 鉴权优先提示）。
+  static String _describeDeleteError(DioException e, String url) {
+    final code = e.response?.statusCode;
+    if (code == 403) {
+      return '权限不足（403）：删除媒体需要管理员权限的 API Key，请在 Emby 后台检查该密钥权限';
+    }
+    if (code == 401) {
+      return '鉴权失败（401）：API Key 无效，请在服务器配置中检查密钥';
+    }
+    return _describeDioError(e, url, isUsersPath: false);
+  }
+
+  /// 公开的播放直链拼接（供“不喜欢列表”等处以 Emby 条目直接播放）。
+  static String buildStreamUrl(EmbyServerConfig server, String itemId) =>
+      _buildStreamUrl(server.serverOrigin, itemId, server.apiKey);
 
   /// 拉取当前用户可见的全部媒体库（GET /Users/{userId}/Views）。
   ///
@@ -153,7 +360,7 @@ class EmbyApi {
     try {
       final resp = await dio.get<dynamic>(
         url,
-        options: Options(headers: {'X-Emby-Token': server.apiKey}),
+        options: _authOptions(server.apiKey),
       );
       final data = resp.data;
       if (data is Map && data['Items'] is List) {
@@ -182,7 +389,7 @@ class EmbyApi {
     try {
       final resp = await dio.get<dynamic>(
         url,
-        options: Options(headers: {'X-Emby-Token': server.apiKey}),
+        options: _authOptions(server.apiKey),
       );
       final data = resp.data;
       if (data is Map && data['Name'] != null) {
@@ -192,6 +399,54 @@ class EmbyApi {
     } on DioException catch (e) {
       throw EmbyApiException(_describeDioError(e, url, isUsersPath: false));
     }
+  }
+
+  // ───────────────────── 内部工具 ─────────────────────
+
+  static int _clampLimit(int? limit) =>
+      (limit ?? EmbyConfigManager.randomLimit)
+          .clamp(EmbyRandomSettings.minLimit, EmbyRandomSettings.maxLimit);
+
+  /// 统一的 Items 查询（返回 Items 数组）。
+  static Future<List<Map>> _fetchItems(
+    Dio dio, {
+    required EmbyServerConfig server,
+    required String userId,
+    required Map<String, dynamic> queryParameters,
+  }) async {
+    final url = '${server.serverOrigin}/Users/$userId/Items';
+    try {
+      final resp = await dio.get<dynamic>(
+        url,
+        queryParameters: queryParameters,
+        options: _authOptions(server.apiKey),
+      );
+      final data = resp.data;
+      if (data is Map && data['Items'] is List) {
+        return (data['Items'] as List).whereType<Map>().toList();
+      }
+      throw EmbyApiException('服务器返回的数据格式异常（缺少 Items 字段）');
+    } on DioException catch (e) {
+      throw EmbyApiException(_describeDioError(e, url, isUsersPath: false));
+    }
+  }
+
+  /// Emby Item → 播放器数据（直链 + 封面 + Emby itemId，供收藏接口使用）。
+  static TikTokVideoItem _toVideoItem(
+      Map item, String origin, String apiKey) {
+    final itemId = item['Id']?.toString() ?? '';
+    final name = item['Name']?.toString() ?? '未命名视频';
+    final streamUrl = _buildStreamUrl(origin, itemId, apiKey);
+    return TikTokVideoItem(
+      id: streamUrl,
+      fileName: name,
+      videoUrl: streamUrl,
+      filePath: name,
+      thumb: _buildPrimaryImageUrl(origin, itemId, apiKey),
+      embyItemId: itemId.isEmpty ? null : itemId,
+      provider: null,
+      modifiedMilliseconds: null,
+    );
   }
 
   /// 确保拿到 userId：有缓存直接返回；无缓存则 GET /Users 取列表第一个 Id 并回写缓存。
@@ -213,7 +468,7 @@ class EmbyApi {
     try {
       final resp = await dio.get<dynamic>(
         url,
-        options: Options(headers: {'X-Emby-Token': apiKey}),
+        options: _authOptions(apiKey),
       );
       final data = resp.data;
       final users = (data is List) ? data : <dynamic>[];
@@ -227,40 +482,6 @@ class EmbyApi {
       throw EmbyApiException('服务器（$origin）返回的用户数据缺少 Id 字段');
     } on DioException catch (e) {
       throw EmbyApiException(_describeDioError(e, url, isUsersPath: true));
-    }
-  }
-
-  /// GET /Users/{userId}/Items 随机抽取（带选中媒体库 ParentId）。
-  static Future<List<dynamic>> _fetchRandomItems(
-    Dio dio, {
-    required String origin,
-    required String apiKey,
-    required String userId,
-    required String parentId,
-    required int limit,
-  }) async {
-    final url = '$origin/Users/$userId/Items';
-    try {
-      final resp = await dio.get<dynamic>(
-        url,
-        queryParameters: {
-          'ParentId': parentId,
-          'SortBy': 'Random',
-          'Recursive': 'true',
-          'IncludeItemTypes': 'Video,Movie',
-          'Fields': 'Path,Overview,MediaSources',
-          'Limit': limit,
-        },
-        options: Options(headers: {'X-Emby-Token': apiKey}),
-      );
-      final data = resp.data;
-      if (data is Map && data['Items'] is List) {
-        final items = data['Items'] as List;
-        return items.whereType<Map>().toList();
-      }
-      throw EmbyApiException('服务器返回的数据格式异常（缺少 Items 字段）');
-    } on DioException catch (e) {
-      throw EmbyApiException(_describeDioError(e, url, isUsersPath: false));
     }
   }
 
@@ -294,10 +515,13 @@ class EmbyApi {
         if (code == 401) {
           return '鉴权失败（401）：API Key 无效或无权限，请在服务器配置中检查密钥';
         }
+        if (code == 403) {
+          return '权限不足（403）：该操作需要管理员权限的 API Key';
+        }
         if (code == 404) {
           return isUsersPath
               ? '地址不存在（404）：该地址可能不是有效的 Emby 服务器'
-              : '请求资源不存在（404）：请检查媒体库 Id 是否正确';
+              : '请求资源不存在（404）：请检查 Id 是否正确';
         }
         String? body;
         try {

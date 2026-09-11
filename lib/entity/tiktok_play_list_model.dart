@@ -10,7 +10,8 @@ class TikTokPlayListModel {
   /// 是否记录观看历史（单文件入口为true，收集N个视频入口为false）
   final bool recordHistory;
 
-  /// 是否来自 Emby 随机播放（隐藏收藏/踩等依赖 AList 账号的操作，信息里展示直链 URL）
+  /// 是否来自 Emby 随机播放（爱心=Emby 收藏接口、踩=加入本地“不喜欢列表”，
+  /// 信息里展示直链 URL；不含 AList 收藏/踩逻辑）
   final bool fromEmby;
 
   TikTokPlayListModel({
@@ -53,7 +54,10 @@ class TikTokVideoItem {
   /// 修改时间戳（毫秒）
   final int? modifiedMilliseconds;
 
-  /// 是否点赞
+  /// Emby 媒体项 Id（Emby 来源时用于收藏/取消收藏接口）
+  final String? embyItemId;
+
+  /// 是否点赞（Emby 来源时表示是否已收藏）
   bool isLiked;
 
   /// 是否不喜欢
@@ -70,6 +74,7 @@ class TikTokVideoItem {
     this.provider,
     this.thumb,
     this.modifiedMilliseconds,
+    this.embyItemId,
     this.isLiked = false,
     this.isDisliked = false,
   });
