@@ -52,7 +52,7 @@ class EmbyMediaLibrary {
   }
 }
 
-/// Emby API 网络层（对标 cs.py / emby.py）。
+/// Emby API 网络层
 ///
 /// 特点：
 /// - 每次请求前实时读取传入的服务器配置（protocol/baseUrl/apiKey），
@@ -113,7 +113,7 @@ class EmbyApi {
     }
   }
 
-  /// 使用指定服务器与媒体库执行一次随机抽取（对标 cs.py 三步数据流）。
+  /// 使用指定服务器与媒体库执行一次随机抽取
   ///
   /// 内部自动处理 userId 的动态获取与回写缓存；返回可直接喂给
   /// “视界流”播放器的 [TikTokVideoItem] 列表。失败抛出 [EmbyApiException]。
