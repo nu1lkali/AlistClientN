@@ -772,15 +772,28 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
     } catch (_) {}
   }
 
-  // ═══════════════ Gesture: Single Tap (immediate) + Double Tap ═══════════════
-  void _onDoubleTap(TapDownDetails d) {
+  // ═══════════════ Gesture: Single Tap (delayed) + Double Tap ═══════════════
+  Offset _lastTapDownPos = Offset.zero;
+
+  /// 双击按下：记录坐标，供红心飘动特效定位（onDoubleTap 本身不带位置）。
+  void _onDoubleTapDown(TapDownDetails d) {
+    _lastTapDownPos = d.globalPosition;
+  }
+
+  /// 双击：红心飘动特效 + 切换收藏。
+  ///
+  /// 与单击共存：GestureDetector 同时声明 onTap 与 onDoubleTap 后，Flutter 的
+  /// 手势竞技场会自动把单击判定延迟到双击超时之后——双击只会走这里，
+  /// 不会误触发一次播放/暂停。
+  void _onDoubleTap() {
+    final pos = _lastTapDownPos;
     // Emby 来源：双击 = 爱心特效 + 切换 Emby 收藏
     if (_playList.fromEmby) {
-      if (mounted) setState(() => _doubleTapIcons.add(d.globalPosition));
+      if (mounted) setState(() => _doubleTapIcons.add(pos));
       _toggleEmbyFavorite();
       return;
     }
-    if (mounted) setState(() => _doubleTapIcons.add(d.globalPosition));
+    if (mounted) setState(() => _doubleTapIcons.add(pos));
     final v = _playList.videos[_currentIndex];
     v.isLiked = !v.isLiked;
     if (v.isLiked && v.isDisliked) v.isDisliked = false;
@@ -1081,6 +1094,10 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
       child: GestureDetector(
         behavior: HitTestBehavior.opaque,
         onTap: _onScreenTap,
+        // 单击（播放/暂停）与双击（红心特效）共存：
+        // 声明 onDoubleTap 后，单击会在双击超时后才触发，二者不互抢
+        onDoubleTapDown: _onDoubleTapDown,
+        onDoubleTap: _onDoubleTap,
         child: _buildPageView(),
       ),
     );
@@ -1196,11 +1213,10 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
           onTap: _togglePlayPause));
     }
     if (_playList.fromEmby) {
-      // Emby 入口：爱心=Emby 收藏接口；踩=加入本地“不喜欢列表”（删除动作在列表内）
-      buttons.add(_btn(
-          icon: v.isLiked ? Icons.favorite : Icons.favorite_border,
+      // Emby 入口：爱心=Emby 收藏接口（带动效）；踩=加入本地“不喜欢列表”
+      buttons.add(_HeartBtn(
+          liked: v.isLiked,
           label: v.isLiked ? '已收藏' : '收藏',
-          color: v.isLiked ? Colors.red : Colors.white,
           onTap: _toggleEmbyFavorite));
       buttons.add(_btn(
           icon: v.isDisliked ? Icons.thumb_down : Icons.thumb_down_outlined,
@@ -1208,10 +1224,9 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
           color: v.isDisliked ? Colors.blue : Colors.white,
           onTap: _toggleEmbyDislike));
     } else {
-      buttons.add(_btn(
-          icon: v.isLiked ? Icons.favorite : Icons.favorite_border,
+      buttons.add(_HeartBtn(
+          liked: v.isLiked,
           label: v.isLiked ? '已收藏' : '收藏',
-          color: v.isLiked ? Colors.red : Colors.white,
           onTap: _toggleLike));
       buttons.add(_btn(
           icon: v.isDisliked ? Icons.thumb_down : Icons.thumb_down_outlined,
@@ -1571,6 +1586,177 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
   }
 }
 
+/// 工具栏爱心按钮：空心 ↔ 红心，收藏瞬间“弹跳放大 + 外围星光闪烁”。
+///
+/// 设计说明（对齐抖音手感）：
+/// - 弹跳：520ms 内 easeOutCubic 冲到 1.35 倍，再用 easeOutBack 回落 1.0（带过冲回弹）；
+/// - 星光：8 颗四角星沿半径 14→30 扩散并淡出，同时一圈红色光环扩张淡出，形成“bling”感；
+/// - 取消收藏：只做回弹，不喷星光（语义更自然）；
+/// - 触感：收藏成功时 HapticFeedback.lightImpact()。
+class _HeartBtn extends StatefulWidget {
+  final bool liked;
+  final String label;
+  final VoidCallback onTap;
+
+  const _HeartBtn({
+    required this.liked,
+    required this.label,
+    required this.onTap,
+  });
+
+  @override
+  State<_HeartBtn> createState() => _HeartBtnState();
+}
+
+class _HeartBtnState extends State<_HeartBtn>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _c = AnimationController(
+      vsync: this, duration: const Duration(milliseconds: 520));
+  bool _burst = false; // 本次动画是否喷星光（仅“收藏”时）
+
+  @override
+  void didUpdateWidget(covariant _HeartBtn oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.liked != oldWidget.liked) {
+      _burst = widget.liked;
+      _c.forward(from: 0);
+      if (widget.liked) {
+        try {
+          HapticFeedback.lightImpact();
+        } catch (_) {}
+      }
+    }
+  }
+
+  @override
+  void dispose() {
+    _c.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final liked = widget.liked;
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: widget.onTap,
+      child: AnimatedBuilder(
+        animation: _c,
+        builder: (_, __) {
+          final t = _c.value;
+          // 0 → 0.6：冲到 1.35 倍；0.6 → 1：过冲回落到 1.0
+          final bounce = t <= 0
+              ? 1.0
+              : (t < 0.6
+                  ? 1 + 0.35 * Curves.easeOutCubic.transform(t / 0.6)
+                  : 1.35 -
+                      0.35 * Curves.easeOutBack.transform((t - 0.6) / 0.4));
+          return Column(children: [
+            SizedBox(
+              width: 32,
+              height: 32,
+              child: Stack(
+                alignment: Alignment.center,
+                clipBehavior: Clip.none, // 允许星光溢出按钮范围
+                children: [
+                  if (_burst && t > 0 && t < 1)
+                    Positioned.fill(
+                      child:
+                          CustomPaint(painter: _SparklePainter(progress: t)),
+                    ),
+                  Transform.scale(scale: bounce, child: _icon(liked)),
+                ],
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text(widget.label,
+                style: TextStyle(
+                    color: liked ? Colors.red : Colors.white, fontSize: 11)),
+          ]);
+        },
+      ),
+    );
+  }
+
+  Widget _icon(bool liked) {
+    if (!liked) {
+      return const Icon(Icons.favorite_border, color: Colors.white, size: 32);
+    }
+    // 红心：径向渐变 + 外发光，与“飘心”特效风格统一
+    return Container(
+      decoration: const BoxDecoration(
+        shape: BoxShape.circle,
+        boxShadow: [
+          BoxShadow(color: Color(0x55FF3B30), blurRadius: 10, spreadRadius: 1),
+        ],
+      ),
+      child: ShaderMask(
+        blendMode: BlendMode.srcATop,
+        shaderCallback: (b) => const RadialGradient(
+          center: Alignment(0, -0.25),
+          colors: [Color(0xFFFF8A80), Color(0xFFE53935)],
+        ).createShader(b),
+        child: const Icon(Icons.favorite, color: Colors.white, size: 32),
+      ),
+    );
+  }
+}
+
+/// 爱心外围星光：8 颗四角星 + 一圈扩散光环，随进度扩散并淡出。
+class _SparklePainter extends CustomPainter {
+  final double progress;
+
+  const _SparklePainter({required this.progress});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final center = size.center(Offset.zero);
+    final t = progress.clamp(0.0, 1.0);
+    // 前 12% 留给爱心弹出，星光稍后出现
+    final p = ((t - 0.12) / 0.88).clamp(0.0, 1.0);
+    if (p <= 0 || p >= 1) return;
+    final fade = (1 - p) * (p < 0.25 ? p / 0.25 : 1.0);
+    final radius = 14 + 16 * Curves.easeOutCubic.transform(p);
+
+    // 光环
+    canvas.drawCircle(
+      center,
+      radius,
+      Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 2.4 * (1 - p) + 0.4
+        ..color = const Color(0xFFFF5252).withOpacity(0.55 * fade),
+    );
+
+    // 星光：8 颗四角星，交替大小形成闪烁节奏
+    final starPaint = Paint()
+      ..color = const Color(0xFFFFD54F).withOpacity(0.95 * fade);
+    for (var i = 0; i < 8; i++) {
+      final angle = i * (2 * pi / 8) + 0.35;
+      final dist = radius * (0.85 + 0.15 * ((i % 3) / 2));
+      final pos = center + Offset(cos(angle) * dist, sin(angle) * dist);
+      final r = (2.6 * (1 - p) + 0.6) * (i.isEven ? 1.0 : 0.7);
+      _drawSparkle(canvas, pos, r, starPaint);
+    }
+  }
+
+  /// 四角星（十字形）路径
+  void _drawSparkle(Canvas canvas, Offset c, double r, Paint paint) {
+    final path = Path()
+      ..moveTo(c.dx, c.dy - r * 1.8)
+      ..quadraticBezierTo(c.dx + r * 0.28, c.dy - r * 0.28, c.dx + r * 1.8, c.dy)
+      ..quadraticBezierTo(c.dx + r * 0.28, c.dy + r * 0.28, c.dx, c.dy + r * 1.8)
+      ..quadraticBezierTo(c.dx - r * 0.28, c.dy + r * 0.28, c.dx - r * 1.8, c.dy)
+      ..quadraticBezierTo(c.dx - r * 0.28, c.dy - r * 0.28, c.dx, c.dy - r * 1.8)
+      ..close();
+    canvas.drawPath(path, paint);
+  }
+
+  @override
+  bool shouldRepaint(covariant _SparklePainter oldDelegate) =>
+      oldDelegate.progress != progress;
+}
+
 class _HeartAnim extends StatefulWidget {
   final Offset position;
   final VoidCallback onDone;
@@ -1609,13 +1795,33 @@ class _HeartAnimState extends State<_HeartAnim> with SingleTickerProviderStateMi
         ? 0.6 + v / 0.4 * 0.5
         : (v <= _dismissStart ? 1.1 : 1 + (v - _dismissStart) / (1.0 - _dismissStart) * 0.4);
     const sz = 120.0;
+    // 蹦出 + 外围星光：星光在爱心弹出后出现，随之后半段淡出
+    final sparkleProgress = (v / 0.75).clamp(0.0, 1.0);
     return Positioned(left: widget.position.dx - sz / 2, top: widget.position.dy - sz,
       child: Transform.rotate(angle: _rot, child: Opacity(opacity: op,
-        child: Transform.scale(alignment: Alignment.bottomCenter, scale: sc,
-          child: ShaderMask(blendMode: BlendMode.srcATop,
-            shaderCallback: (b) => const RadialGradient(center: Alignment(0, 0),
-              colors: [Color(0xffEF6F6F), Color(0xffF03E3E)]).createShader(b),
-            child: const Icon(Icons.favorite, size: sz, color: Colors.white))))));
+        child: SizedBox(
+          width: sz,
+          height: sz,
+          child: Stack(
+            alignment: Alignment.center,
+            clipBehavior: Clip.none,
+            children: [
+              if (v < 0.75)
+                Positioned.fill(
+                  child: Transform.scale(
+                    scale: 1.35, // 星光比爱心略大一圈，形成外圈闪烁
+                    child: CustomPaint(
+                        painter: _SparklePainter(progress: sparkleProgress)),
+                  ),
+                ),
+              Transform.scale(alignment: Alignment.bottomCenter, scale: sc,
+                child: ShaderMask(blendMode: BlendMode.srcATop,
+                  shaderCallback: (b) => const RadialGradient(center: Alignment(0, 0),
+                    colors: [Color(0xffEF6F6F), Color(0xffF03E3E)]).createShader(b),
+                  child: const Icon(Icons.favorite, size: sz, color: Colors.white))),
+            ],
+          ),
+        ))));
   }
 }
 
