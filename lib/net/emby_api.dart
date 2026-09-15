@@ -502,9 +502,10 @@ class EmbyApi {
   static String _describeDioError(DioException e, String url,
       {required bool isUsersPath}) {
     final type = e.type;
-    switch (type) {
+ switch (type) {
       case DioExceptionType.connectionTimeout:
       case DioExceptionType.sendTimeout:
+      case DioExceptionType.transformTimeout:
         return '连接服务器超时，请检查地址与网络（$url）';
       case DioExceptionType.receiveTimeout:
         return '服务器响应超时，请稍后重试（$url）';

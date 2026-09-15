@@ -21,6 +21,7 @@ import 'package:alist/util/subtitle/subtitle_settings.dart';
 import 'package:alist/util/log_utils.dart';
 import 'package:alist/util/named_router.dart';
 import 'package:alist/util/user_controller.dart';
+import 'package:alist/util/video_fit_mode.dart';
 import 'package:alist/util/widget_utils.dart';
 import 'package:alist/widget/alist_scaffold.dart';
 import 'package:filesystem_picker/filesystem_picker.dart';
@@ -335,6 +336,11 @@ class _SettingsContainerState extends State<_SettingsContainer>
             }),
         SettingsItemData(icon: Icons.tune_rounded, title: Intl.settingsScreen_item_videoPlayer.tr,
             searchTerms: ['player', '播放'], onTap: () => Get.toNamed(NamedRouter.playerSettings)),
+        SettingsItemData(icon: Icons.aspect_ratio_rounded, title: '横屏画面适配',
+            subtitle: '横屏全屏时画面如何适配屏幕',
+            trailingText: LandscapeFitModeHelper.read().label,
+            searchTerms: ['landscape', 'fit', 'ratio', 'crop', 'stretch', '横屏', '画面', '比例', '黑边', '裁剪', '拉伸'],
+            onTap: () => _showLandscapeFitDialog(context)),
         SettingsItemData(icon: Icons.live_tv_rounded, title: '流媒体地址播放',
             searchTerms: ['stream', 'url', '地址'], onTap: () => _showUrlInputDialog(context)),
         SettingsItemData(icon: Icons.music_note_rounded, title: '音频播放器风格',
@@ -1113,6 +1119,43 @@ class _SettingsContainerState extends State<_SettingsContainer>
                   }
                 }),
           ],
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('取消'))
+        ],
+      ),
+    );
+  }
+
+  void _showLandscapeFitDialog(BuildContext context) {
+    final current = LandscapeFitModeHelper.read();
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Text('横屏画面适配'),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              for (final mode in LandscapeFitMode.values)
+                RadioListTile<LandscapeFitMode>(
+                    title: Text(mode.label),
+                    subtitle: Text(mode.description,
+                        style: const TextStyle(fontSize: 12)),
+                    value: mode,
+                    groupValue: current,
+                    onChanged: (v) {
+                      if (v != null) {
+                        LandscapeFitModeHelper.write(v);
+                        Navigator.pop(ctx);
+                        setState(() {});
+                      }
+                    }),
+            ],
+          ),
         ),
         actions: [
           TextButton(

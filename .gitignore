@@ -123,3 +123,9 @@ windows/**/*.[Cc]ache
 .svn/
 .FullName
 cs.py
+/.iconbuild
+*.py
+1.svg
+build.bat
+build_log.txt
+build_log.txt

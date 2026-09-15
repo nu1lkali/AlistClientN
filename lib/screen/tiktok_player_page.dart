@@ -20,8 +20,10 @@ import 'package:alist/util/subtitle/subtitle.dart';
 import 'package:alist/util/video_player_util.dart';
 import 'package:alist/widget/network_speed_indicator.dart';
 import 'package:alist/widget/subtitle_view.dart';
+import 'package:alist/widget/tiktok_video_info_sheet.dart';
 import 'package:alist/util/stream_size_resolver.dart';
 import 'package:alist/util/user_controller.dart';
+import 'package:alist/util/video_fit_mode.dart';
 import 'package:flustars/flustars.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/gestures.dart';
@@ -54,6 +56,8 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
   final Set<int> _initializingIndexes = {};
   bool _isPlaying = false;
   bool _isLandscape = false;
+  /// 横屏全屏的画面适配方式（在 [build] 中同步自 SpUtil）
+  LandscapeFitMode _fitMode = LandscapeFitMode.auto;
   // 循环模式: 0=自动下一个, 1=播完即停止, 2=单视频循环
   int _loopMode = 0;
   final List<Offset> _doubleTapIcons = [];
@@ -949,37 +953,26 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
   // ═══════════════ Video Info ═══════════════
   void _showInfo() {
     final v = _playList.videos[_currentIndex];
+    final mq = MediaQuery.of(context);
+    // 高度上限按「去掉系统安全区后的可用高度」计算：横屏可用高度只有 ~360dp，
+    // 若直接取屏幕高度的比例，BottomSheet 总高会超出屏幕，顶部几行被裁掉
+    final maxSheetHeight =
+        (mq.size.height - mq.padding.top - mq.padding.bottom) * 0.96;
     showModalBottomSheet(
-      context: context, backgroundColor: Colors.black87,
-      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
-      builder: (ctx) => SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.all(20),
-          child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Center(child: Container(width: 40, height: 4, decoration: BoxDecoration(color: Colors.white30, borderRadius: BorderRadius.circular(2)))),
-            const SizedBox(height: 16),
-            const Text('视频信息', style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
-            const SizedBox(height: 16),
-            _row('文件名', v.fileName), _row('文件大小', v.formattedSize),
-            // Emby 直链来源：文件路径展示播放直链 URL（切换视频自动跟随当前项）
-            _row('文件路径', _playList.fromEmby ? (v.videoUrl ?? v.filePath) : v.filePath),
-            if (!_playList.fromEmby) _row('修改时间', v.formattedModified),
-            _row('Provider', v.provider ?? '未知'),
-            _row('文件签名', v.sign ?? '无'), _row('播放位置', '${_currentIndex + 1} / ${_playList.videos.length}'),
-            const SizedBox(height: 16),
-          ]),
-        ),
+      context: context,
+      backgroundColor: Colors.black87,
+      isScrollControlled: true,
+      // maxWidth 640 与 Material 3 的 BottomSheet 默认约束保持一致
+      constraints: BoxConstraints(maxWidth: 640, maxHeight: maxSheetHeight),
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
+      builder: (ctx) => TiktokVideoInfoSheet(
+        video: v,
+        fromEmby: _playList.fromEmby,
+        position: '${_currentIndex + 1} / ${_playList.videos.length}',
       ),
     );
   }
-
-  Widget _row(String l, String val) => Padding(
-    padding: const EdgeInsets.symmetric(vertical: 6),
-    child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      SizedBox(width: 80, child: Text(l, style: const TextStyle(color: Colors.white54, fontSize: 13))),
-      Expanded(child: Text(val, style: const TextStyle(color: Colors.white, fontSize: 13))),
-    ]),
-  );
 
   String _fmtDur(Duration d) {
     final m = d.inMinutes.remainder(60).toString().padLeft(2, '0');
@@ -993,19 +986,24 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
     final screenSize = MediaQuery.of(context).size;
     _screenWidth = screenSize.width;
     _screenHeight = screenSize.height;
+    // 设置页改过之后回到播放页能立即生效
+    _fitMode = LandscapeFitModeHelper.read();
     return Scaffold(
       backgroundColor: Colors.black,
       body: Stack(children: [
         _buildGestureLayer(),
         _buildPauseIcon(),
-        if (!(_hideUI && _isLandscape)) _buildTopBar(),
-        if (!_hideUI) _buildToolBar(),
-        if (!_hideUI) _buildProgress(),
-        SubtitleView(controller: _subtitleController, bottomOffset: _isLandscape ? 60 : 150),
+        // 横屏：画面全屏铺满，控件全部收进可唤起的浮动 HUD；
+        // 竖屏：沿用原来的常驻顶栏 / 右侧工具栏 / 底部进度条。
+        if (_isLandscape)
+          Positioned.fill(child: _buildLandscapeHud())
+        else ...[
+          if (!_hideUI) _buildTopBar(),
+          if (!_hideUI) _buildToolBar(),
+          if (!_hideUI) _buildProgress(),
+        ],
+        SubtitleView(controller: _subtitleController, bottomOffset: _isLandscape ? 84 : 150),
         if (!_hideUI && !_isLandscape) _buildBottomInfo(),
-        if (!_hideUI && _isLandscape) _buildLandscapeCenterControls(),
-        if (!_hideUI && _isLandscape && _playList.videos.length > 1)
-          _buildLandscapeFloatingSwitchButton(),
         if (_isSeeking) _buildSeekPreview(),
         if (_showBrightnessIndicator && _isVerticalDragging)
           Positioned(left: 20, top: 0, bottom: 0,
@@ -1142,16 +1140,57 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
         child: VideoPlayer(c),
       );
       if (_isLandscape) {
-        return SizedBox.expand(
-          child: FittedBox(
-            fit: BoxFit.contain,
-            child: SizedBox(width: c.value.size.width, height: c.value.size.height, child: video),
-          ),
-        );
+        return _buildLandscapeVideo(video, c.value.size);
       }
       return Center(child: AspectRatio(aspectRatio: c.value.aspectRatio, child: video));
     }
     return const Center(child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2));
+  }
+
+  /// 横屏全屏时的画面适配，具体行为由 [_fitMode] 决定（见 [LandscapeFitMode]）。
+  ///
+  /// 自适应模式用「物理像素」把视频和屏幕放在同一尺度上比较：
+  /// - 铺满所需的缩放倍数 > 1：说明要把视频放大才铺得满，画质会发虚；
+  /// - 裁切比例 > [LandscapeFitMode.autoMaxCropRatio]：说明铺满会切掉贴底的硬字幕。
+  /// 命中任一条就退化为等比完整显示（宁可留黑边，也不糊、不切内容）。
+  Widget _buildLandscapeVideo(Widget video, Size videoSize) {
+    return LayoutBuilder(builder: (ctx, constraints) {
+      // 用 item 的真实约束而不是 MediaQuery：分屏 / 自由窗口下两者并不相等
+      final dpr = MediaQuery.of(ctx).devicePixelRatio;
+      final needW = constraints.maxWidth * dpr / videoSize.width;
+      final needH = constraints.maxHeight * dpr / videoSize.height;
+      final fillScale = max(needW, needH); // 铺满整屏所需的缩放倍数
+      final keepRatio = min(needW, needH) / fillScale; // 铺满时还能看到的画面比例
+
+      final fit = switch (_fitMode) {
+        LandscapeFitMode.cover => BoxFit.cover,
+        LandscapeFitMode.contain => BoxFit.contain,
+        LandscapeFitMode.fill => BoxFit.fill,
+        LandscapeFitMode.auto =>
+          (fillScale <= 1.0 &&
+                  keepRatio >= 1.0 - LandscapeFitMode.autoMaxCropRatio)
+              ? BoxFit.cover
+              : BoxFit.contain,
+      };
+      return SizedBox.expand(
+        child: FittedBox(
+          fit: fit,
+          clipBehavior: Clip.hardEdge,
+          child: SizedBox(
+              width: videoSize.width, height: videoSize.height, child: video),
+        ),
+      );
+    });
+  }
+
+  /// 横屏 HUD 上的画面适配快切：按 自适应 → 铺满裁剪 → 完整显示 → 拉伸填满 循环。
+  void _cycleFitMode() {
+    final next = LandscapeFitMode
+        .values[(_fitMode.index + 1) % LandscapeFitMode.values.length];
+    _fitMode = next;
+    LandscapeFitModeHelper.write(next);
+    setState(() {});
+    SmartDialog.showToast('画面适配：${next.label}');
   }
 
   Widget _buildPageView() {
@@ -1176,66 +1215,35 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
           Text('${_currentIndex + 1}/${_playList.videos.length}',
             style: const TextStyle(color: Colors.white70, fontSize: 14)),
           const Spacer(),
-          if (!_isLandscape)
-            IconButton(
-              icon: Icon(_hideUI ? Icons.visibility : Icons.visibility_off,
-                  color: Colors.white, size: 22),
-              onPressed: () {
-                setState(() {
-                  _hideUI = !_hideUI;
-                  _manualHideUI = _hideUI;
-                });
-              },
-            )
-          else
-            const SizedBox(width: 48),
+          // 竖屏顶栏的显隐开关（横屏改用点击屏幕，见 [_buildLandscapeHud]）
+          IconButton(
+            icon: Icon(_hideUI ? Icons.visibility : Icons.visibility_off,
+                color: Colors.white, size: 22),
+            onPressed: () {
+              setState(() {
+                _hideUI = !_hideUI;
+                _manualHideUI = _hideUI;
+              });
+            },
+          ),
         ]),
       )),
     ));
   }
 
+  /// 竖屏右侧竖向工具栏：收藏 / 踩 / 循环 / 信息。
+  ///
+  /// 横屏不再使用它——横屏的同类按钮由 [_buildLandscapeHud] 的浮动层承担。
   Widget _buildToolBar() {
-    final v = _playList.videos[_currentIndex];
     final screenH = MediaQuery.of(context).size.height;
     final topPad = MediaQuery.of(context).padding.top;
-    final bottomPad = MediaQuery.of(context).padding.bottom;
-    final bottomOffset = _isLandscape ? (bottomPad + 70) : 160.0;
+    const bottomOffset = 160.0;
     final maxH = screenH - topPad - bottomOffset - 20;
 
-    // 依当前状态收集按钮（Emby 来源：爱心=Emby 收藏接口、踩=加入本地“不喜欢列表”），
-    // 按钮间固定间距、底部紧凑排列
-    final buttons = <Widget>[];
-    if (_isLandscape) {
-      buttons.add(_btn(
-          icon: _isPlaying ? Icons.pause_rounded : Icons.play_arrow_rounded,
-          label: _isPlaying ? '暂停' : '播放',
-          color: Colors.white,
-          onTap: _togglePlayPause));
-    }
-    if (_playList.fromEmby) {
-      // Emby 入口：爱心=Emby 收藏接口（带动效）；踩=加入本地“不喜欢列表”
-      buttons.add(_HeartBtn(
-          liked: v.isLiked,
-          label: v.isLiked ? '已收藏' : '收藏',
-          onTap: _toggleEmbyFavorite));
-      buttons.add(_btn(
-          icon: v.isDisliked ? Icons.thumb_down : Icons.thumb_down_outlined,
-          label: v.isDisliked ? '已踩' : '踩',
-          color: v.isDisliked ? Colors.blue : Colors.white,
-          onTap: _toggleEmbyDislike));
-    } else {
-      buttons.add(_HeartBtn(
-          liked: v.isLiked,
-          label: v.isLiked ? '已收藏' : '收藏',
-          onTap: _toggleLike));
-      buttons.add(_btn(
-          icon: v.isDisliked ? Icons.thumb_down : Icons.thumb_down_outlined,
-          label: v.isDisliked ? '已踩' : '踩',
-          color: v.isDisliked ? Colors.blue : Colors.white,
-          onTap: _toggleDislike));
-    }
-    if (!_isLandscape) {
-      buttons.add(_btn(
+    final buttons = <Widget>[
+      _buildFavoriteButton(),
+      _buildDislikeButton(),
+      _btn(
           icon: _loopMode == 2
               ? Icons.repeat_one
               : _loopMode == 1
@@ -1243,25 +1251,13 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
                   : Icons.repeat,
           label: ['自动下一个', '播完即停止', '单视频循环'][_loopMode],
           color: _loopMode != 0 ? Colors.amber : Colors.white,
-          onTap: _toggleLoop));
-    }
-    if (_isLandscape) {
-      buttons.add(_btn(
-          icon: Icons.stay_current_portrait,
-          label: '竖屏',
+          onTap: _toggleLoop),
+      _btn(
+          icon: Icons.info_outline,
+          label: '信息',
           color: Colors.white,
-          onTap: _toggleOrientation));
-      buttons.add(_btn(
-          icon: Icons.camera_alt_outlined,
-          label: '截图',
-          color: Colors.white,
-          onTap: _takeScreenshot));
-    }
-    buttons.add(_btn(
-        icon: Icons.info_outline,
-        label: '信息',
-        color: Colors.white,
-        onTap: _showInfo));
+          onTap: _showInfo),
+    ];
 
     final spaced = <Widget>[];
     for (var i = 0; i < buttons.length; i++) {
@@ -1282,6 +1278,29 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
     );
   }
 
+  /// 「收藏」按钮：Emby 来源走 Emby 收藏接口，其余走本地收藏库（均带动效）。
+  /// 竖屏工具栏与横屏右侧胶囊共用。
+  Widget _buildFavoriteButton() {
+    final v = _playList.videos[_currentIndex];
+    return _HeartBtn(
+      liked: v.isLiked,
+      label: v.isLiked ? '已收藏' : '收藏',
+      onTap: _playList.fromEmby ? _toggleEmbyFavorite : _toggleLike,
+    );
+  }
+
+  /// 「踩」按钮：Emby 来源写入本地“不喜欢列表”，其余写入本地不喜欢库。
+  /// 竖屏工具栏与横屏右侧胶囊共用。
+  Widget _buildDislikeButton() {
+    final v = _playList.videos[_currentIndex];
+    return _btn(
+      icon: v.isDisliked ? Icons.thumb_down : Icons.thumb_down_outlined,
+      label: v.isDisliked ? '已踩' : '踩',
+      color: v.isDisliked ? Colors.blue : Colors.white,
+      onTap: _playList.fromEmby ? _toggleEmbyDislike : _toggleDislike,
+    );
+  }
+
   Widget _btn({required IconData icon, required String label, required Color color, required VoidCallback onTap}) {
     return GestureDetector(onTap: onTap,
       child: Column(children: [Icon(icon, color: color, size: 32), const SizedBox(height: 4),
@@ -1292,8 +1311,7 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
     final totalMs = _dur.inMilliseconds.toDouble();
     final curMs = _pos.inMilliseconds.toDouble();
     final val = totalMs > 0 ? (curMs / totalMs).clamp(0.0, 1.0) : 0.0;
-    final bottomPad = MediaQuery.of(context).padding.bottom;
-    final bottomOffset = _isLandscape ? (bottomPad + 16) : 80.0;
+    final bottomOffset = 80.0;
     return Positioned(left: 0, right: 0, bottom: bottomOffset,
       child: Opacity(opacity: _uiOpacity, child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 12),
@@ -1357,24 +1375,23 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
               ]),
             ]),
           ),
-          if (!_isLandscape) ...[
-            GestureDetector(
-              onTap: _toggleOrientation,
-              child: Padding(
-                padding: const EdgeInsets.all(8),
-                child: Icon(Icons.screen_rotation_outlined,
-                    color: Colors.white.withOpacity(0.7), size: 22),
-              ),
+          // 竖屏专属：切横屏 / 截图（横屏由 HUD 底部 / 顶部浮层提供）
+          GestureDetector(
+            onTap: _toggleOrientation,
+            child: Padding(
+              padding: const EdgeInsets.all(8),
+              child: Icon(Icons.screen_rotation_outlined,
+                  color: Colors.white.withOpacity(0.7), size: 22),
             ),
-            GestureDetector(
-              onTap: _takeScreenshot,
-              child: Padding(
-                padding: const EdgeInsets.all(8),
-                child: Icon(Icons.camera_alt_outlined,
-                    color: Colors.white.withOpacity(0.7), size: 22),
-              ),
+          ),
+          GestureDetector(
+            onTap: _takeScreenshot,
+            child: Padding(
+              padding: const EdgeInsets.all(8),
+              child: Icon(Icons.camera_alt_outlined,
+                  color: Colors.white.withOpacity(0.7), size: 22),
             ),
-          ],
+          ),
         ],
       )),
     );
@@ -1408,111 +1425,183 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
     );
   }
 
-  Widget _buildLandscapeCenterControls() {
-    return Center(
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          _centerCtrlBtn(
-            icon: Icons.replay_10_rounded,
-            onTap: () {
-              final target = _pos - const Duration(seconds: 10);
-              _controllers[_currentIndex]?.seekTo(target < Duration.zero ? Duration.zero : target);
-            },
-          ),
-          const SizedBox(width: 48),
-          GestureDetector(
-            onTap: _togglePlayPause,
-            child: Icon(
-              _isPlaying ? Icons.pause_rounded : Icons.play_arrow_rounded,
-              color: Colors.white.withOpacity(0.85),
-              size: 64,
-            ),
-          ),
-          const SizedBox(width: 48),
-          _centerCtrlBtn(
-            icon: Icons.forward_10_rounded,
-            onTap: () {
-              final target = _pos + const Duration(seconds: 10);
-              final max = _dur;
-              _controllers[_currentIndex]?.seekTo(target > max ? max : target);
-            },
-          ),
-        ],
+  // ═══════════════ 横屏沉浸式 HUD ═══════════════
+
+  /// 横屏浮动控制层（Overlay HUD）。
+  ///
+  /// 画面本身已全屏铺满（见 [_buildVideoItem]），所有控件默认隐藏；
+  /// 点击屏幕任意位置淡入上下浮层（[_onScreenTap]），播放中静止
+  /// [_landscapeAutoHide] 后自动淡出（[_startLandscapeAutoHide]）。
+  /// 右侧「收藏 / 踩」胶囊不随显隐消失，只降低不透明度，保持随时可点。
+  Widget _buildLandscapeHud() {
+    return AnimatedOpacity(
+      opacity: _hideUI ? 0.0 : _uiOpacity,
+      duration: const Duration(milliseconds: 220),
+      curve: Curves.easeOut,
+      child: IgnorePointer(
+        ignoring: _hideUI,
+        child: Stack(children: [
+          _buildLandscapeTopBar(),
+          _buildLandscapeBottomBar(),
+          _buildLandscapeSideActions(),
+        ]),
       ),
     );
   }
 
-  Widget _centerCtrlBtn({required IconData icon, required VoidCallback onTap}) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Icon(icon, color: Colors.white.withOpacity(0.85), size: 48),
+  /// 顶部浮层：返回 / 标题 + 播放位置 / 系统时间 · 截图 · 信息。
+  Widget _buildLandscapeTopBar() {
+    final v = _playList.videos[_currentIndex];
+    return Positioned(
+      top: 0, left: 0, right: 0,
+      child: Container(
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: [Colors.black.withOpacity(0.78), Colors.transparent],
+          ),
+        ),
+        child: SafeArea(
+          bottom: false,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(2, 2, 6, 22),
+            child: Row(children: [
+              IconButton(
+                icon: const Icon(Icons.arrow_back_ios_new_rounded,
+                    color: Colors.white, size: 22),
+                onPressed: () => Navigator.pop(context),
+              ),
+              Expanded(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(stripKnownVideoExtension(v.fileName),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 14,
+                            fontWeight: FontWeight.w600)),
+                    const SizedBox(height: 2),
+                    Text('${_currentIndex + 1} / ${_playList.videos.length}',
+                        style: TextStyle(
+                            color: Colors.white.withOpacity(0.65),
+                            fontSize: 11)),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
+              Text(_fmtClock(DateTime.now()),
+                  style: TextStyle(
+                      color: Colors.white.withOpacity(0.85), fontSize: 13)),
+              const SizedBox(width: 4),
+              _hudBarButton(Icons.camera_alt_outlined, '截图', _takeScreenshot),
+              _hudBarButton(Icons.info_outline, '信息', _showInfo),
+            ]),
+          ),
+        ),
+      ),
     );
   }
 
-  Widget _buildLandscapeFloatingSwitchButton() {
-    final bottomPad = MediaQuery.of(context).padding.bottom;
+  /// 底部浮层：快退10s / 播放暂停 / 快进10s · 进度条与时间 · 上一个 / 下一个 · 切回竖屏。
+  Widget _buildLandscapeBottomBar() {
+    final totalMs = _dur.inMilliseconds.toDouble();
+    final curMs = _pos.inMilliseconds.toDouble();
+    final val = totalMs > 0 ? (curMs / totalMs).clamp(0.0, 1.0) : 0.0;
+    final hasPrev = _currentIndex > 0;
+    final hasNext = _currentIndex < _playList.videos.length - 1;
     return Positioned(
-      left: 16,
-      bottom: bottomPad + 60,
-      child: GestureDetector(
-        onTap: () {},
-        child: Container(
-          width: 110,
-          height: 36,
-          decoration: BoxDecoration(
-            color: Colors.white.withOpacity(0.15),
-            borderRadius: BorderRadius.circular(18),
-            border: Border.all(color: Colors.white.withOpacity(0.2)),
+      left: 0, right: 0, bottom: 0,
+      child: Container(
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.bottomCenter,
+            end: Alignment.topCenter,
+            colors: [Colors.black.withOpacity(0.82), Colors.transparent],
           ),
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(17),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+        ),
+        child: SafeArea(
+          top: false,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(4, 26, 8, 2),
+            child: Row(children: [
+              _hudBarButton(
+                  Icons.replay_10_rounded, '快退 10 秒', () => _seekBy(-10)),
+              _hudBarButton(
+                  _isPlaying ? Icons.pause_rounded : Icons.play_arrow_rounded,
+                  _isPlaying ? '暂停' : '播放',
+                  _togglePlayPause,
+                  size: 32),
+              _hudBarButton(
+                  Icons.forward_10_rounded, '快进 10 秒', () => _seekBy(10)),
+              const SizedBox(width: 10),
+              Text(_fmtDur(_pos),
+                  style: const TextStyle(color: Colors.white70, fontSize: 11)),
+              Expanded(
+                child: SliderTheme(
+                  data: SliderTheme.of(context).copyWith(
+                      trackHeight: 2,
+                      thumbShape:
+                          const RoundSliderThumbShape(enabledThumbRadius: 5),
+                      overlayShape:
+                          const RoundSliderOverlayShape(overlayRadius: 12),
+                      activeTrackColor: Colors.white,
+                      inactiveTrackColor: Colors.white24,
+                      thumbColor: Colors.white,
+                      overlayColor: Colors.white24),
+                  child: Slider(
+                    value: val,
+                    onChangeStart: (_) => _onSeekStart(),
+                    onChanged: _onSeekChanged,
+                    onChangeEnd: _onSeekEnd,
+                  ),
+                ),
+              ),
+              Text(_fmtDur(_dur),
+                  style: const TextStyle(color: Colors.white70, fontSize: 11)),
+              const SizedBox(width: 6),
+              _hudBarButton(Icons.skip_previous_rounded, '上一个',
+                  hasPrev ? () => _goToPage(_currentIndex - 1) : null),
+              _hudBarButton(Icons.skip_next_rounded, '下一个',
+                  hasNext ? () => _goToPage(_currentIndex + 1) : null),
+              _hudBarButton(
+                  _fitMode.icon, '画面适配：${_fitMode.label}', _cycleFitMode),
+              _hudBarButton(
+                  Icons.screen_rotation_rounded, '竖屏', _toggleOrientation),
+            ]),
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// 右侧半透明竖向胶囊：收藏 / 踩。
+  ///
+  /// HUD 隐藏时只把不透明度降到 0.32（不彻底消失、不拦截点击），
+  /// 既不遮挡画面核心区域，又能随时收藏 / 踩。
+  Widget _buildLandscapeSideActions() {
+    return Positioned(
+      right: 10, top: 0, bottom: 0,
+      child: Center(
+        child: AnimatedOpacity(
+          opacity: _hideUI ? 0.32 : _uiOpacity,
+          duration: const Duration(milliseconds: 260),
+          child: Container(
+            padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
+            decoration: BoxDecoration(
+              color: Colors.black.withOpacity(0.35),
+              borderRadius: BorderRadius.circular(26),
+              border: Border.all(color: Colors.white.withOpacity(0.14)),
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
               children: [
-                GestureDetector(
-                  onTap: _currentIndex > 0
-                      ? () => _pageController.animateToPage(_currentIndex - 1,
-                          duration: const Duration(milliseconds: 300), curve: Curves.easeOut)
-                      : null,
-                  child: Container(
-                    width: 28,
-                    height: 28,
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      color: Colors.white.withOpacity(0.1),
-                    ),
-                    child: Icon(Icons.skip_previous_rounded,
-                        color: _currentIndex > 0 ? Colors.white : Colors.white38,
-                        size: 16),
-                  ),
-                ),
-                Text(
-                  '${_currentIndex + 1}/${_playList.videos.length}',
-                  style: const TextStyle(
-                      color: Colors.white70,
-                      fontSize: 11,
-                      fontWeight: FontWeight.w500),
-                ),
-                GestureDetector(
-                  onTap: _currentIndex < _playList.videos.length - 1
-                      ? () => _pageController.animateToPage(_currentIndex + 1,
-                          duration: const Duration(milliseconds: 300), curve: Curves.easeOut)
-                      : null,
-                  child: Container(
-                    width: 28,
-                    height: 28,
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      color: Colors.white.withOpacity(0.1),
-                    ),
-                    child: Icon(Icons.skip_next_rounded,
-                        color: _currentIndex < _playList.videos.length - 1
-                            ? Colors.white
-                            : Colors.white38,
-                        size: 16),
-                  ),
-                ),
+                _buildFavoriteButton(),
+                const SizedBox(height: 8),
+                _buildDislikeButton(),
               ],
             ),
           ),
@@ -1520,6 +1609,51 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
       ),
     );
   }
+
+  /// HUD 通用按钮：固定 42x42 点击区，禁用态（[onTap] 为 null）自动转半透明。
+  Widget _hudBarButton(IconData icon, String tip, VoidCallback? onTap,
+      {double size = 22}) {
+    if (onTap == null) {
+      return SizedBox(
+        width: 42,
+        height: 42,
+        child: Center(child: Icon(icon, size: size, color: Colors.white24)),
+      );
+    }
+    return IconButton(
+      tooltip: tip,
+      padding: EdgeInsets.zero,
+      style: IconButton.styleFrom(
+        minimumSize: const Size(42, 42),
+        maximumSize: const Size(42, 42),
+        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+      ),
+      icon: Icon(icon, size: size, color: Colors.white),
+      onPressed: onTap,
+    );
+  }
+
+  /// 相对当前进度快进 / 快退（秒）。
+  void _seekBy(int seconds) {
+    try {
+      final target = _pos + Duration(seconds: seconds);
+      var clamped = target < Duration.zero ? Duration.zero : target;
+      if (_dur > Duration.zero && clamped > _dur) clamped = _dur;
+      _controllers[_currentIndex]?.seekTo(clamped);
+      if (mounted) setState(() => _pos = clamped);
+    } catch (_) {}
+  }
+
+  /// 切到第 [idx] 个视频（对应原来的上一个 / 下一个）。
+  void _goToPage(int idx) {
+    if (idx < 0 || idx >= _playList.videos.length) return;
+    _pageController.animateToPage(idx,
+        duration: const Duration(milliseconds: 300), curve: Curves.easeOut);
+  }
+
+  /// 顶部浮层的系统时间（HH:mm）——进度定时器刷新时顺带重建即保持最新。
+  String _fmtClock(DateTime now) =>
+      '${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}';
 
   Widget _buildPauseIcon() {
     if (_isPlaying || _isLandscape) return const SizedBox.shrink();
@@ -1544,7 +1678,7 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
     final topPad = mq.padding.top;
     final bottomPad = mq.padding.bottom;
     final safeH = mq.size.height - topPad - bottomPad;
-    final rightPad = _isLandscape ? 52.0 : 8.0;
+    // 横屏时右侧边缘留给「收藏 / 踩」胶囊，页码点指示器移到左边缘
     final dotH = total <= 30 ? 8.0 : (total <= 80 ? 5.0 : 3.0);
     final activeH = dotH * 2;
     final vMargin = 1.0;
@@ -1560,7 +1694,8 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
     });
 
     return Positioned(
-      right: rightPad,
+      left: _isLandscape ? 6.0 : null,
+      right: _isLandscape ? null : 8.0,
       top: topPad + (safeH - maxH) / 2,
       child: SizedBox(
         height: maxH,

@@ -62,6 +62,7 @@ import 'package:alist/util/filter_persistence.dart';
 import 'package:alist/widget/alist_scaffold.dart';
 import 'package:alist/widget/bottom_navigation_bar.dart';
 import 'package:alist/widget/config_file_name_max_lines_dialog.dart';
+import 'package:alist/widget/emby_favorite_random_icon.dart';
 import 'package:alist/widget/file_details_dialog.dart';
 import 'package:alist/widget/file_list_item_view.dart';
 import 'package:alist/widget/overflow_text.dart';
@@ -1613,9 +1614,12 @@ class _FileListScreenState extends State<FileListScreen>
                   ),
                 ),
               // Emby 随机播放收藏（从收藏中随机抽取）
+              // 图标取自项目根目录 1.svg，由 .iconbuild/svg_to_dart.py 编译成
+              // EmbyFavoriteRandomIcon 内的矢量 Path：颜色 / 尺寸 / 禁用态同样取自
+              // IconTheme（与相邻按钮一致），并且任意像素比下都不会发糊。
               if (path == '/')
                 IconButton(
-                  icon: const Icon(Icons.favorite_rounded),
+                  icon: const EmbyFavoriteRandomIcon(),
                   onPressed: () => startEmbyFavoriteRandomPlay(context),
                 ),
               // ⋮ 菜单保持不动

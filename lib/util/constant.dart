@@ -59,6 +59,7 @@ class AlistConstant {
   static const String menuPlayExpanded = 'menuPlayExpanded'; // 播放选项展开
   static const String menuToolsExpanded = 'menuToolsExpanded'; // 整理工具展开
   static const String tiktokUiOpacity = 'tiktokUiOpacity'; // 视界流播放器控件透明度
+  static const String landscapeVideoFitMode = 'landscapeVideoFitMode'; // 横屏全屏画面适配: 0=自适应, 1=铺满裁剪, 2=完整显示, 3=拉伸填满
   static const String strmHostOverrideEnabled = 'strmHostOverrideEnabled'; // .strm URL 主机替换开关
   static const String strmHostOverrideFrom = 'strmHostOverrideFrom'; // 原始主机地址（如 192.168.2.124:8024）
   static const String strmHostOverrideTo = 'strmHostOverrideTo'; // 替换后主机地址（如 frp.example.com:12345）
