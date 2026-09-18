@@ -47,7 +47,8 @@ class TikTokPlayerPage extends StatefulWidget {
 
 class _TikTokPlayerPageState extends State<TikTokPlayerPage>
     with WidgetsBindingObserver, TickerProviderStateMixin {
-  static const bool _enableNetworkSpeed = false; // TODO: 调试完成后改为 true
+  /// 实时下载速度徽标总开关（关闭后所有采样与 UI 都不再构建）
+  static const bool _enableNetworkSpeed = true;
   late final TikTokPlayListModel _playList;
   late PageController _pageController;
   late int _currentIndex;
@@ -67,6 +68,7 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
   static const int _cacheRange = 1;
   bool _hideUI = false;
   bool _manualHideUI = false; // 竖屏下用户手动点击隐藏按钮
+  bool _hideHintShown = false; // 「怎么把控件找回来」的提示只弹一次
 
   final AlistDatabaseController _database = Get.find();
   final UserController _userController = Get.find();
@@ -93,10 +95,51 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
   Timer? _landscapeHideTimer;
   static const _landscapeAutoHide = Duration(seconds: 2);
 
+  /// 竖屏中间那一行（−10s / 播放 / +10s）的「醒着」标记。
+  ///
+  /// 它正好压在画面正中央的主视觉上，常驻会挡主体，所以改成**按需浮出、
+  /// 2 秒自动淡出**（见 [_wakeCenterRow]）。只有这行是自动消失的，
+  /// 顶栏 / 右侧工具栏 / 底部进度条都在边缘，保持原来的显隐规则不动。
+  bool _centerRowAwake = false;
+  /// 进页面后的**一次性引导**：第一次起播露 2 秒让人知道有 ±10s 这两个键，
+  /// 之后切页不再露——已经知道了就没必要每次都挡一下。
+  bool _centerRowIntroShown = false;
+  Timer? _centerRowFadeTimer;
+  static const _centerRowLinger = Duration(seconds: 2);
+  static const _centerRowFade = Duration(milliseconds: 260);
+
+  /// 实时下载速度（字节/秒）：**活跃下载段**的速率，见 [_calcNetworkSpeed]。
   double _networkSpeed = 0;
+  /// 真正显示出来的速度：在 [_networkSpeed] 之上再加一层死区，末位数字才不乱跳。
+  double _displaySpeed = 0;
+  /// 当前「活跃下载段」的起点字节数 / 起点时刻；null 表示现在没有在下载
+  double _segStartBytes = 0;
+  DateTime? _segStartAt;
+  /// 最近一次检测到缓冲增长的时刻
+  DateTime? _lastGrowAt;
+  /// 最近一次结算出速度的时刻，用来判断读数是否已经过期
+  DateTime? _lastSpeedUpdateAt;
+  /// 上一次的累计字节数，用来识别缓冲回退（seek / 换源）
+  double _lastCumBytes = 0;
   Duration _lastBufferedEnd = Duration.zero;
   DateTime _lastSpeedSample = DateTime.now();
   DateTime _loadStartTime = DateTime.now();
+  /// 文件大小未知时的假设码率 ≈ 5 Mbps，用于估算「缓冲秒数 → 字节数」
+  static const double _fallbackBitrateBps = 625000.0;
+  /// 速度上限（125 MB/s）：超过即视为跨视频 / 跨 seek 的异常跳变，直接丢弃
+  static const double _maxSpeedBps = 125 * 1024 * 1024.0;
+  /// 静默超过这么久，就认为「这一段下载结束了」，可以结算速率
+  static const int _segSilentMs = 700;
+  /// 短于这个时长的段只含一两个采样点（可能刚好跨越了停止时刻），不采信
+  static const int _segMinMs = 200;
+  /// 连续下载超过这么久就先结算一次，免得起播冲刺期要等到停下来才出数
+  static const int _segMaxMs = 1500;
+  /// 超过这么久没有新的下载段：判定缓冲已满 / 停止下载 → 归零，徽标消失
+  static const int _speedStaleMs = 3000;
+  /// 显示死区：新值和当前显示值相差不到 8% 就不刷新数字
+  static const double _speedDeadband = 0.08;
+  /// 新段速率的融合权重（段速率本身已经是平均值，不用太保守）
+  static const double _speedEmaAlpha = 0.45;
 
   // ══════ Gesture state ══════
   static const _gestureDecideThreshold = 10.0;
@@ -203,6 +246,10 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
   // 其余位置横滑才是拖动进度条。
   static const double _edgeBackZone = 42.0; // 左右边缘热区宽度（逻辑像素）
   static const double _edgeBackTrigger = 64.0; // 触发返回所需的最小向内位移
+  /// 横拖的「精调区」占屏宽比例：这一小段行程只走 ±10 秒，方便对准台词/画面
+  static const double _fineSeekZoneRatio = 0.2;
+  /// 精调区对应的毫秒数
+  static const int _fineSeekRangeMs = 10000;
   double? _horizontalStartDx;
   bool _edgeBackCandidate = false;
 
@@ -238,12 +285,32 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
     final dx = details.globalPosition.dx - _seekStartX;
     final totalMs = _dur.inMilliseconds.toDouble();
     if (totalMs <= 0) return;
-    // 全屏宽跳转时长随视频总时长自适应（短视频不会一拖到底，长视频不会拖一大段才几秒）
-    final rangeMs =
-        VideoPlayerUtil.seekRangeForDuration(_dur).inMilliseconds.toDouble();
-    final deltaMs = (dx * rangeMs / _screenWidth).round();
+    final deltaMs = _seekDeltaMs(dx, totalMs).round();
     final targetMs = (_seekStartPosition.inMilliseconds + deltaMs).clamp(0, totalMs.toInt());
     setState(() => _seekTarget = Duration(milliseconds: targetMs));
+  }
+
+  /// 横拖位移 → 时间偏移。
+  ///
+  /// 以前全屏宽只对应 `VideoPlayerUtil.seekRangeForDuration()` 给的一小段
+  ///（短片才 15 秒），手指从最左划到最右也才走这么点，明显不合理。
+  /// 现在改成 YouTube 那种两段灵敏度：
+  /// - **起步 [_fineSeekZoneRatio] 行程**是精调区，只走 ±10 秒，用来对准台词/画面；
+  /// - **剩下的行程**线性铺满整片，一次拖到底就是一整部片子。
+  /// 短视频里精调区最多只占总时长的 10%，不会把行程吃光。
+  double _seekDeltaMs(double dx, double totalMs) {
+    final w = _screenWidth;
+    if (w <= 0) return 0;
+    final fineW = w * _fineSeekZoneRatio;
+    final fineMs = min(_fineSeekRangeMs.toDouble(), totalMs * 0.1);
+    final absDx = dx.abs();
+    if (absDx <= fineW) {
+      return (dx / fineW) * fineMs;
+    }
+    final restMs = (totalMs - fineMs).clamp(0.0, totalMs).toDouble();
+    final restW = (w - fineW).clamp(1.0, w).toDouble();
+    final sign = dx < 0 ? -1.0 : 1.0;
+    return sign * (fineMs + (absDx - fineW) / restW * restMs);
   }
 
   void _onHorizontalDragEnd(DragEndDetails details) {
@@ -256,6 +323,7 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
     if (!_isSeeking) return;
     _controllers[_currentIndex]?.seekTo(_seekTarget);
     if (_wasPlayingBeforeSeek) _controllers[_currentIndex]?.play();
+    _resetSpeedSample();
     _startTimer();
     setState(() => _isSeeking = false);
   }
@@ -299,6 +367,7 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
     _progressTimer?.cancel();
     _landscapeHideTimer?.cancel();
     _indicatorFadeTimer?.cancel();
+    _centerRowFadeTimer?.cancel();
     _flushPending();
     WidgetsBinding.instance.removeObserver(this);
     for (final c in _controllers.values) {
@@ -396,11 +465,11 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
       try {
         final c = _controllers[_currentIndex];
         if (c != null && c.value.isInitialized) {
+          // 采样必须先于 setState，否则新速度要等下一帧才刷出来（肉眼可见延迟）
+          if (_enableNetworkSpeed) _calcNetworkSpeed(c);
           // 滑动调整进度期间，不从播放器读取位置，避免覆盖预览进度导致闪烁
-            setState(() { _pos = c.value.position; _dur = c.value.duration; });
-            _subtitleController.updatePosition(c.value.position.inMilliseconds);
-          if (_enableNetworkSpeed)
-          _calcNetworkSpeed(c);
+          setState(() { _pos = c.value.position; _dur = c.value.duration; });
+          _subtitleController.updatePosition(c.value.position.inMilliseconds);
           if (c.value.duration > Duration.zero &&
               c.value.position >= c.value.duration - const Duration(milliseconds: 500) &&
               !_completing) {
@@ -687,14 +756,32 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
         if (_enableNetworkSpeed) {
           final loadElapsed = DateTime.now().difference(_loadStartTime);
           final fs = v.fileSize;
-          if (loadElapsed.inMilliseconds > 300 && fs != null && fs > 0) {
-            _networkSpeed = (fs.toDouble() / (loadElapsed.inMilliseconds / 1000.0)).clamp(0.0, 125000000.0);
+          final b = ctrl.value.buffered;
+          final durMs = ctrl.value.duration.inMilliseconds.toDouble();
+          if (loadElapsed.inMilliseconds > 300 && b.isNotEmpty && durMs > 0) {
+            // 起播瞬间的种子值：初始化完成时**实际已缓冲**的字节数 / 起播耗时。
+            // 只用于让徽标在第一个下载段结算前就有数，随后会被段速率替换。
+            // （这里不能用「整片大小 / 起播耗时」：起播往往只下载了整片的一小段，
+            //  那样会高估好几倍，一进来就顶到 125 MB/s 的上限。）
+            double bps = _fallbackBitrateBps;
+            if (fs != null && fs > 0) bps = fs * 1000.0 / durMs;
+            final cum = b.last.end.inMilliseconds / 1000.0 * bps;
+            _networkSpeed = (cum / (loadElapsed.inMilliseconds / 1000.0))
+                .clamp(0.0, _maxSpeedBps);
+            _displaySpeed = _networkSpeed;
+            _lastCumBytes = cum; // 对齐基准，免得下一帧被误判成缓冲回退
+            _lastBufferedEnd = b.last.end;
             _lastSpeedSample = DateTime.now();
-            _lastBufferedEnd = Duration.zero;
+            _lastSpeedUpdateAt = DateTime.now(); // 起算「读数过期」的倒计时
           }
         }
       }
       if (mounted) setState(() {});
+      // 进页面后只引导一次：第一次起播露 2 秒让人知道有 ±10s，之后不再露
+      if (idx == _currentIndex && !_centerRowIntroShown) {
+        _centerRowIntroShown = true;
+        _wakeCenterRow();
+      }
 
       // 仅当前播放视频获取大小，预加载视频延迟到切换时再获取（减少CDN请求）
       if (idx == _currentIndex && (v.fileSize == null || v.fileSize! <= 0)) {
@@ -741,39 +828,146 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
 
   void _safePlay() {
     try { final c = _controllers[_currentIndex]; if (c != null && c.value.isInitialized) { c.play(); _isPlaying = true; if (mounted) setState(() {}); } } catch (_) {}
+    _dismissCenterRow(); // 从后台回来继续播 → 同样不留中间那一行
   }
 
   void _safePause() {
     try { final c = _controllers[_currentIndex]; if (c != null && c.value.isInitialized) { c.pause(); _isPlaying = false; if (mounted) setState(() {}); } } catch (_) {}
   }
 
+  /// 重置网速采样基线：切换视频 / 拖动进度后必须调用，
+  /// 否则会把「跨视频」「跨 seek」的缓冲跳变算成成千上万的假峰值。
+  void _resetSpeedSample() {
+    _networkSpeed = 0;
+    _displaySpeed = 0;
+    _clearSpeedSegment();
+    _lastSpeedUpdateAt = null;
+    _lastCumBytes = 0;
+    _lastBufferedEnd = Duration.zero;
+    _lastSpeedSample = DateTime.now();
+  }
+
+  /// 网速徽标当前是否需要占用布局。
+  ///
+  /// 低于 1 KB/s（缓冲已追平播放进度、或已整片缓存）就不再显示，
+  /// 免得长期挂一个 "0 B/s" 白占版面。
+  bool _speedVisible() => _enableNetworkSpeed && _displaySpeed >= 1024;
+
+  /// 结束当前「活跃下载段」的记账（不结算，只是丢弃）。
+  void _clearSpeedSegment() {
+    _segStartAt = null;
+    _segStartBytes = 0;
+    _lastGrowAt = null;
+  }
+
+  /// 把一个段速率融合进当前读数。
+  void _settleSpeedSegment(double segSpeed) {
+    _networkSpeed = _networkSpeed <= 0
+        ? segSpeed
+        : _networkSpeed + (segSpeed - _networkSpeed) * _speedEmaAlpha;
+    _lastSpeedUpdateAt = DateTime.now();
+    _updateDisplaySpeed();
+  }
+
+  /// 实时下载速度：**只统计「活跃下载段」**。
+  ///
+  /// 关键前提：播放器是「下一小段就停」的策略——缓冲到阈值就暂停下载，等播放
+  /// 消费掉一段再继续。所以**不能**拿长时间平均当网速：那样会把「停下来不动」
+  /// 的时间也摊进去，实测只有真实带宽的几分之一（真跑 5 MB/s 却显示 300 KB/s）。
+  ///
+  /// 这里的做法：把连续有增长的一段时间记为一个「下载段」，段结束时用
+  /// 「段内新增字节 / 段内时长」结算——这段时间里确实一直在下，所以得到的就是
+  /// 别的播放器 / 下载工具显示的那个带宽读数。段速率本身已经是平均值，天然不抖。
   void _calcNetworkSpeed(VideoPlayerController ctrl) {
     try {
       final buffered = ctrl.value.buffered;
       if (buffered.isEmpty) return;
+
       final end = buffered.last.end;
       final now = DateTime.now();
-      final elapsed = now.difference(_lastSpeedSample);
-      if (elapsed.inMilliseconds < 200) return;
-      final deltaMs = (end - _lastBufferedEnd).inMilliseconds.toDouble();
-      // Only calculate if buffer is actually growing
-      if (deltaMs > 0 && elapsed.inMilliseconds > 0) {
-        final fileSize = _playList.videos[_currentIndex].fileSize;
-        final durMs = ctrl.value.duration.inMilliseconds;
-        if (fileSize != null && fileSize > 0 && durMs > 0) {
-          _networkSpeed = (deltaMs / durMs * fileSize) / (elapsed.inMilliseconds / 1000.0);
-        } else if (durMs > 0) {
-          // Estimate bitrate: assume 5 Mbps (625 KB/s) for HD video as fallback
-          const estimatedBitrate = 625000.0; // bytes/s
-          _networkSpeed = (deltaMs / elapsed.inMilliseconds * 1000.0) * estimatedBitrate;
-        }
-      } else if (deltaMs == 0 && elapsed.inMilliseconds > 3000) {
-        // Buffer not growing -> speed is essentially 0
-        _networkSpeed = 0;
+
+      // 拖动进度期间缓冲区间会整体跳变，这一段样本不参与计算
+      if (_isSeeking) {
+        _lastBufferedEnd = end;
+        _lastSpeedSample = now;
+        _clearSpeedSegment();
+        return;
       }
+
+      // 每「音视频秒」对应的字节数
+      double bytesPerSecOfVideo = _fallbackBitrateBps;
+      final durMs = ctrl.value.duration.inMilliseconds.toDouble();
+      if (durMs > 0) {
+        final fs = _playList.videos[_currentIndex].fileSize;
+        if (fs != null && fs > 0) bytesPerSecOfVideo = fs * 1000.0 / durMs;
+      }
+      // 累计已下载字节数：缓冲到的位置 × 每秒字节数
+      final cumBytes = end.inMilliseconds / 1000.0 * bytesPerSecOfVideo;
+
+      if (cumBytes + 1024 < _lastCumBytes) {
+        // 缓冲位置回退（seek / 换源），旧数据整体作废
+        _networkSpeed = 0;
+        _displaySpeed = 0;
+        _clearSpeedSegment();
+      }
+
+      final prevCum = _lastCumBytes;
+      final grew = cumBytes - prevCum > 1.0;
+      if (grew) {
+        // 增长发生在「上一帧 → 现在」之间，所以段的起点取上一帧时刻
+        _segStartAt ??= _lastSpeedSample;
+        if (_segStartBytes == 0) _segStartBytes = prevCum;
+        _lastGrowAt = now;
+
+        // 连续下载太久（起播冲刺）就先结算一次，别等到停下来才出数
+        final segMs = now.difference(_segStartAt!).inMilliseconds;
+        if (segMs >= _segMaxMs) {
+          final segBytes = cumBytes - _segStartBytes;
+          if (segBytes > 0) {
+            _settleSpeedSegment(
+                (segBytes * 1000.0 / segMs).clamp(0.0, _maxSpeedBps));
+          }
+          _segStartAt = now;
+          _segStartBytes = cumBytes;
+        }
+      }
+      _lastCumBytes = cumBytes;
       _lastBufferedEnd = end;
       _lastSpeedSample = now;
+
+      // 静默够久 → 这一段下载结束了，结算它
+      if (!grew && _segStartAt != null && _lastGrowAt != null &&
+          now.difference(_lastGrowAt!).inMilliseconds >= _segSilentMs) {
+        final segMs = _lastGrowAt!.difference(_segStartAt!).inMilliseconds;
+        final segBytes = cumBytes - _segStartBytes;
+        if (segMs >= _segMinMs && segBytes > 0) {
+          _settleSpeedSegment(
+              (segBytes * 1000.0 / segMs).clamp(0.0, _maxSpeedBps));
+        }
+        _clearSpeedSegment();
+      }
+
+      // 太久没有新的下载段：缓冲已满 / 整片已缓存，读数过期 → 归零
+      if (_networkSpeed > 0 &&
+          _lastSpeedUpdateAt != null &&
+          now.difference(_lastSpeedUpdateAt!).inMilliseconds > _speedStaleMs) {
+        _networkSpeed = 0;
+        _displaySpeed = 0;
+      }
     } catch (_) {}
+  }
+
+  /// 显示死区：新值和正在显示的值相差不到 [_speedDeadband] 就维持原数字。
+  /// 归零 / 起步这类大跳变直接放行，免得卡住不动。
+  void _updateDisplaySpeed() {
+    final v = _networkSpeed;
+    if (_displaySpeed <= 0 || v <= 0) {
+      _displaySpeed = v;
+      return;
+    }
+    if ((v - _displaySpeed).abs() / _displaySpeed > _speedDeadband) {
+      _displaySpeed = v;
+    }
   }
 
   // ═══════════════ Gesture: Single Tap (delayed) + Double Tap ═══════════════
@@ -784,13 +978,62 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
     _lastTapDownPos = d.globalPosition;
   }
 
-  /// 双击：红心飘动特效 + 切换收藏。
+  /// 左右各 30% 是「双击跳 10 秒」区，中间 40% 留给双击点赞。
+  static const double _doubleTapSeekZone = 0.30;
+  static const int _doubleTapSeekStep = 10;
+  final List<_SeekRipple> _seekRipples = <_SeekRipple>[];
+  int _rippleSeconds = 0;
+  bool _rippleLeft = false;
+  DateTime? _rippleAt;
+
+  /// 双击**分区域**：屏幕左右各 [_doubleTapSeekZone] → 快退 / 快进 10 秒，
+  /// 中间 40% → 原来的双击点赞。
+  ///
+  /// 这是把中间那一行彻底从"播放中"撤掉的配套：播放时画面上不再有任何
+  /// ±10s 控件，想跳就双击屏幕两侧（YouTube / B 站同一套肌肉记忆），
+  /// 反馈只是一闪而过的涟漪（[_SeekRippleAnim]），不占画面、不挡主体。
   ///
   /// 与单击共存：GestureDetector 同时声明 onTap 与 onDoubleTap 后，Flutter 的
   /// 手势竞技场会自动把单击判定延迟到双击超时之后——双击只会走这里，
   /// 不会误触发一次播放/暂停。
   void _onDoubleTap() {
     final pos = _lastTapDownPos;
+    final w = _screenWidth;
+    if (w <= 0 || _dur <= Duration.zero) {
+      _doubleTapLike(pos); // 还没拿到时长，跳不了秒，退回点赞
+      return;
+    }
+    if (pos.dx <= w * _doubleTapSeekZone) {
+      _seekByDoubleTap(-_doubleTapSeekStep, left: true, pos: pos);
+    } else if (pos.dx >= w * (1 - _doubleTapSeekZone)) {
+      _seekByDoubleTap(_doubleTapSeekStep, left: false, pos: pos);
+    } else {
+      _doubleTapLike(pos);
+    }
+  }
+
+  /// 双击左右两侧：跳 [_doubleTapSeekStep] 秒，并在那一侧冒一个涟漪。
+  ///
+  /// 700ms 内连击同一侧会累加（10 → 20 → 30 秒），涟漪上的数字跟着涨，
+  /// 跟 YouTube 一样：连点几下就能一次跳很远，不用等动画播完再点。
+  void _seekByDoubleTap(int delta, {required bool left, required Offset pos}) {
+    final now = DateTime.now();
+    final chain = _rippleAt != null &&
+        now.difference(_rippleAt!) < const Duration(milliseconds: 700) &&
+        _rippleLeft == left;
+    _rippleSeconds = chain ? _rippleSeconds + delta : delta;
+    _rippleLeft = left;
+    _rippleAt = now;
+    _seekBy(delta);
+    if (!mounted) return;
+    setState(() {
+      _seekRipples.removeWhere((r) => r.left == left); // 同侧只留最新的那个
+      _seekRipples.add(_SeekRipple(UniqueKey(), pos, left, _rippleSeconds));
+    });
+  }
+
+  /// 双击中间区域：红心飘动特效 + 切换收藏。
+  void _doubleTapLike(Offset pos) {
     // Emby 来源：双击 = 爱心特效 + 切换 Emby 收藏
     if (_playList.fromEmby) {
       if (mounted) setState(() => _doubleTapIcons.add(pos));
@@ -806,6 +1049,18 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
     if (mounted) setState(() {});
   }
 
+  List<Widget> _buildSeekRipples() => _seekRipples
+      .map((r) => _SeekRippleAnim(
+            key: r.key,
+            position: r.pos,
+            left: r.left,
+            seconds: r.seconds,
+            onDone: () {
+              if (mounted) setState(() => _seekRipples.remove(r));
+            },
+          ))
+      .toList();
+
   void _togglePlayPause() {
     try {
       final c = _controllers[_currentIndex];
@@ -820,6 +1075,9 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
         _startLandscapeAutoHide();
       }
       if (mounted) setState(() {});
+      // 方向决定生死：恢复播放**立刻收起**（用户这时要的是接着看，画面上
+      // 不该再留东西，哪怕 2 秒也嫌挡）；暂停则常驻，见 [_wakeCenterRow]。
+      if (_isPlaying) _dismissCenterRow();
     } catch (_) {}
   }
 
@@ -836,15 +1094,61 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
       }
     } else {
       if (_hideUI) {
-        // 竖屏手动隐藏后，单击屏幕不恢复显示
-        if (_manualHideUI) return;
-        setState(() { _hideUI = false; _manualHideUI = false; });
+        // 保险①：竖屏隐藏后，单击屏幕一律恢复控件（不再区分自动/手动）。
+        // 这一击只做「恢复 UI」，不触发播放/暂停 —— 否则想找回界面的人
+        // 会被顺手暂停掉，手感很别扭（抖音也是这个行为）。
+        _hideUI = false;
+        _manualHideUI = false;
+        // 显式恢复控件 → 顺手把中间一行也叫出来（这一次确实是想看点什么）
+        _wakeCenterRow();
       } else {
+        // 播放/暂停本身就能决定中间一行：暂停常驻、恢复播放立刻收起
         _togglePlayPause();
       }
     }
     if (mounted) setState(() {});
   }
+
+  /// 唤出竖屏中间那一行（−10s / 播放键 / +10s），并在**播放中**启动 2 秒倒计时。
+  ///
+  /// 现在只剩两个唤出时机，都是「用户确实想看界面」的时刻：
+  /// - **进页面后的第一次起播**：露 2 秒做引导（[_centerRowIntroShown] 只放一次，
+  ///   之后切页不再露 —— 已经知道有这两个键了，没必要每次都挡一下）；
+  /// - **隐藏后恢复控件**：这一下是用户主动要找回界面；
+  /// - **暂停**：见下，直接长亮。
+  ///
+  /// 播放中途的手势（拖进度、横拖 seek、调亮度/音量）**不再唤出它**，
+  /// 恢复播放更是 [_dismissCenterRow] 立刻收起 —— 那时用户正在看画面，
+  /// 凭空冒出来两个圆只会挡住主体；要跳秒就双击屏幕两侧。
+  void _wakeCenterRow() {
+    _centerRowFadeTimer?.cancel();
+    if (!mounted) return;
+    if (!_centerRowAwake) setState(() => _centerRowAwake = true);
+    if (!_isPlaying) return; // 暂停中长亮，不倒计时
+    _centerRowFadeTimer = Timer(_centerRowLinger, () {
+      _centerRowFadeTimer = null;
+      if (!mounted || !_isPlaying) return; // 这 2 秒里要是被暂停了，就继续留着
+      setState(() => _centerRowAwake = false);
+    });
+  }
+
+  /// 立刻收起中间那一行：不等 2 秒，直接走 [_centerRowFade] 淡出。
+  ///
+  /// 用在「恢复播放」上——点了继续播放就说明想接着看，画面上不该再留任何东西，
+  /// 哪怕 2 秒的停留也是白占。想再用 ±10s 就再点一下屏幕（那一击会顺带暂停，
+  /// 整行随即常驻，见 [_buildCenterControls]）。
+  void _dismissCenterRow() {
+    _centerRowFadeTimer?.cancel();
+    _centerRowFadeTimer = null;
+    if (!mounted || !_centerRowAwake) return;
+    setState(() => _centerRowAwake = false);
+  }
+
+  void _cancelCenterRowFade() {
+    _centerRowFadeTimer?.cancel();
+    _centerRowFadeTimer = null;
+  }
+
   void _toggleOrientation() {
     _isLandscape = !_isLandscape;
     if (!_isLandscape) {
@@ -907,6 +1211,7 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
         _controllers[_currentIndex]?.seekTo(Duration(milliseconds: (val * _dur.inMilliseconds).round()));
       }
     } catch (_) {}
+    _resetSpeedSample();
     _startTimer();
   }
 
@@ -974,6 +1279,17 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
     );
   }
 
+  /// 拖动预览里的偏移量：1 分钟内显示 +12s，超过则显示 +12:34，
+  /// 免得长视频拖一下冒出一串四位数秒。
+  String _fmtSeekDelta(Duration d) {
+    final totalMs = d.inMilliseconds;
+    final s = totalMs.abs() ~/ 1000;
+    final sign = totalMs < 0 ? '-' : '+';
+    if (s < 60) return '$sign${s}s';
+    final m = s ~/ 60;
+    return '$sign$m:${(s % 60).toString().padLeft(2, '0')}';
+  }
+
   String _fmtDur(Duration d) {
     final m = d.inMinutes.remainder(60).toString().padLeft(2, '0');
     final s = d.inSeconds.remainder(60).toString().padLeft(2, '0');
@@ -992,15 +1308,16 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
       backgroundColor: Colors.black,
       body: Stack(children: [
         _buildGestureLayer(),
-        _buildPauseIcon(),
         // 横屏：画面全屏铺满，控件全部收进可唤起的浮动 HUD；
-        // 竖屏：沿用原来的常驻顶栏 / 右侧工具栏 / 底部进度条。
+        // 竖屏：顶栏 / 右侧工具栏 / 底部进度条 + 屏幕正中那一行三件套。
         if (_isLandscape)
           Positioned.fill(child: _buildLandscapeHud())
         else ...[
           if (!_hideUI) _buildTopBar(),
           if (!_hideUI) _buildToolBar(),
           if (!_hideUI) _buildProgress(),
+          // 竖屏专属：中央一行「−10s ⏵ +10s」，播放键已并入这一行
+          if (!_hideUI) _buildCenterControls(),
         ],
         SubtitleView(controller: _subtitleController, bottomOffset: _isLandscape ? 84 : 150),
         if (!_hideUI && !_isLandscape) _buildBottomInfo(),
@@ -1018,7 +1335,12 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
                 value: _currentVolume,
                 color: Colors.blue))),
         ..._buildHearts(),
-        if (!_hideUI && (SpUtil.getBool(AlistConstant.showTiktokPageIndicator) ?? true)) _buildIndicator(),
+        // 双击跳秒时的涟漪：只在操作的那一瞬间出现，600 多毫秒就散掉，
+        // 放在 hearts 之后，跟红心一样不参与命中测试、不受 _hideUI 影响
+        ..._buildSeekRipples(),
+        // 页码指示器自身承担「休眠态」：隐藏控件时它淡化留守并兼作恢复入口，
+        // 不额外新造控件，避免同一个位置出现两套视觉语言
+        if (_pageIndicatorEnabled()) _buildIndicator(),
       ]),
     );
   }
@@ -1103,11 +1425,14 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
 
   void _onPageChanged(int idx) {
     _flushPending();
+    _centerRowAwake = false; // 换页先收起：新视频开头挡着主体最难受
+    _cancelCenterRowFade();
     try { _controllers[_currentIndex]?.pause(); } catch (_) {}
     _currentIndex = idx;
     _isPlaying = false;
     _pos = Duration.zero;
     _dur = Duration.zero;
+    _resetSpeedSample(); // 换视频后旧缓冲区间作废，否则会冒出一个假峰值
     _loadSubtitleForCurrent();
     _disposeOutOfRange(idx);
     if (mounted) setState(() {});
@@ -1116,6 +1441,7 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
       c.play();
       _isPlaying = true;
       _recordViewing(idx);
+      // 切页后不再重复引导：[_centerRowIntroShown] 在第一次起播时已经放过一次
       if (mounted) setState(() {});
       final v = _playList.videos[idx];
       if ((v.fileSize == null || v.fileSize! <= 0) && v.videoUrl != null) {
@@ -1214,6 +1540,11 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
           const Spacer(),
           Text('${_currentIndex + 1}/${_playList.videos.length}',
             style: const TextStyle(color: Colors.white70, fontSize: 14)),
+          // 实时网速：紧跟页码。放这里既避开底部拥挤区，又不用自己管显隐
+          if (_speedVisible()) ...[
+            const SizedBox(width: 8),
+            _buildSpeedBadge(),
+          ],
           const Spacer(),
           // 竖屏顶栏的显隐开关（横屏改用点击屏幕，见 [_buildLandscapeHud]）
           IconButton(
@@ -1224,11 +1555,21 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
                 _hideUI = !_hideUI;
                 _manualHideUI = _hideUI;
               });
+              if (_hideUI) _notifyHideHint(); // 保险③：第一次隐藏时告诉人怎么找回来
             },
           ),
         ]),
       )),
     ));
+  }
+
+  /// 隐藏控件后怎么找回来。文案跟着页码指示器走：开着就补一句「点右侧圆点」。
+  /// 每次进播放页只提示一次，不打扰。
+  void _notifyHideHint() {
+    if (_hideHintShown) return;
+    _hideHintShown = true;
+    final tail = _pageIndicatorEnabled() ? '，或点右侧页码圆点' : '';
+    SmartDialog.showToast('控件已隐藏 · 点屏幕任意位置即可恢复$tail');
   }
 
   /// 竖屏右侧竖向工具栏：收藏 / 踩 / 循环 / 信息。
@@ -1332,15 +1673,95 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
     );
   }
 
+  /// 竖屏**屏幕正中一行的三件套**：`−10s ⏵ +10s`。
+  ///
+  /// 位置：还是以中间播放键为轴对称排开（MX Player / VLC 的经典布局）。
+  ///
+  /// 但它压在画面正中央，所以**播放中一律不出现**。整行的出现时机收敛成三条：
+  /// - **暂停时**：常驻（画面静止不挡内容，而这时正是要按这两个键的时刻）；
+  /// - **进页面第一次起播**：露 2 秒做一次引导（[_centerRowIntroShown]）；
+  /// - **隐藏后恢复控件**：用户主动要看界面；
+  /// 恢复播放由 [_dismissCenterRow] **立刻收起**，一秒都不多留。
+  /// 播放中要跳秒改走**双击屏幕左右两侧**（见 [_onDoubleTap]）。
+  ///
+  /// 一行的尺寸是 256×72；隐藏时用 [IgnorePointer] 把点击还给手势层，
+  /// 手指照样能单击暂停、双击跳秒。
+  ///
+  /// 显隐：仍然挂在 build() 的 `if (!_hideUI)` 上，整体透明度还是 [_uiOpacity]，
+  /// 这一层额外叠的是「按需浮出」开关，跟原来的规则互不冲突。
+  Widget _buildCenterControls() {
+    // 暂停时 `_isPlaying == false` → 长亮：画面静止时它不挡内容，
+    // 而这正是用户最需要看清这两个按钮的时刻。
+    final awake = _centerRowAwake || !_isPlaying;
+    return Positioned.fill(
+      child: Center(
+        child: AnimatedOpacity(
+          opacity: awake ? _uiOpacity : 0.0,
+          duration: _centerRowFade,
+          curve: Curves.easeOut,
+          child: IgnorePointer(
+            ignoring: !awake,
+            child: Row(mainAxisSize: MainAxisSize.min, children: [
+              _seekStepButton(icon: Icons.replay_10, seconds: -10),
+              const SizedBox(width: 40),
+              _buildCenterSlot(),
+              const SizedBox(width: 40),
+              _seekStepButton(icon: Icons.forward_10, seconds: 10),
+            ]),
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// ±10s 按钮本体。视觉详见 [_SeekStepIcon]，这里只负责接线。
+  Widget _seekStepButton({required IconData icon, required int seconds}) {
+    return _SeekStepIcon(icon: icon, onTap: () => _seekBy(seconds));
+  }
+
   String _fmtSpeed(double bps) {
     if (bps < 1024) return '${bps.toInt()} B/s';
     if (bps < 1024 * 1024) return '${(bps / 1024).toInt()} KB/s';
     return '${(bps / (1024 * 1024)).toStringAsFixed(1)} MB/s';
   }
 
+  /// 实时下载速度徽标（⬇ 1.2 MB/s）。
+  ///
+  /// 位置选在「顶栏页码旁」而不是底部文件信息行的原因：
+  /// 底部那行已经有文件路径 + 文件大小，再加网速会被 ellipsis 截掉，
+  /// 而且右侧工具栏（bottom 160 起）和进度条（bottom 80）已经很挤；
+  /// 顶栏中间是唯一的空白区，且横竖屏都对应同一处，切换后视线不需要重新找。
+  ///
+  /// 显隐：本组件没有任何自己的 Timer / Controller，纯跟随所在浮层
+  /// —— 竖屏由 [_buildTopBar] 的 `if (!_hideUI)` + Opacity 控制，
+  /// 横屏由 [_buildLandscapeHud] 的 AnimatedOpacity 淡入淡出，
+  /// 因此天然符合原有的控件显隐规则。
+  Widget _buildSpeedBadge({bool compact = false}) {
+    if (!_speedVisible()) return const SizedBox.shrink();
+    return Container(
+      padding: EdgeInsets.symmetric(
+          horizontal: compact ? 6 : 7, vertical: compact ? 2 : 3),
+      decoration: BoxDecoration(
+        color: Colors.black.withOpacity(compact ? 0.4 : 0.5),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: Colors.white.withOpacity(0.14), width: 0.5),
+      ),
+      child: Row(mainAxisSize: MainAxisSize.min, children: [
+        Icon(Icons.downloading_rounded,
+            color: const Color(0xFF4FC3F7), size: compact ? 11 : 12),
+        const SizedBox(width: 3),
+        Text(_fmtSpeed(_displaySpeed),
+            style: TextStyle(
+                color: const Color(0xFF4FC3F7),
+                fontSize: compact ? 10 : 11,
+                fontWeight: FontWeight.w600,
+                fontFamily: 'monospace')),
+      ]),
+    );
+  }
+
   Widget _buildBottomInfo() {
     final v = _playList.videos[_currentIndex];
-    final showSpeed = _enableNetworkSpeed && _isPlaying && _networkSpeed > 100;
     return Positioned(left: 12, bottom: 20, right: 12,
       child: Opacity(opacity: _uiOpacity, child: Row(
         crossAxisAlignment: CrossAxisAlignment.end,
@@ -1354,13 +1775,8 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
                   maxLines: 1, overflow: TextOverflow.ellipsis);
               }),
               const SizedBox(height: 4),
+              // 网速已移到顶栏徽标（[_buildSpeedBadge]），此处只留 大小 | 路径，避免被截断
               Row(children: [
-                if (showSpeed) ...[
-                  Text('⬇ ${_fmtSpeed(_networkSpeed)}',
-                      style: const TextStyle(color: Color(0xFF4FC3F7), fontSize: 11, fontFamily: 'monospace')),
-                  const Text('  |  ',
-                      style: TextStyle(color: Colors.white30, fontSize: 11)),
-                ],
                 // Emby 直链来源的 filePath 与文件名重复，只显示大小；其余显示 大小 | 路径
                 Expanded(
                   child: Text(
@@ -1399,11 +1815,9 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
 
   Widget _buildSeekPreview() {
     final delta = _seekTarget - _seekStartPosition;
-    final deltaSec = delta.inSeconds;
-    final icon = deltaSec >= 0
+    final icon = delta.inMilliseconds >= 0
         ? Icons.fast_forward_rounded
         : Icons.fast_rewind_rounded;
-    final sign = deltaSec >= 0 ? '+' : '';
     return Positioned(
       top: _screenHeight * 0.3,
       left: 0, right: 0,
@@ -1417,7 +1831,7 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
           child: Row(mainAxisSize: MainAxisSize.min, children: [
             Icon(icon, color: Colors.white, size: 28),
             const SizedBox(width: 12),
-            Text('${_fmtDur(_seekTarget)}  ($sign${deltaSec}s)',
+            Text('${_fmtDur(_seekTarget)}  (${_fmtSeekDelta(delta)})',
                 style: const TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.w600)),
           ]),
         ),
@@ -1485,10 +1899,20 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
                             fontSize: 14,
                             fontWeight: FontWeight.w600)),
                     const SizedBox(height: 2),
-                    Text('${_currentIndex + 1} / ${_playList.videos.length}',
-                        style: TextStyle(
-                            color: Colors.white.withOpacity(0.65),
-                            fontSize: 11)),
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text('${_currentIndex + 1} / ${_playList.videos.length}',
+                            style: TextStyle(
+                                color: Colors.white.withOpacity(0.65),
+                                fontSize: 11)),
+                        // 与竖屏保持同一处（页码旁），旋转后视线不用来回找
+                        if (_speedVisible()) ...[
+                          const SizedBox(width: 6),
+                          _buildSpeedBadge(compact: true),
+                        ],
+                      ],
+                    ),
                   ],
                 ),
               ),
@@ -1640,7 +2064,10 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
       var clamped = target < Duration.zero ? Duration.zero : target;
       if (_dur > Duration.zero && clamped > _dur) clamped = _dur;
       _controllers[_currentIndex]?.seekTo(clamped);
+      _resetSpeedSample();
       if (mounted) setState(() => _pos = clamped);
+      // 不用在这里 _wakeCenterRow()：暂停时整行本来就长亮，
+      // 而播放中根本不该把这行叫出来（要跳秒请双击屏幕两侧）。
     } catch (_) {}
   }
 
@@ -1655,13 +2082,17 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
   String _fmtClock(DateTime now) =>
       '${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}';
 
-  Widget _buildPauseIcon() {
-    if (_isPlaying || _isLandscape) return const SizedBox.shrink();
+  /// 中央一行**正中间那一格**：暂停时是播放键，播放中是等宽空位。
+  ///
+  /// 留空位而不是让它整个消失，是为了让左右两个 ±10s 永远对称——
+  /// 否则三角形一出现 / 一消失，两边按钮就会左右跳一下，很难看。
+  Widget _buildCenterSlot() {
+    if (_isPlaying || _isLandscape) return const SizedBox(width: 72, height: 72);
     return GestureDetector(
       onTap: _togglePlayPause,
-      child: Center(child: Container(width: 72, height: 72,
+      child: Container(width: 72, height: 72,
         decoration: BoxDecoration(color: Colors.black45, borderRadius: BorderRadius.circular(36)),
-        child: const Icon(Icons.play_arrow_rounded, color: Colors.white70, size: 44))),
+        child: const Icon(Icons.play_arrow_rounded, color: Colors.white70, size: 44)),
     );
   }
 
@@ -1669,8 +2100,132 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
     _HeartAnim(key: Key(p.toString()), position: p, onDone: () => _doubleTapIcons.remove(p))).toList();
 
   // 修复：页码指示器支持任意数量视频，用比例显示
+
+  /// 页码指示器开关。
+  ///
+  /// 原来写成 `SpUtil.getBool(k) ?? true`，那句 `?? true` 是**永远走不到的死代码**：
+  /// sp_util 的 getBool 签名是 `static bool? getBool(String key, {bool? defValue = false})`，
+  /// 也就是「key 从来没写过」时它返回的是 false 而不是 null —— 结果就是默认关闭，
+  /// 而且外面怎么都救不回来。这里改成先用 haveKey 判断是否真的存过。
+  bool _pageIndicatorEnabled() {
+    final key = AlistConstant.showTiktokPageIndicator;
+    if (SpUtil.haveKey(key) != true) return true; // 从未设置过 → 默认开启
+    return SpUtil.getBool(key) ?? false;
+  }
+
   final ScrollController _indicatorScrollCtrl = ScrollController();
 
+  // ═════════ 页码指示器：拖动选片 ═════════
+  /// 正在指示器上拖动选片（此时整条指示器提亮，跟休眠态区分开）。
+  bool _scrubbing = false;
+  /// 手指当前落在第几个（−1 = 没有）。松手就跳到这个。
+  int _scrubIndex = -1;
+  /// 手指在指示条内的纵向位置，气泡跟着它走。
+  double _scrubDy = 0;
+  /// 触感节流：大列表一次能划过几百个，不节流会疯狂震动。
+  DateTime? _lastScrubHaptic;
+  /// 跨度超过这个数就别动画了（PageView 一路闪过去反而卡），直接落位。
+  static const int _pageJumpThreshold = 20;
+
+  /// 指示器**命中区**的宽度。圆点本身只有 3~6px 宽，照着它做热区手指根本按不到，
+  /// 所以热区外扩到 28，再用 Align 把圆点贴回原来那一侧（左/右边缘），
+  /// 视觉位置一像素不动，但手指有 28px 可落脚。
+  static const double _indicatorHitWidth = 28.0;
+
+  /// 手指位置 → 下标。**按密度分两档**（这是大列表能用得下去的关键）：
+  ///
+  /// - **看得全**（`total * itemH <= maxH`）：绝对映射，手指底下哪个点就是哪个，
+  ///   所见即所得，不用解释；
+  /// - **看不全**（长列表，点被压到 3px）：改**比例映射** —— 整条高度 = 整个
+  ///   播放列表，`index = 手指高度占比 × (total-1)`。一次拖动就能从第一个到
+  ///   最后一个，跟拖滚动条一样；再密的列表也不需要"边缘加速"那套补丁。
+  int _scrubIndexFor(
+      double dy, double itemH, double maxH, int total, bool dense) {
+    if (total <= 0) return 0;
+    if (dense) {
+      final f = maxH <= 0 ? 0.0 : (dy / maxH).clamp(0.0, 1.0);
+      return (f * (total - 1)).round();
+    }
+    final offset =
+        _indicatorScrollCtrl.hasClients ? _indicatorScrollCtrl.offset : 0.0;
+    return itemH <= 0 ? 0 : ((dy + offset) / itemH).floor().clamp(0, total - 1);
+  }
+
+  void _scrubHaptic() {
+    final now = DateTime.now();
+    if (_lastScrubHaptic != null &&
+        now.difference(_lastScrubHaptic!) < const Duration(milliseconds: 70)) {
+      return;
+    }
+    _lastScrubHaptic = now;
+    HapticFeedback.selectionClick();
+  }
+
+  void _onIndicatorDragStart(double dy, double itemH, double maxH, int total,
+      bool dense) {
+    _scrubDy = dy;
+    _lastScrubHaptic = null;
+    _scrubHaptic();
+    setState(() {
+      _scrubbing = true;
+      _scrubIndex = _scrubIndexFor(dy, itemH, maxH, total, dense);
+    });
+  }
+
+  void _onIndicatorDragUpdate(
+      double dy, double itemH, double maxH, int total, bool dense) {
+    _scrubDy = dy;
+    final i = _scrubIndexFor(dy, itemH, maxH, total, dense);
+    if (i != _scrubIndex) {
+      setState(() => _scrubIndex = i);
+      _scrubHaptic(); // 每划过一个点给一下，手感像滚轮
+    }
+  }
+
+  void _endIndicatorDrag() {
+    final target = _scrubIndex;
+    if (mounted) {
+      setState(() {
+        _scrubbing = false;
+        _scrubIndex = -1;
+      });
+    }
+    if (target < 0 || target == _currentIndex) return;
+    // 跨度太大时动画反而会从几千个页面上一路闪过去（既慢又卡），直接落位更干净
+    if ((target - _currentIndex).abs() > _pageJumpThreshold) {
+      try {
+        _pageController.jumpToPage(target);
+      } catch (_) {
+        _goToPage(target);
+      }
+    } else {
+      _goToPage(target);
+    }
+  }
+
+  void _cancelIndicatorDrag() {
+    if (mounted) {
+      setState(() {
+        _scrubbing = false;
+        _scrubIndex = -1;
+      });
+    }
+  }
+
+  /// 竖屏/横屏通用的页码点指示器，四态：
+  ///
+  /// - **活跃态**（控件可见）：白点 + 半透明白点，正常亮度；
+  /// - **休眠态**（控件隐藏后）：不新增任何控件，指示器自己淡到 35% 留守，
+  ///   继续告诉用户"现在在第几个"，同时兼作恢复入口——点它跟点屏幕一样能唤回控件；
+  /// - **拖动态**（手指按住上下划）：整条强制提亮到 100%（休眠态下也要看清在选第几个），
+  ///   手指底下那个点变粗变亮、其余压暗到 16%，松手即跳到对应视频；
+  /// - **气泡态**（拖动中）：跟着手指浮出「下标 / 总数 + 文件名」，见 [_buildScrubBubble]。
+  ///
+  /// 大列表（几百集）靠 [_scrubIndexFor] 的**比例映射**兜底：整条高度 = 整个播放列表，
+  /// 一次拖动就能从第一集划到最后一集，不用"边缘加速"之类的补丁。
+  ///
+  /// 之所以不另做一个「恢复把手」：那会在同一块右边缘塞进两套视觉语言，
+  /// 而且和这里的圆点位置几乎重叠，看着很脏。一个元素多种状态最干净。
   Widget _buildIndicator() {
     final total = _playList.videos.length;
     if (total <= 1) return const SizedBox.shrink();
@@ -1682,39 +2237,155 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
     final dotH = total <= 30 ? 8.0 : (total <= 80 ? 5.0 : 3.0);
     final activeH = dotH * 2;
     final vMargin = 1.0;
+    final itemH = dotH + vMargin * 2;
     final maxH = safeH * 0.7;
+    // 一眼排不下 → 整条当滚动条用（比例映射），见 [_scrubIndexFor]
+    final dense = total * itemH > maxH;
+    final boxTop = topPad + (safeH - maxH) / 2;
+    final pickedH = (dotH * 2.6).clamp(dotH * 2, 22.0).toDouble();
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!_indicatorScrollCtrl.hasClients) return;
-      final itemH = dotH + vMargin * 2;
-      final target = (_currentIndex * itemH - maxH / 2 + itemH / 2)
-          .clamp(0.0, _indicatorScrollCtrl.position.maxScrollExtent);
-      _indicatorScrollCtrl.animateTo(target,
-        duration: const Duration(milliseconds: 200), curve: Curves.easeOut);
+      final c = _indicatorScrollCtrl;
+      if (!c.hasClients) return;
+      final anchor = (_scrubbing && dense) ? _scrubIndex : _currentIndex;
+      final target = (anchor * itemH - maxH / 2 + itemH / 2)
+          .clamp(0.0, c.position.maxScrollExtent);
+      // 目标没变就别动：原来这里每帧都起一次 animateTo，长列表下纯烧帧
+      if ((target - c.offset).abs() < 0.5) return;
+      if (_scrubbing && dense) {
+        c.jumpTo(target); // 拖动中要跟手，不能走动画
+      } else {
+        c.animateTo(target,
+            duration: const Duration(milliseconds: 200), curve: Curves.easeOut);
+      }
     });
 
+    final dormant = _hideUI; // 控件隐藏 → 指示器进入休眠态
+
+    return Stack(children: [
+      Positioned(
+        left: _isLandscape ? 6.0 : null,
+        right: _isLandscape ? null : 8.0,
+        top: boxTop,
+        child: GestureDetector(
+          behavior: HitTestBehavior.translucent,
+          // 与点屏幕保持同一套语义：显示态=播放/暂停，隐藏态=唤回控件。
+          // 顺带修掉一个老问题：原来点这块区域会被 ListView 吃掉，不触发任何操作。
+          onTap: _onScreenTap,
+          onVerticalDragStart: (d) => _onIndicatorDragStart(
+              d.localPosition.dy, itemH, maxH, total, dense),
+          onVerticalDragUpdate: (d) => _onIndicatorDragUpdate(
+              d.localPosition.dy, itemH, maxH, total, dense),
+          onVerticalDragEnd: (_) => _endIndicatorDrag(),
+          onVerticalDragCancel: _cancelIndicatorDrag,
+          child: AnimatedOpacity(
+            // 拖动时强制提亮：休眠态（35%）下也得看清自己在选第几个
+            opacity: (_scrubbing || !dormant) ? 1.0 : 0.35,
+            duration: const Duration(milliseconds: 200),
+            child: SizedBox(
+              // 命中区加宽到 28（原来 12，手指太难按），圆点本身仍贴在原处：
+              // 用 Align 把 12 宽的 ListView 靠到原来那一侧，视觉位置一像素不差
+              height: maxH,
+              width: _indicatorHitWidth,
+              child: Align(
+                alignment: _isLandscape
+                    ? Alignment.centerLeft
+                    : Alignment.centerRight,
+                child: SizedBox(
+                  width: 12,
+                  child: ListView.builder(
+                    controller: _indicatorScrollCtrl,
+                    physics: const NeverScrollableScrollPhysics(),
+                    itemCount: total,
+                    itemBuilder: (_, i) {
+                      final active = i == _currentIndex;
+                      final picked = _scrubbing && i == _scrubIndex;
+                      // 竖向 ListView 给子项的是「宽度紧约束」（= 上面 SizedBox 的 12），
+                      // 不套 Center 的话这里的 width:3 会被直接无视，每个点都会被拉成
+                      // 12px 宽的白块，看起来就是一整条粗柱子而不是点——这也是
+                      // 「明明开了却看不出有指示器」的元凶之一。
+                      return Center(
+                        child: AnimatedContainer(
+                          duration: const Duration(milliseconds: 130),
+                          curve: Curves.easeOut,
+                          width: picked ? 6 : 3,
+                          height: picked ? pickedH : (active ? activeH : dotH),
+                          margin: EdgeInsets.symmetric(vertical: vMargin),
+                          decoration: BoxDecoration(
+                            color: picked
+                                ? Colors.white
+                                : (active
+                                    ? Colors.white
+                                    : (_scrubbing
+                                        ? Colors.white.withOpacity(0.16)
+                                        : Colors.white30)),
+                            borderRadius: BorderRadius.circular(2),
+                            // 只给选中点加一点点暗晕，亮画面上也立得出来
+                            boxShadow: picked
+                                ? [
+                                    BoxShadow(
+                                        color: Colors.black.withOpacity(0.5),
+                                        blurRadius: 6)
+                                  ]
+                                : null,
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+      if (_scrubbing && _scrubIndex >= 0)
+        _buildScrubBubble(boxTop, topPad, bottomPad),
+    ]);
+  }
+
+  /// 拖动选片时跟着手指的气泡：**下标 / 总数**，下面再带一行文件名。
+  ///
+  /// 长列表里点只有 3px，光看圆点根本不知道选到了第几个，全靠这个气泡；
+  /// 一行文件名则让"我要找的是那一集"变成看得见的事，不用松手去试。
+  Widget _buildScrubBubble(double boxTop, double topPad, double bottomPad) {
+    final mq = MediaQuery.of(context);
+    final v = _playList.videos[_scrubIndex];
+    final top = (boxTop + _scrubDy - 24.0)
+        .clamp(topPad + 8.0, mq.size.height - bottomPad - 72.0);
+    final gap = 8.0 + _indicatorHitWidth + 6.0;
     return Positioned(
-      left: _isLandscape ? 6.0 : null,
-      right: _isLandscape ? null : 8.0,
-      top: topPad + (safeH - maxH) / 2,
-      child: SizedBox(
-        height: maxH,
-        width: 12,
-        child: ListView.builder(
-          controller: _indicatorScrollCtrl,
-          physics: const NeverScrollableScrollPhysics(),
-          itemCount: total,
-          itemBuilder: (_, i) {
-            final active = i == _currentIndex;
-            return Container(
-              width: 3,
-              height: active ? activeH : dotH,
-              margin: EdgeInsets.symmetric(vertical: vMargin),
-              decoration: BoxDecoration(
-                color: active ? Colors.white : Colors.white30,
-                borderRadius: BorderRadius.circular(2)),
-            );
-          },
+      top: top,
+      right: _isLandscape ? null : gap,
+      left: _isLandscape ? gap : null,
+      child: IgnorePointer(
+        ignoring: true, // 纯提示，绝不能吃掉正在进行的拖动
+        child: Container(
+          constraints: const BoxConstraints(maxWidth: 168),
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+          decoration: BoxDecoration(
+            color: Colors.black.withOpacity(0.72),
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: _isLandscape
+                ? CrossAxisAlignment.start
+                : CrossAxisAlignment.end,
+            children: [
+              Text('${_scrubIndex + 1} / ${_playList.videos.length}',
+                  style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600)),
+              const SizedBox(height: 2),
+              Text(stripKnownVideoExtension(v.fileName),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                      color: Colors.white.withOpacity(0.7), fontSize: 11)),
+            ],
+          ),
         ),
       ),
     );
@@ -2031,5 +2702,181 @@ class _MiddleVerticalDragRecognizer extends VerticalDragGestureRecognizer {
   bool isPointerAllowed(PointerEvent event) {
     if (event is PointerDownEvent && !isMiddleZone(event.position)) return false;
     return super.isPointerAllowed(event);
+  }
+}
+
+/// ±10s 快进 / 快退按钮本体。
+///
+/// 它不再常驻，而是跟着中间那一行一起被 [_wakeCenterRow] 叫出来，
+/// 停留 2 秒后随整行淡出（见 `_buildCenterControls` 里的 AnimatedOpacity）。
+/// 正因为只露脸一小会儿，这里才敢保留圆形底盘 —— 短暂出现时「看得清」
+/// 比「不抢眼」重要；填充取比常驻版本淡一档的 black38。
+///
+/// 按下时有 0.86 缩放 + 55% 透明度的回弹反馈（用 TweenAnimationBuilder，
+/// 不依赖较高版本才有的 AnimatedScale，也不需要 AnimationController）。
+class _SeekStepIcon extends StatefulWidget {
+  final IconData icon;
+  final VoidCallback onTap;
+
+  const _SeekStepIcon({required this.icon, required this.onTap});
+
+  @override
+  State<_SeekStepIcon> createState() => _SeekStepIconState();
+}
+
+class _SeekStepIconState extends State<_SeekStepIcon> {
+  bool _pressed = false;
+
+  static const double _minScale = 0.86;
+  static const double _minOpacity = 0.55;
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTapDown: (_) => setState(() => _pressed = true),
+      onTapUp: (_) => setState(() => _pressed = false),
+      onTapCancel: () => setState(() => _pressed = false),
+      onTap: widget.onTap,
+      child: TweenAnimationBuilder<double>(
+        tween: Tween<double>(begin: 1.0, end: _pressed ? _minScale : 1.0),
+        duration: const Duration(milliseconds: 120),
+        curve: Curves.easeOut,
+        builder: (context, scale, child) {
+          // scale: 1.0 ↔ 0.86 → 归一化成 0..1 的按压进度，顺带驱动透明度
+          final t = ((scale - _minScale) / (1.0 - _minScale)).clamp(0.0, 1.0);
+          return Transform.scale(
+            scale: scale,
+            child: Opacity(
+              opacity: _minOpacity + (1.0 - _minOpacity) * t,
+              child: child,
+            ),
+          );
+        },
+        child: Container(
+          width: 52,
+          height: 52,
+          decoration: BoxDecoration(
+            // 恢复圆形底：因为它只在被叫出来的 2 秒里露脸（见 [_wakeCenterRow]），
+            // 短暂出现时"看得清"比"不抢眼"重要；填充取 black38，比常驻时的
+            // black45 淡一档，配 60% 的整体透明度，落在画面上已经很轻了。
+            color: Colors.black38,
+            shape: BoxShape.circle,
+          ),
+          alignment: Alignment.center,
+          child: Icon(widget.icon, color: const Color(0xF2FFFFFF), size: 26),
+        ),
+      ),
+    );
+  }
+}
+
+/// 一次「双击跳秒」的记录，只用来给涟漪定位（动画播完就被移除）。
+class _SeekRipple {
+  final Key key;
+  final Offset pos;
+  final bool left;
+  final int seconds;
+  const _SeekRipple(this.key, this.pos, this.left, this.seconds);
+}
+
+/// 双击屏幕左右侧时的**涟漪反馈**（YouTube / B 站同款）。
+///
+/// 存在感被刻意压到最低：只在手指离开的那一侧冒出来一个半透明圆，
+/// 620ms 内「弹出 → 停一下 → 散掉」，结束即自我移除，不常驻、不挡主体。
+/// 连续双击时由外部把 seconds 累加好传进来（10 → 20 → 30 秒）。
+class _SeekRippleAnim extends StatefulWidget {
+  final Offset position;
+  final bool left;
+  final int seconds;
+  final VoidCallback onDone;
+  const _SeekRippleAnim(
+      {super.key,
+      required this.position,
+      required this.left,
+      required this.seconds,
+      required this.onDone});
+
+  @override
+  State<_SeekRippleAnim> createState() => _SeekRippleAnimState();
+}
+
+class _SeekRippleAnimState extends State<_SeekRippleAnim>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _ac = AnimationController(
+      duration: const Duration(milliseconds: 620), vsync: this);
+
+  static const double _appearEnd = 0.18; // 弹出段
+  static const double _holdEnd = 0.55; // 保持段结束，之后淡出
+  static const double _size = 88.0;
+
+  @override
+  void initState() {
+    super.initState();
+    _ac.addListener(() {
+      if (mounted) setState(() {});
+    });
+    _ac.forward().then((_) => widget.onDone());
+  }
+
+  @override
+  void dispose() {
+    _ac.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final v = _ac.value;
+    final op = v < _appearEnd
+        ? v / _appearEnd
+        : (v < _holdEnd
+            ? 1.0
+            : (1.0 - (v - _holdEnd) / (1.0 - _holdEnd)).clamp(0.0, 1.0));
+    final sc = v < _appearEnd
+        ? 0.85 + 0.15 * (v / _appearEnd)
+        : 1.0 + 0.08 * ((v - _appearEnd) / (1.0 - _appearEnd));
+    final size = MediaQuery.of(context).size;
+    // 贴着那一侧固定放，纵向跟着手指落点，再夹进安全区避免顶到状态栏/进度条
+    final x = widget.left ? 20.0 : (size.width - _size - 20.0);
+    final maxY = (size.height - 180.0).clamp(80.0, size.height);
+    final y = (widget.position.dy - _size / 2).clamp(80.0, maxY);
+    return Positioned(
+      left: x,
+      top: y,
+      child: IgnorePointer(
+        ignoring: true, // 纯反馈，绝不能吃掉手势
+        child: Opacity(
+          opacity: op,
+          child: Transform.scale(
+            scale: sc,
+            child: Container(
+              width: _size,
+              height: _size,
+              decoration: BoxDecoration(
+                color: Colors.black.withOpacity(0.42),
+                shape: BoxShape.circle,
+              ),
+              child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(
+                        widget.left
+                            ? Icons.fast_rewind_rounded
+                            : Icons.fast_forward_rounded,
+                        color: Colors.white,
+                        size: 30),
+                    const SizedBox(height: 2),
+                    Text('${widget.seconds.abs()} 秒',
+                        style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w500)),
+                  ]),
+            ),
+          ),
+        ),
+      ),
+    );
   }
 }
