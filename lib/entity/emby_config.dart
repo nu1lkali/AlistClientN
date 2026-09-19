@@ -95,25 +95,60 @@ class EmbyLibraryConfig {
   /// Emby 媒体库 Id（随机抽取时的 ParentId）
   final String parentId;
 
+  /// 是否排除在「全部媒体库」随机抽取之外。
+  ///
+  /// 仅影响「全部媒体库」模式：勾选媒体库本身单独播放时不受此开关影响。
+  final bool excludeFromAll;
+
   const EmbyLibraryConfig({
     required this.id,
     this.serverId = '',
     required this.remark,
     required this.parentId,
+    this.excludeFromAll = false,
   });
 
   bool get isValid => parentId.trim().isNotEmpty;
+
+  // ─────────────「全部媒体库」虚拟项 ─────────────
+  //
+  // 它不是一条真实存储的配置，而是「跨当前服务器全部媒体库随机抽取」的虚拟选项：
+  // 选中后随机播放会对每个媒体库各抽一批，汇总去重后再均匀洗牌。
+  // 详见 EmbyApi.fetchRandomVideosFromAllLibraries。
+
+  /// 「全部媒体库」虚拟项的固定本地 id（不与任何真实媒体库 id 冲突）
+  static const String allLibrariesId = '__all_libraries__';
+
+  /// 占位 ParentId（无实际意义，仅用于通过 [isValid] 配置校验）
+  static const String allLibrariesParentId = 'ALL';
+
+  /// 列表/提示中的显示名
+  static const String allLibrariesRemark = '全部媒体库';
+
+  /// 构造归属于 [serverId] 的「全部媒体库」虚拟配置。
+  factory EmbyLibraryConfig.allLibraries(String serverId) =>
+      EmbyLibraryConfig(
+        id: allLibrariesId,
+        serverId: serverId,
+        remark: allLibrariesRemark,
+        parentId: allLibrariesParentId,
+      );
+
+  /// 当前配置是否为「全部媒体库」虚拟项
+  bool get isAllLibraries => id == allLibrariesId;
 
   EmbyLibraryConfig copyWith({
     String? serverId,
     String? remark,
     String? parentId,
+    bool? excludeFromAll,
   }) {
     return EmbyLibraryConfig(
       id: id,
       serverId: serverId ?? this.serverId,
       remark: remark ?? this.remark,
       parentId: parentId ?? this.parentId,
+      excludeFromAll: excludeFromAll ?? this.excludeFromAll,
     );
   }
 
@@ -122,6 +157,7 @@ class EmbyLibraryConfig {
         'serverId': serverId,
         'remark': remark,
         'parentId': parentId,
+        'excludeFromAll': excludeFromAll,
       };
 
   factory EmbyLibraryConfig.fromJson(Map<String, dynamic> json) {
@@ -130,6 +166,8 @@ class EmbyLibraryConfig {
       serverId: (json['serverId'] as String?) ?? '',
       remark: (json['remark'] as String?) ?? '',
       parentId: (json['parentId'] as String?) ?? '',
+      // 历史数据没有该字段，默认参与
+      excludeFromAll: (json['excludeFromAll'] as bool?) ?? false,
     );
   }
 }

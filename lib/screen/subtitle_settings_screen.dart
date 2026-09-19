@@ -13,9 +13,9 @@ class SubtitleSettingsScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return AlistScaffold(
-      appbarTitle: const Text('外挂字幕'),
-      body: const _SubtitleSettingsBody(),
+    return const AlistScaffold(
+      appbarTitle: Text('外挂字幕'),
+      body: _SubtitleSettingsBody(),
     );
   }
 }
@@ -80,7 +80,11 @@ class _SubtitleSettingsBody extends StatelessWidget {
                       '视频: www.98T.la@HEYZO-0806_iris2.mp4\n'
                       '字幕: HEYZO-0806.srt\n'
                       '→ 精确查找: ✗ 不匹配\n'
-                      '→ 模糊查找: ✓ 提取番号 HEYZO-0806 匹配',
+                      '→ 模糊查找: ✓ 番号一致 (95分)\n'
+                      '\n'
+                      '视频: 1.mp4\n'
+                      '字幕: 13333.srt\n'
+                      '→ 模糊查找: ✗ 纯数字不做包含匹配 (0分)',
                       style: TextStyle(fontSize: 10, color: scheme.onSurfaceVariant,
                           fontFamily: 'monospace', height: 1.5),
                     ),
@@ -259,9 +263,9 @@ class _SubtitleSettingsBody extends StatelessWidget {
   static String _modeDescription(SubtitleMatchMode mode) {
     switch (mode) {
       case SubtitleMatchMode.exact:
-        return '文件名完全一致才匹配（去掉后缀，忽略大小写）';
+        return '文件名完全一致才匹配（去掉后缀，忽略大小写与分隔符）';
       case SubtitleMatchMode.fuzzy:
-        return '提取番号核心ID，字幕名包含该ID即匹配';
+        return '按番号/季集/片名综合打分，低于阈值不匹配（纯数字不子串包含）';
       case SubtitleMatchMode.dual:
         return '先精确查找，未命中再模糊查找（推荐）';
     }

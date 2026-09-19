@@ -223,6 +223,24 @@ class EmbyConfigManager {
     }
   }
 
+  /// 设置某媒体库是否**排除**在「全部媒体库」随机抽取之外。
+  ///
+  /// 仅影响 [EmbyLibraryConfig.allLibrariesId] 模式；单独选中该库播放不受影响。
+  static void setLibraryExcludedFromAll(String id, bool excluded) {
+    final libraries = loadLibraries();
+    final idx = libraries.indexWhere((e) => e.id == id);
+    if (idx < 0 || libraries[idx].excludeFromAll == excluded) return;
+    libraries[idx] = libraries[idx].copyWith(excludeFromAll: excluded);
+    saveLibraries(libraries);
+  }
+
+  /// 参与「全部媒体库」随机抽取的媒体库：
+  /// 配置有效、非虚拟项、且未被用户手动排除。
+  static List<EmbyLibraryConfig> allLibrariesTargetsOf(String? serverId) =>
+      librariesOf(serverId)
+          .where((e) => e.isValid && !e.isAllLibraries && !e.excludeFromAll)
+          .toList();
+
   static void deleteLibrary(String id) {
     final libraries = loadLibraries()..removeWhere((e) => e.id == id);
     saveLibraries(libraries);
@@ -241,6 +259,11 @@ class EmbyConfigManager {
       SpUtil.getString(_keySelectedLibraryId, defValue: '');
 
   static void selectLibrary(String id) {
+    // 「全部媒体库」是虚拟项，不在媒体库列表里，直接放行
+    if (id == EmbyLibraryConfig.allLibrariesId) {
+      _selectLibraryId(id);
+      return;
+    }
     if (loadLibraries().any((e) => e.id == id)) _selectLibraryId(id);
   }
 
@@ -273,6 +296,9 @@ class EmbyConfigManager {
     final libs = librariesOf(selectedServer?.id);
     if (libs.isEmpty) return null;
     final id = selectedLibraryId;
+    if (id == EmbyLibraryConfig.allLibrariesId) {
+      return EmbyLibraryConfig.allLibraries(selectedServer?.id ?? '');
+    }
     if (id != null && id.isNotEmpty) {
       final match = libs.where((e) => e.id == id);
       if (match.isNotEmpty) return match.first;

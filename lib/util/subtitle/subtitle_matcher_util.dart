@@ -67,10 +67,12 @@ class SubtitleMatcherUtil {
       final matched = SubtitleMatcher.findMatchedSubtitles(videoName, subtitleFiles, mode);
 
       if (matched.isEmpty) {
+        final videoKey = SubtitleMatcher.cleanName(videoName);
         final videoId = SubtitleMatcher.extractId(videoName);
-        final subIds = subtitleFiles.map((s) => SubtitleMatcher.extractId(s)).toList();
+        final subKeys = subtitleFiles.map(SubtitleMatcher.cleanName).toList();
         SubtitleController.addLog('本地字幕未匹配 (模式: ${_modeLabel(mode)})');
-        SubtitleController.addLog('  视频ID: $videoId, 字幕池ID: $subIds');
+        SubtitleController.addLog('  视频关键字: $videoKey${videoId.isEmpty ? '' : ' (番号: $videoId)'}');
+        SubtitleController.addLog('  字幕池(${'${subKeys.length}'}): $subKeys');
         return null;
       }
 

@@ -8,6 +8,13 @@ enum SubtitleMatchMode {
   dual,
 }
 
+/// 模糊匹配的最低可接受分数（低于此值视为不匹配）
+const int kFuzzyAcceptScore = 70;
+
+/// 参与模糊比对的最短核心串长度：低于此长度只认「完全相等」，
+/// 避免 "1.mp4" 这类短名被 "13333.srt" 包含命中
+const int kMinCoreLength = 3;
+
 /// 匹配结果（带评分，分数越高匹配度越好）
 class _MatchResult {
   final String subtitleName;
@@ -109,9 +116,6 @@ class SubtitleMatcher {
     r'(?:$|[-_\s.])',
     caseSensitive: false,
   );
-
-  // 用于模糊比对时完全抹平噪音符号（连字符、下划线、空格）的正则
-  static final _regFlatten = RegExp(r'[-_\s]');
 
   // 连字符分隔的语言标记（如 -zh-CN, -zh-TW, -en, -ja 等）
   static final _regHyphenLangTag = RegExp(r'-[a-zA-Z]{1,4}(?:-[a-zA-Z0-9]{2,4})?$');
@@ -225,8 +229,11 @@ class SubtitleMatcher {
       }
     }
 
-    // 8. 无法提取番号时，返回深度清洗后的名称
-    return name;
+    // 8. 无法提取番号时返回空串。
+    //    旧实现这里退化成「返回整个清洗名」，于是 "1.mp4" 的 ID 变成 "1"，
+    //    再被 "13333.srt" 的 contains 判定命中（"13333".contains("1")）→ 误匹配。
+    //    提取失败就是没有番号，返回空，交由词元/相似度策略处理。
+    return '';
   }
 
   /// 从文件名中提取所有可能的番号核心ID
@@ -296,6 +303,106 @@ class SubtitleMatcher {
   }
 
   // ==========================================
+  // --- 文件名特征抽取（新版匹配的核心） ---
+  // ==========================================
+
+  /// 剧集信息（季/集），任一端缺失都为 null
+  static final _regSeasonEpisode =
+      RegExp(r's(\d{1,2})[.\-\s_]?e(\d{1,3})(?![0-9])', caseSensitive: false);
+  static final _regEpisodeOnly =
+      RegExp(r'(?:^|[^a-z])e[p]?[.\-\s_]?(\d{1,3})(?![0-9])', caseSensitive: false);
+  static final _regSeasonOnly =
+      RegExp(r'(?:^|[^a-z])s[e]?[.\-\s_]?(\d{1,2})(?![0-9])', caseSensitive: false);
+  static final _regCjkEpisode = RegExp(r'第\s*(\d{1,3})\s*[集话]');
+  /// 归一化核心串：只保留字母、数字、中文，其余符号全部丢弃
+  static final _regKeepChars = RegExp(r'[^a-z0-9\u4e00-\u9fff]');
+  /// 词元切分：英文单词 / 数字串 / 单个汉字
+  static final _regToken = RegExp(r'[a-z]+|\d+|[\u4e00-\u9fff]');
+  static final _regPureDigits = RegExp(r'^\d+$');
+
+  /// 解析文件名特征（清洗 → 归一化 → 抽番号/剧集/词元）
+  static _NameFeatures _featuresOf(String fileName) {
+    final cleaned = _deepClean(_nameWithoutExt(_baseName(fileName)));
+    // 点号视为分隔符，让 "HEYZO.0806" 也能命中番号正则
+    final idSource = cleaned.replaceAll('.', ' ');
+    final core = cleaned.toLowerCase().replaceAll(_regKeepChars, '');
+
+    return _NameFeatures(
+      core: core,
+      ids: extractAllIds(idSource)
+          .map((e) => e.toLowerCase().replaceAll(_regKeepChars, ''))
+          .where((e) => e.isNotEmpty)
+          .toList(),
+      tokens: _regToken.allMatches(core).map((m) => m.group(0)!).toSet(),
+      season: _seasonOf(cleaned),
+      episode: _episodeOf(cleaned),
+    );
+  }
+
+  static int? _seasonOf(String cleaned) {
+    final se = _regSeasonEpisode.firstMatch(cleaned);
+    if (se != null) return int.tryParse(se.group(1)!);
+    final s = _regSeasonOnly.firstMatch(cleaned);
+    return s == null ? null : int.tryParse(s.group(1)!);
+  }
+
+  static int? _episodeOf(String cleaned) {
+    final se = _regSeasonEpisode.firstMatch(cleaned);
+    if (se != null) return int.tryParse(se.group(2)!);
+    final e = _regEpisodeOnly.firstMatch(cleaned);
+    if (e != null) return int.tryParse(e.group(1)!);
+    final cjk = _regCjkEpisode.firstMatch(cleaned);
+    return cjk == null ? null : int.tryParse(cjk.group(1)!);
+  }
+
+  /// 数值相等比较（忽略前导零）："01" == "1"，"0806" == "806"
+  static bool _numEq(String a, String b) {
+    if (a.isEmpty || b.isEmpty) return false;
+    final na = int.tryParse(a);
+    final nb = int.tryParse(b);
+    if (na != null && nb != null) return na == nb;
+    return a == b;
+  }
+
+  /// 词元拼接串（用于把 "miaa"+"003" 还原成 "miaa003" 做边界包含判断）
+  static String _joinedTokens(Set<String> tokens) => tokens.join();
+
+  /// 带边界的包含判断：needle 在 haystack 中，且两侧不直接粘连字母/数字
+  static bool _containsBounded(String haystack, String needle) {
+    if (needle.isEmpty || haystack.isEmpty) return false;
+    final idx = haystack.indexOf(needle);
+    if (idx < 0) return false;
+    final before = idx > 0 ? haystack[idx - 1] : '';
+    final afterIdx = idx + needle.length;
+    final after = afterIdx < haystack.length ? haystack[afterIdx] : '';
+    const alnum = 'abcdefghijklmnopqrstuvwxyz0123456789';
+    if (before.isNotEmpty && alnum.contains(before)) return false;
+    if (after.isNotEmpty && alnum.contains(after)) return false;
+    return true;
+  }
+
+  /// Dice 二元文法相似度（0~1），中英文通用
+  static double _dice(String a, String b) {
+    if (a.isEmpty || b.isEmpty) return 0;
+    if (a.length < 2 || b.length < 2) return a == b ? 1.0 : 0.0;
+    final ba = _bigrams(a);
+    final bb = _bigrams(b);
+    var common = 0;
+    for (final g in ba) {
+      if (bb.remove(g)) common++;
+    }
+    return 2.0 * common / (ba.length + bb.length);
+  }
+
+  static List<String> _bigrams(String s) {
+    final list = <String>[];
+    for (var i = 0; i < s.length - 1; i++) {
+      list.add(s.substring(i, i + 2));
+    }
+    return list;
+  }
+
+  // ==========================================
   // --- 污染清洗 ---
   // ==========================================
 
@@ -359,87 +466,117 @@ class SubtitleMatcher {
   // --- 匹配方法 ---
   // ==========================================
 
-  /// 精确匹配：安全剥离后缀和语言标记后，文件名是否完全一致（忽略大小写）
+  /// 精确匹配：剥离后缀和语言标记后文件名一致（忽略大小写与分隔符差异）
   static bool isExactMatch(String videoName, String subtitleName) {
     final videoBase = _nameWithoutExt(_baseName(videoName)).toLowerCase();
     final subBase = _nameWithoutExt(_baseName(subtitleName)).toLowerCase();
-    return videoBase == subBase;
+    if (videoBase == subBase) return true;
+    // 容忍分隔符/符号差异："Movie Name" 与 "Movie.Name"
+    return _featuresOf(videoName).core == _featuresOf(subtitleName).core;
   }
 
-  /// 模糊匹配：从视频和字幕**双方**提取核心ID，进行多策略比对
-  ///
-  /// 匹配策略（按优先级）：
-  /// 1. 双方番号ID完全一致 → 强匹配
-  /// 2. 一方番号ID被另一方清洗名包含 → 中等匹配
-  /// 3. 双方清洗名互相包含 → 弱匹配
+  /// 模糊匹配：是否达到可接受分数（[kFuzzyAcceptScore]）
   static bool isFuzzyMatch(String videoName, String subtitleName) {
-    final score = fuzzyMatchScore(videoName, subtitleName);
-    return score >= 80;
+    return fuzzyMatchScore(videoName, subtitleName) >= kFuzzyAcceptScore;
   }
 
-  /// 计算模糊匹配分数（0 = 不匹配，分数越高匹配度越好）
+  /// 计算匹配分数（0 = 不匹配，越高越好）
   ///
-  /// 评分规则：
-  /// - 双方番号ID完全一致: 100分
-  /// - 一方番号ID被另一方清洗名包含: 80分
-  /// - 双方清洗名互相包含（短名被长名包含）: 60分
-  /// - 双方任一ID互相包含: 50分
+  /// 新版评分（**不再用子串包含判断数字**，避免 "1.mp4" 命中 "13333.srt"）：
+  /// - 100：归一化核心串完全一致
+  /// - 95 ：双方番号一致
+  /// - 92/88：单侧番号，另一侧核心串等于/词元边界包含该番号
+  /// - 90 ：双方都是纯数字且数值相等
+  /// - 85 ：核心串互相包含（字幕名比视频名多一段常见后缀）
+  /// - 80 ：词元集合包含
+  /// - 70~90：Dice 相似度兜底（要求存在公共锚点词元）
   static int fuzzyMatchScore(String videoName, String subtitleName) {
-    // 1. 从双方提取番号ID
-    final videoId = extractId(videoName).replaceAll(_regFlatten, '').toUpperCase();
-    final subId = extractId(subtitleName).replaceAll(_regFlatten, '').toUpperCase();
+    final v = _featuresOf(videoName);
+    final s = _featuresOf(subtitleName);
+    if (v.core.isEmpty || s.core.isEmpty) return 0;
 
-    // 2. 双方清洗后的名称（用于包含检测）
-    final videoClean = _deepClean(_nameWithoutExt(_baseName(videoName)))
-        .replaceAll(_regFlatten, '').toUpperCase();
-    final subClean = _deepClean(_nameWithoutExt(_baseName(subtitleName)))
-        .replaceAll(_regFlatten, '').toUpperCase();
-
-    // 3. 策略1：双方番号ID完全一致（最强匹配）
-    if (videoId.isNotEmpty && subId.isNotEmpty && videoId == subId) {
-      return 100;
+    // 0. 核心串过短（如 "1"、"12"）：只认完全相等，杜绝短串被长串包含
+    final shorter = v.core.length <= s.core.length ? v.core : s.core;
+    if (shorter.length < kMinCoreLength) {
+      return v.core == s.core ? 100 : 0;
     }
 
-    // 4. 策略2：双方所有ID中有任意一对一致
-    if (videoId.isNotEmpty && subId.isNotEmpty) {
-      final videoAllIds = extractAllIds(videoName)
-          .map((id) => id.replaceAll(_regFlatten, '').toUpperCase())
-          .toSet();
-      final subAllIds = extractAllIds(subtitleName)
-          .map((id) => id.replaceAll(_regFlatten, '').toUpperCase())
-          .toSet();
-      if (videoAllIds.intersection(subAllIds).isNotEmpty) {
-        return 95;
+    // 1. 核心串完全一致
+    if (v.core == s.core) return 100;
+
+    // 2. 剧集硬约束：双方都解析出集号且不一致 → 直接判定不是同一集
+    if (v.episode != null && s.episode != null && v.episode != s.episode) {
+      return 0;
+    }
+    if (v.season != null && s.season != null && v.season != s.season) {
+      return 0;
+    }
+
+    // 3. 番号：双方都有 → 必须一致；只有一方有 → 看另一侧能否还原该番号
+    if (v.ids.isNotEmpty && s.ids.isNotEmpty) {
+      return _idsIntersect(v.ids, s.ids) ? 95 : 0;
+    }
+    if (v.ids.isNotEmpty || s.ids.isNotEmpty) {
+      final withId = v.ids.isNotEmpty ? v : s;
+      final other = v.ids.isNotEmpty ? s : v;
+      var best = 0;
+      for (final id in withId.ids) {
+        if (other.core == id) return 92;
+        if (_containsBounded(other.core, id) ||
+            _containsBounded(_joinedTokens(other.tokens), id)) {
+          best = best < 88 ? 88 : best;
+          continue;
+        }
+        // 番号的数字部分独立出现（如 HEYZO-0806 vs 0806.srt）：只给低分，
+        // 需要配合词元证据才可能过线，避免纯数字误命中
+        final digits = id.replaceAll(RegExp(r'[^0-9]'), '');
+        if (digits.length >= 3 && other.numbers.any((n) => _numEq(n, digits))) {
+          best = best < 62 ? 62 : best;
+        }
       }
+      return best;
     }
 
-    // 5. 策略3：一方番号ID被另一方清洗名包含
-    if (videoId.isNotEmpty && subClean.contains(videoId)) {
-      return 80;
-    }
-    if (subId.isNotEmpty && videoClean.contains(subId)) {
-      return 80;
-    }
-
-    // 6. 策略4：双方清洗名互相包含（短名被长名包含）
-    if (videoClean.isNotEmpty && subClean.isNotEmpty) {
-      if (videoClean.length >= subClean.length && videoClean.contains(subClean)) {
-        return 60;
-      }
-      if (subClean.length >= videoClean.length && subClean.contains(videoClean)) {
-        return 60;
-      }
+    // 4. 纯数字：必须数值相等，**绝不做子串包含**
+    final vDigits = _regPureDigits.hasMatch(v.core);
+    final sDigits = _regPureDigits.hasMatch(s.core);
+    if (vDigits || sDigits) {
+      final digits = vDigits ? v.core : s.core;
+      final other = vDigits ? s : v;
+      if (vDigits && sDigits) return _numEq(v.core, s.core) ? 90 : 0;
+      if (digits.length < 3) return 0;
+      return other.numbers.any((n) => _numEq(n, digits)) ? 85 : 0;
     }
 
-    // 7. 策略5：双方任一ID被对方清洗名包含（宽松匹配）
-    if (videoId.isNotEmpty && subClean.contains(videoId)) {
-      return 50;
+    // 5. 核心串包含：字幕名 = 视频名 + 额外标记（年份、版本等）
+    if (v.core.contains(s.core) || s.core.contains(v.core)) {
+      return 85;
     }
-    if (subId.isNotEmpty && videoClean.contains(subId)) {
-      return 50;
+
+    // 6. 词元集合包含（英文/中文混排场景）
+    final small = v.tokens.length <= s.tokens.length ? v : s;
+    final big = small == v ? s : v;
+    if (small.tokens.isNotEmpty && small.tokens.every(big.tokens.contains)) {
+      final hasAnchor =
+          small.tokens.any((t) => t.length >= 3) || small.tokens.length >= 2;
+      if (hasAnchor) return 80;
+    }
+
+    // 7. 相似度兜底：Dice ≥ 0.7 且存在长度≥2的公共锚点词元
+    final sim = _dice(v.core, s.core);
+    final anchor = v.tokens.intersection(s.tokens).any((t) => t.length >= 2);
+    if (sim >= 0.7 && anchor) {
+      return (60 + sim * 30).round().clamp(kFuzzyAcceptScore, 90);
     }
 
     return 0;
+  }
+
+  static bool _idsIntersect(List<String> a, List<String> b) {
+    for (final id in a) {
+      if (b.contains(id)) return true;
+    }
+    return false;
   }
 
   /// 字幕格式优先级权重
@@ -465,7 +602,11 @@ class SubtitleMatcher {
     return sorted;
   }
 
-  /// 从字幕池中查找匹配的字幕列表（已按优先级排序）
+  /// 从字幕池中查找匹配的字幕列表
+  ///
+  /// 返回顺序：**匹配分数降序** → 格式优先级 → 文件名长度升序。
+  /// （旧实现先用分数排序、再用 prioritizeSubtitles 重排，分数顺序被覆盖掉，
+  ///  会出现 80 分的 .srt 压过 100 分的 .ass 的情况。）
   static List<String> findMatchedSubtitles(
     String videoName,
     List<String> subtitlePool,
@@ -473,39 +614,61 @@ class SubtitleMatcher {
   ) {
     if (videoName.isEmpty || subtitlePool.isEmpty) return [];
 
-    List<String> results = [];
+    final scored = <_MatchResult>[];
     switch (mode) {
       case SubtitleMatchMode.exact:
-        results = subtitlePool.where((sub) => isExactMatch(videoName, sub)).toList();
+        for (final sub in subtitlePool) {
+          if (isExactMatch(videoName, sub)) {
+            scored.add(_MatchResult(sub, 100));
+          }
+        }
         break;
       case SubtitleMatchMode.fuzzy:
-        results = _fuzzyMatchSorted(videoName, subtitlePool);
+        scored.addAll(_scoredMatches(videoName, subtitlePool));
         break;
       case SubtitleMatchMode.dual:
-        final exactResults = subtitlePool.where((sub) => isExactMatch(videoName, sub)).toList();
-        if (exactResults.isNotEmpty) {
-          results = exactResults;
+        final exact = <_MatchResult>[];
+        for (final sub in subtitlePool) {
+          if (isExactMatch(videoName, sub)) {
+            exact.add(_MatchResult(sub, 100));
+          }
+        }
+        if (exact.isNotEmpty) {
+          scored.addAll(exact);
           break;
         }
-        results = _fuzzyMatchSorted(videoName, subtitlePool);
+        scored.addAll(_scoredMatches(videoName, subtitlePool));
         break;
     }
 
-    return prioritizeSubtitles(results);
+    _sortScored(scored);
+    return scored.map((r) => r.subtitleName).toList();
   }
 
-  /// 模糊匹配并按匹配分数排序（分数高的排前面）
-  static List<String> _fuzzyMatchSorted(String videoName, List<String> subtitlePool) {
+  /// 逐个计算分数并过滤掉低于阈值的
+  static List<_MatchResult> _scoredMatches(
+      String videoName, List<String> subtitlePool) {
     final scored = <_MatchResult>[];
     for (final sub in subtitlePool) {
       final score = fuzzyMatchScore(videoName, sub);
-      if (score >= 80) {
+      if (score >= kFuzzyAcceptScore) {
         scored.add(_MatchResult(sub, score));
       }
     }
-    // 按分数降序排序
-    scored.sort((a, b) => b.score.compareTo(a.score));
-    return scored.map((r) => r.subtitleName).toList();
+    return scored;
+  }
+
+  /// 排序：分数降序 → 格式优先级 → 文件名长度升序
+  static void _sortScored(List<_MatchResult> scored) {
+    scored.sort((a, b) {
+      if (a.score != b.score) return b.score.compareTo(a.score);
+      final priA = _formatPriority[_getExtension(a.subtitleName).toLowerCase()] ?? 99;
+      final priB = _formatPriority[_getExtension(b.subtitleName).toLowerCase()] ?? 99;
+      if (priA != priB) return priA.compareTo(priB);
+      final lenA = _nameWithoutExt(_baseName(a.subtitleName)).length;
+      final lenB = _nameWithoutExt(_baseName(b.subtitleName)).length;
+      return lenA.compareTo(lenB);
+    });
   }
 
   // ==========================================
@@ -597,4 +760,32 @@ class SubtitleMatcher {
     final idx = fileName.lastIndexOf('.');
     return idx >= 0 ? fileName.substring(idx) : '';
   }
+}
+
+/// 文件名解析出来的比对特征（[SubtitleMatcher] 内部使用）
+class _NameFeatures {
+  /// 归一化核心串：清洗后只保留字母/数字/中文，如 "MIAA-003" → "miaa003"
+  final String core;
+
+  /// 结构化番号（严格提取，提取不到就是空列表，不再退化成整名）
+  final List<String> ids;
+
+  /// 词元集合：英文单词 / 数字串 / 单个汉字
+  final Set<String> tokens;
+
+  /// 季 / 集（解析不到为 null）
+  final int? season;
+  final int? episode;
+
+  _NameFeatures({
+    required this.core,
+    required this.ids,
+    required this.tokens,
+    this.season,
+    this.episode,
+  });
+
+  /// 其中的纯数字词元（用于严格的数值比较）
+  Set<String> get numbers =>
+      tokens.where((t) => RegExp(r'^\d+$').hasMatch(t)).toSet();
 }

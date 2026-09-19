@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:math';
 
 import 'package:alist/entity/emby_config.dart';
 import 'package:alist/entity/tiktok_play_list_model.dart';
@@ -153,6 +154,99 @@ class EmbyApi {
     return items
         .map((item) => _toVideoItem(item, origin, server.apiKey))
         .toList();
+  }
+
+  /// 跨「全部媒体库」随机抽取（首页 / 弹窗选中「全部媒体库」时调用）。
+  ///
+  /// 步骤：
+  /// 1. 对 [libraries] 中每个媒体库**并发**各发一次随机请求（单库失败不影响整体）；
+  /// 2. 汇总后按 Item Id **去重**（同一视频可能同时归入多个库）；
+  /// 3. **均匀抽签**：各库内部先自行随机排序，再按「轮询取牌」从每个库交替取 1 条，
+  ///    直到凑满 [limit] 条 —— 保证最终每个媒体库的占比基本持平；
+  ///    某个库库存不足时，剩余名额自动由其它库补齐；
+  /// 4. 最后对整个结果再随机打乱一次，消除「每隔 N 条必定同一来源」的固定节奏。
+  ///
+  /// 失败（全部媒体库都抽不到内容）抛出 [EmbyApiException]。
+  static Future<List<TikTokVideoItem>> fetchRandomVideosFromAllLibraries({
+    required EmbyServerConfig server,
+    required List<EmbyLibraryConfig> libraries,
+    int? limit,
+  }) async {
+    final count = _clampLimit(limit);
+    final targets = libraries
+        .where((e) => e.isValid && !e.isAllLibraries)
+        .toList(growable: false);
+    if (targets.isEmpty) {
+      throw EmbyApiException('没有可用于随机抽取的媒体库，请先到「媒体库管理」添加');
+    }
+
+    final origin = server.serverOrigin;
+    final dio = _newDio();
+    final userId = await _ensureUserId(dio, server);
+
+    // 每个库都按总量拉取：单个库库存不足时，其它库仍有足够候选补齐名额。
+    final perLibraryLimit = count;
+
+    // 并发拉取；单个媒体库出错（无内容 / 无权限）只丢弃该库，不中断整体。
+    final results = await Future.wait(
+      targets.map((lib) async {
+        try {
+          return await _fetchItems(
+            dio,
+            server: server,
+            userId: userId,
+            queryParameters: {
+              'ParentId': lib.parentId,
+              'SortBy': 'Random',
+              'Recursive': 'true',
+              'IncludeItemTypes': 'Video,Movie',
+              'Fields': 'Path,Overview,MediaSources',
+              'Limit': perLibraryLimit,
+            },
+          );
+        } catch (_) {
+          return <Map>[];
+        }
+      }),
+    );
+
+    final random = Random();
+    // 每个库一条候选队列，先各自随机打乱（服务端已 SortBy=Random，这里再兜一层）
+    final queues = <List<Map>>[];
+    for (final items in results) {
+      final queue = List<Map>.of(items)..shuffle(random);
+      queues.add(queue);
+    }
+
+    // 轮询交替取牌 + 去重：每轮从每个库各取 1 条，取满或全部耗尽为止
+    final cursors = List<int>.filled(queues.length, 0);
+    final seenIds = <String>{};
+    final picked = <Map>[];
+    while (picked.length < count) {
+      var progressed = false;
+      for (var i = 0; i < queues.length && picked.length < count; i++) {
+        final queue = queues[i];
+        while (cursors[i] < queue.length) {
+          final item = queue[cursors[i]++];
+          final itemId = item['Id']?.toString() ?? '';
+          if (itemId.isEmpty || !seenIds.add(itemId)) continue; // 跨库重复，跳过
+          picked.add(item);
+          progressed = true;
+          break;
+        }
+      }
+      if (!progressed) break; // 所有库都已取空
+    }
+
+    if (picked.isEmpty) {
+      throw EmbyApiException('全部媒体库均未抽取到任何视频，请确认服务器媒体库内容与权限');
+    }
+
+    // 最终洗牌：组成不变（各库占比仍持平），只打乱播放顺序
+    picked.shuffle(random);
+    return picked
+        .map((item) => _toVideoItem(item, origin, server.apiKey))
+        .toList(growable: false);
   }
 
   /// 收藏视频随机列表（首页“随机播放收藏”）。

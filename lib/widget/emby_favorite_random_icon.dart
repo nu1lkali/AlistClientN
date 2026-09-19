@@ -73,8 +73,15 @@ class _EmbyFavoriteRandomPainter extends CustomPainter {
   /// 归一化后的整体缩放微调：1.0 = 铺满，<1 缩小，>1 放大。
   static const double _fitScale = 0.92;
 
-  /// 垂直微调（视图单位）：负值上移，正值下移。
-  static const double _offsetY = -8;
+  /// 垂直微调，按**图标尺寸的百分比**计算（负值上移），因此任意尺寸下偏移比例一致。
+  ///
+  /// 背景：图形按墨迹包围盒归一化后几何上已居中（实测墨迹重心与盒子中心只差
+  /// 0.07px @24px），MaterialIcons 字体的 ascent=512 / descent=0，相邻 Material
+  /// 图标同样是铺满居中的。但本图形下方是粗边框、上方是心的尖角，视觉重量偏下，
+  /// 并排看会比邻居低一点。实测 -0.0625（≈1.5px）偏多，回调到一半：
+  /// 这里统一上移约 1px（24px 时）。
+  /// 只改这一个数即可：-0.03 ≈ 0.72px，-0.05 ≈ 1.2px，-0.08 ≈ 1.9px。
+  static const double _offsetYRatio = -0.04;
 
   /// 描边宽度（用户坐标单位，×0.1 后为视图单位）：越大线条越粗。
   static const double _strokeWidth = 80;
@@ -89,13 +96,14 @@ class _EmbyFavoriteRandomPainter extends CustomPainter {
     canvas.scale(scale);
 
     // ── 包围盒归一化：把图形实际占用的区域等比放大到铺满整个 viewBox ──
-    final double bboxW = _bboxMaxX - _bboxMinX;
-    final double bboxH = _bboxMaxY - _bboxMinY;
+    const double bboxW = _bboxMaxX - _bboxMinX;
+    const double bboxH = _bboxMaxY - _bboxMinY;
     // 以较长边为基准等比缩放，短边方向居中，保持图形不变形
-    final double fit =
+    const double fit =
         _viewBoxSize / (bboxW > bboxH ? bboxW : bboxH) * _fitScale;
-    final double dx = (_viewBoxSize - bboxW * fit) / 2;
-    final double dy = (_viewBoxSize - bboxH * fit) / 2 + _offsetY;
+    const double dx = (_viewBoxSize - bboxW * fit) / 2;
+    const double dy =
+        (_viewBoxSize - bboxH * fit) / 2 + _offsetYRatio * _viewBoxSize;
 
     canvas.translate(dx, dy);
     canvas.scale(fit);
