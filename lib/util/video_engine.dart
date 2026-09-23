@@ -195,6 +195,12 @@ class MediaKitEngine implements VideoEngine {
   final _bufferingCtrl = StreamController<bool>.broadcast();
 
   StreamSubscription? _posSub, _playSub, _compSub, _bufferingSub;
+  StreamSubscription? _errorSub;
+
+  // 解码错误上屏：media_kit 把中途冒出的解码失败通过 stream.error 抛出，
+  // 门面层据此把错误显示到错误页，而不是永远停在 loading。
+  bool _hasError = false;
+  String _errorMessage = '';
 
   /// Expose the native player platform for property queries (e.g. cache-speed)
   dynamic get playerPlatform => _player?.platform;
@@ -215,6 +221,16 @@ class MediaKitEngine implements VideoEngine {
   Stream<bool> get onBufferingChanged => _bufferingCtrl.stream;
   bool get isBuffering => _player?.state.buffering ?? false;
 
+  /// 解码错误（供 TikTok 门面把中途冒出的错误上屏）。
+  bool get hasError => _hasError;
+  String get errorMessage => _errorMessage;
+
+  /// media_kit 不暴露 TCP 速率，返回 0，由上层走系统流量采样。
+  int get nativeSpeedBps => 0;
+
+  /// media_kit 无「已缓冲时长」概念，返回零。
+  Duration get cachedAhead => Duration.zero;
+
   /// 先创建 Player 和 VideoController（同步），让 PlatformView 提前挂到 widget 树
   void createPlayer() {
     _player?.dispose();
@@ -231,6 +247,20 @@ class MediaKitEngine implements VideoEngine {
     _compSub = _player!.stream.completed.listen((_) => _completedCtrl.add(null));
     _player!.stream.duration.listen((d) => _durationCtrl.add(d));
     _bufferingSub = _player!.stream.buffering.listen((b) => _bufferingCtrl.add(b));
+
+    // 解码错误上屏：media_kit 不同版本 error 流类型不同，用动态访问规避编译差异。
+    try {
+      final dyn = _player! as dynamic;
+      final errStream = dyn.stream?.error;
+      if (errStream != null) {
+        _errorSub = errStream.listen((dynamic e) {
+          _hasError = true;
+          final msg = e?.toString();
+          _errorMessage =
+              (msg != null && msg.isNotEmpty) ? msg : '解码发生未知错误';
+        });
+      }
+    } catch (_) {}
   }
 
   /// 加载媒体（Player 和 VideoController 已提前创建）
@@ -239,10 +269,16 @@ class MediaKitEngine implements VideoEngine {
     _mediaOpened = true;
   }
 
-  /// 兼容旧接口
-  Future<void> createFromNetwork(String url, {Map<String, String>? httpHeaders}) async {
+  /// 兼容旧接口。
+  ///
+  /// [autoPlay]：是否在 open 后立即开始播放。
+  /// - TikTok 门面传 false：相邻**预加载**的视频必须保持静默，只有真正切到当前页的
+  ///   那条才会被显式 `play()`；否则离屏的 AVI/WMV/RMVB 会在后台同时出声（"幻听"）。
+  /// - strm 单屏播放器仍用默认 true，保持原自动起播行为。
+  Future<void> createFromNetwork(String url,
+      {Map<String, String>? httpHeaders, bool autoPlay = true}) async {
     createPlayer();
-    _player?.open(Media(url, httpHeaders: httpHeaders ?? {}), play: true);
+    _player?.open(Media(url, httpHeaders: httpHeaders ?? {}), play: autoPlay);
     _mediaOpened = true;
   }
 
@@ -295,6 +331,9 @@ class MediaKitEngine implements VideoEngine {
   Future<void> initialize() async {
     // 监听器已在 createFromNetwork 中设置，无需重复
   }
+
+  /// 空操作：media_kit 通过事件流自行刷新状态，无需主动轮询。
+  Future<void> refresh() async {}
 
   @override
   Future<void> play() async => _player?.play();
@@ -357,6 +396,7 @@ class MediaKitEngine implements VideoEngine {
     await _playSub?.cancel();
     await _compSub?.cancel();
     await _bufferingSub?.cancel();
+    await _errorSub?.cancel();
     await _positionCtrl.close();
     await _durationCtrl.close();
     await _playingCtrl.close();

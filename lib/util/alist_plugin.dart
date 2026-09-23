@@ -210,4 +210,23 @@ class AlistPlugin {
       return false;
     }
   }
+
+  /// App 进程自开机起的**累计下行字节数**（原生侧读 `android.net.TrafficStats`
+  /// 的 `getUidRxBytes(Process.myUid())`）。
+  ///
+  /// 返回值 < 0 表示这台设备不支持按 UID 统计（原生返回 `TrafficStats.UNSUPPORTED`）。
+  ///
+  /// 拿它做差分就是「整个 App 的真实下行速率」。相比原来「缓冲时长 × 平均码率」
+  /// 的估算：
+  /// - 不受 VBR 片源码率波动影响；
+  /// - 不受「起播时 Exo 一次性把整段标成 buffered」造成的假峰值影响；
+  /// - 连 IJK / 内核自己都说不清的那部分流量也算进去了。
+  static Future<int> trafficRxBytes() async {
+    try {
+      final v = await _methodChannel.invokeMethod<int>('trafficRxBytes');
+      return v ?? -1;
+    } catch (_) {
+      return -1;
+    }
+  }
 }

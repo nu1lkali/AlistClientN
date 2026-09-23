@@ -13,6 +13,8 @@ import android.media.MediaMetadataRetriever
 import android.net.Uri
 import android.os.Build
 import android.os.Environment
+import android.os.Process
+import android.net.TrafficStats
 import android.provider.MediaStore
 import android.webkit.MimeTypeMap
 import androidx.annotation.RequiresApi
@@ -27,6 +29,7 @@ import com.github.alist.utils.VideoDataHolder
 import io.flutter.embedding.engine.plugins.FlutterPlugin
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
+import io.flutter.view.TextureRegistry
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -42,16 +45,21 @@ class AlistPlugin(private val activity: Activity, private val scope: CoroutineSc
     private val requestCodeLaunchExternalPlayer = 1
 
     private lateinit var channel: MethodChannel
+    private lateinit var messenger: io.flutter.plugin.common.BinaryMessenger
+    private lateinit var textureRegistry: TextureRegistry
     private lateinit var context: Context
 
     override fun onAttachedToEngine(binding: FlutterPlugin.FlutterPluginBinding) {
         channel = MethodChannel(binding.binaryMessenger, "com.github.alist.clientn.plugin")
+        messenger = binding.binaryMessenger
+        textureRegistry = binding.textureRegistry
         FlutterMethods.channel = channel
         context = binding.applicationContext
         channel.setMethodCallHandler(this)
     }
 
     override fun onDetachedFromEngine(binding: FlutterPlugin.FlutterPluginBinding) {
+        IjkFlutterPlayerRegistry.disposeAll()
         channel.setMethodCallHandler(null)
     }
 
@@ -252,6 +260,96 @@ class AlistPlugin(private val activity: Activity, private val scope: CoroutineSc
                         withContext(Dispatchers.Main) { result.success(null) }
                     }
                 }
+            }
+
+            // =============== IJK 播放内核（老格式兜底） ===============
+            "createIjkPlayer" -> {
+                val url = call.argument<String>("url")
+                val rawHeaders = call.argument<Map<String, String>>("headers")
+                val autoPlay = call.argument<Boolean>("autoPlay") ?: true
+                val fileName = call.argument<String>("fileName")
+                // 硬解黑屏自动重试：Dart 侧置位后强制纯 FFmpeg 软解
+                val forceSoft = call.argument<Boolean>("forceSoft") ?: false
+                if (url.isNullOrEmpty()) {
+                    result.error("-1", "url is empty", null)
+                    return
+                }
+                val headers = rawHeaders ?: emptyMap()
+                try {
+                    val player = IjkFlutterPlayerRegistry.create(
+                        context, messenger, textureRegistry, url, headers,
+                        autoPlay, fileName, forceSoft
+                    )
+                    result.success(
+                        mapOf(
+                            "id" to player.id,
+                            "textureId" to player.textureId,
+                        )
+                    )
+                } catch (e: Throwable) {
+                    result.error("-2", "create ijk player failed: ${e.message}", null)
+                }
+            }
+
+            "ijkGetState" -> {
+                val id = call.argument<Int>("id")
+                val player = IjkFlutterPlayerRegistry.get(id)
+                result.success(player?.snapshot())
+            }
+
+            // 预热 IJK native 解码库：进播放器页就后台装载 libijkplayer /
+            // libijkffmpeg / libijksdl，第一次真正回落 FFmpeg 时不用再等装载。
+            "ijkPreload" -> {
+                IjkFlutterPlayer.preload()
+                result.success(true)
+            }
+
+            "ijkPlay" -> {
+                IjkFlutterPlayerRegistry.get(call.argument<Int>("id"))?.play()
+                result.success(null)
+            }
+
+            "ijkPause" -> {
+                IjkFlutterPlayerRegistry.get(call.argument<Int>("id"))?.pause()
+                result.success(null)
+            }
+
+            "ijkSeekTo" -> {
+                val ms = call.argument<Number>("positionMs")?.toLong() ?: 0L
+                IjkFlutterPlayerRegistry.get(call.argument<Int>("id"))?.seekTo(ms)
+                result.success(null)
+            }
+
+            "ijkSetLooping" -> {
+                val looping = call.argument<Boolean>("looping") ?: false
+                IjkFlutterPlayerRegistry.get(call.argument<Int>("id"))?.setLooping(looping)
+                result.success(null)
+            }
+
+            "ijkSetVolume" -> {
+                val v = call.argument<Number>("volume")?.toDouble() ?: 1.0
+                IjkFlutterPlayerRegistry.get(call.argument<Int>("id"))?.setVolume(v)
+                result.success(null)
+            }
+
+            "ijkDispose" -> {
+                IjkFlutterPlayerRegistry.dispose(call.argument<Int>("id"))
+                result.success(null)
+            }
+
+            /**
+             * 应用自开机以来累计的下行字节数（含所有网络请求）。
+             * Flutter 侧做差分即可得到真实下载速率 —— 播放视频时这个值基本等于
+             * 视频的下行速率，比用「缓冲区间 × 估算码率」推算准得多。
+             * 不支持时返回 -1，调用方自行回退。
+             */
+            "trafficRxBytes" -> {
+                val bytes = try {
+                    TrafficStats.getUidRxBytes(Process.myUid())
+                } catch (_: Throwable) {
+                    TrafficStats.UNSUPPORTED.toLong()
+                }
+                result.success(bytes)
             }
 
             else -> {

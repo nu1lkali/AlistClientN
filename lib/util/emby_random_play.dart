@@ -201,6 +201,20 @@ Future<void> startEmbyRandomPlayWithLibraryPick(BuildContext context) async {
           contentPadding: const EdgeInsets.fromLTRB(8, 6, 8, 0),
           title: Row(
             children: [
+              // 标题图标：`video_library` 是 Material 里「影音库」的标准符号
+              // （轮播出一格胶片 + 书本轮廓），比 video_library_outlined 更有实体感，
+              // 用主色 + 浅色底衬出一个圆角chip，跟右边的齿轮形成「标题 / 操作」分区。
+              Container(
+                width: 30,
+                height: 30,
+                margin: const EdgeInsets.only(right: 10),
+                decoration: BoxDecoration(
+                  color: scheme.primaryContainer,
+                  borderRadius: BorderRadius.circular(9),
+                ),
+                child: Icon(Icons.video_library_rounded,
+                    size: 18, color: scheme.onPrimaryContainer),
+              ),
               const Expanded(
                 child: Text('选择媒体库',
                     maxLines: 1,

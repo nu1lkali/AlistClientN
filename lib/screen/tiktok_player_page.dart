@@ -5,7 +5,6 @@ import 'dart:ui' as ui;
 
 import 'package:alist/database/alist_database_controller.dart';
 import 'package:alist/database/table/disliked_video.dart';
-import 'package:alist/database/table/favorite.dart';
 import 'package:alist/util/favorite_helper.dart';
 import 'package:alist/database/table/file_viewing_record.dart';
 import 'package:alist/entity/emby_config.dart';
@@ -16,9 +15,11 @@ import 'package:alist/util/file_title.dart';
 import 'package:alist/util/constant.dart';
 import 'package:alist/util/file_utils.dart';
 import 'package:alist/util/log_utils.dart' as log;
+import 'package:alist/util/alist_plugin.dart';
+import 'package:alist/util/player/ijk_video_controller.dart';
+import 'package:alist/util/player/tiktok_playback_core.dart';
 import 'package:alist/util/subtitle/subtitle.dart';
-import 'package:alist/util/video_player_util.dart';
-import 'package:alist/widget/network_speed_indicator.dart';
+import 'package:alist/widget/dino_loading.dart';
 import 'package:alist/widget/subtitle_view.dart';
 import 'package:alist/widget/tiktok_video_info_sheet.dart';
 import 'package:alist/util/stream_size_resolver.dart';
@@ -33,7 +34,6 @@ import 'package:flutter_smart_dialog/flutter_smart_dialog.dart';
 import 'package:get/get.dart';
 import 'package:image_gallery_saver/image_gallery_saver.dart';
 import 'package:path_provider/path_provider.dart';
-import 'package:video_player/video_player.dart';
 import 'package:volume_controller/volume_controller.dart';
 import 'package:screen_brightness/screen_brightness.dart';
 import 'package:wakelock/wakelock.dart';
@@ -53,9 +53,32 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
   late PageController _pageController;
   late int _currentIndex;
 
-  final Map<int, VideoPlayerController> _controllers = {};
+  /// 每个索引对应的播放内核。
+  ///
+  /// 类型是 [TikTokPlaybackCore] 而不是某个具体内核的 controller：ExoPlayer 与
+  /// IJK/FFmpeg 的差异全部收敛在 Facade 内部，本页只在「创建」和「渲染」两处
+  /// 跟具体内核打交道，手势 / HUD / 切视频 / 字幕这些逻辑完全不用关心当前跑的是谁。
+  final Map<int, TikTokPlaybackCore> _controllers = {};
   final Set<int> _initializingIndexes = {};
+  /// 初始化失败的原因。留着是为了在页面上给一句人话 + 重试按钮，
+  /// 而不是让用户对着一个转圈 / 黑屏干等。
+  final Map<int, String> _initErrors = {};
+  /// 已经提示过「这条片子被回落到 FFmpeg 内核」的索引，避免每次切回去都弹一次
+  final Set<int> _fallbackNotified = {};
+  /// 用户手动指定走 FFmpeg 内核的索引（「切不动时手动换内核」按钮写入，
+  /// 对该文件本次会话内持续生效，左右滑来回切不再反复重试 Exo）
+  final Set<int> _forceCompat = {};
+  /// 已经做过「硬解→纯软解」自动重试的索引，每个文件最多重试一次
+  final Set<int> _softRetried = {};
+  /// IJK ready 后还没出首帧的截止时间（到点触发软解重试 / 判失败）
+  final Map<int, DateTime> _frameDeadline = {};
+  /// 初始化代次：手动切内核 / 软解重试会作废还在路上的旧初始化，
+  /// 用代次号防止旧 create 返回后把新状态覆盖掉
+  final Map<int, int> _initGen = {};
   bool _isPlaying = false;
+  /// 进入后台前的播放状态：恢复前台时只在该值为 true 时才自动续播，
+  /// 否则会覆盖用户「暂停」的意图（暂停后息屏/切后台再回来，声音又响起来）。
+  bool _wasPlayingBeforeBackground = false;
   bool _isLandscape = false;
   /// 横屏全屏的画面适配方式（在 [build] 中同步自 SpUtil）
   LandscapeFitMode _fitMode = LandscapeFitMode.auto;
@@ -108,10 +131,19 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
   static const _centerRowLinger = Duration(seconds: 2);
   static const _centerRowFade = Duration(milliseconds: 260);
 
-  /// 实时下载速度（字节/秒）：**活跃下载段**的速率，见 [_calcNetworkSpeed]。
+  /// 实时下载速度（字节/秒）。**数据源优先级见 [_sampleNetworkSpeed]**：
+  /// 首选 IJK 自己的 tcpSpeed，其次 Android 系统真实流量，最后才是旧估算。
   double _networkSpeed = 0;
   /// 真正显示出来的速度：在 [_networkSpeed] 之上再加一层死区，末位数字才不乱跳。
   double _displaySpeed = 0;
+
+  // ── 系统真实流量采样（TrafficStats）──
+  /// 上一次采样到的 App 累计下行字节数；< 0 表示还没取到有效基准
+  int _lastRxBytes = -1;
+  DateTime? _lastRxAt;
+  /// 这台设备不支持按 UID 统计流量时为 true → 永久退回旧估算通道
+  bool _trafficStatsUnsupported = false;
+
   /// 当前「活跃下载段」的起点字节数 / 起点时刻；null 表示现在没有在下载
   double _segStartBytes = 0;
   DateTime? _segStartAt;
@@ -121,9 +153,7 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
   DateTime? _lastSpeedUpdateAt;
   /// 上一次的累计字节数，用来识别缓冲回退（seek / 换源）
   double _lastCumBytes = 0;
-  Duration _lastBufferedEnd = Duration.zero;
   DateTime _lastSpeedSample = DateTime.now();
-  DateTime _loadStartTime = DateTime.now();
   /// 文件大小未知时的假设码率 ≈ 5 Mbps，用于估算「缓冲秒数 → 字节数」
   static const double _fallbackBitrateBps = 625000.0;
   /// 速度上限（125 MB/s）：超过即视为跨视频 / 跨 seek 的异常跳变，直接丢弃
@@ -142,7 +172,6 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
   static const double _speedEmaAlpha = 0.45;
 
   // ══════ Gesture state ══════
-  static const _gestureDecideThreshold = 10.0;
   static const _systemGestureBottomMargin = 40.0;
   static const _edgeZoneRatio = 0.15; // 左侧15%为亮度区域
   static const _edgeZoneRatioRight = 0.25; // 右侧25%为音量区域（覆盖控件左侧部分）
@@ -150,7 +179,6 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
   static const _videoSwitchMinVelocity = 300.0; // 切换视频最小速度 (px/s)
   double _screenWidth = 1;
   double _screenHeight = 1;
-  bool _ignoreCurrentGesture = false;
 
   bool _isSeeking = false;
   double _seekStartX = 0;
@@ -354,6 +382,8 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
     Wakelock.enable();
 
     _initBrightnessAndVolume();
+    // 预热 FFmpeg 内核的 native 库：把 5MB 级 .so 的装载挪出「切内核」关键路径
+    IjkVideoController.preloadLibraries();
     _safeInitCtrl(_currentIndex);
     _preloadNearby(_currentIndex);
     _loadStates(_currentIndex);
@@ -386,12 +416,15 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.paused) {
+      // 先记下「进后台前到底在不在放」，恢复前台时才不会把用户暂停的片子又播起来
+      _wasPlayingBeforeBackground = _isPlaying;
       _safePause();
       _releaseNonCurrentControllers();
       _clearImageCache();
     } else if (state == AppLifecycleState.resumed) {
       _preloadNearby(_currentIndex);
-      _safePlay();
+      // 只有「进后台时正在放」才自动续播；用户主动暂停的，回来保持暂停
+      if (_wasPlayingBeforeBackground) _safePlay();
     }
   }
 
@@ -460,18 +493,69 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
   // ═══════════════ Timer ═══════════════
   bool _completing = false;
   void _startTimer() {
-    _progressTimer = Timer.periodic(const Duration(milliseconds: 400), (_) {
+    _progressTimer = Timer.periodic(
+        const Duration(milliseconds: 400), (_) { _onTick(); });
+  }
+
+  /// 每 400ms 一次的统一心跳：拉 IJK 状态 → 采样网速 → 刷进度 → 处理播完。
+  ///
+  /// 之所以把「拉 IJK 状态」放在这里：ExoPlayer 自己是 ChangeNotifier，值变了
+  /// 会通知 Flutter；IJK 走的是纹理 + MethodChannel，**不会主动通知**，
+  /// 只能由这个定时器代为拉取。放在同一个 tick 里，两个内核的刷新节奏就一致了，
+  /// 不会出现「横屏功能用什么内核都是一样的，只有 FFmpeg 时 UI 慢半拍」。
+  Future<void> _onTick() async {
+    if (!mounted) return;
+    try {
+      final c = _controllers[_currentIndex];
+      if (c == null) return;
+      await c.tick();
       if (!mounted) return;
-      try {
-        final c = _controllers[_currentIndex];
-        if (c != null && c.value.isInitialized) {
-          // 采样必须先于 setState，否则新速度要等下一帧才刷出来（肉眼可见延迟）
-          if (_enableNetworkSpeed) _calcNetworkSpeed(c);
-          // 滑动调整进度期间，不从播放器读取位置，避免覆盖预览进度导致闪烁
-          setState(() { _pos = c.value.position; _dur = c.value.duration; });
-          _subtitleController.updatePosition(c.value.position.inMilliseconds);
-          if (c.value.duration > Duration.zero &&
-              c.value.position >= c.value.duration - const Duration(milliseconds: 500) &&
+
+      // ── 创建成功后才冒出来的错误（播放中途解码失败 / 网络中断）──
+      // 原来这种情况会永远停在恐龙 loading 上，没人告诉用户出了什么事。
+      if (c.hasError && !c.isInitialized) {
+        _frameDeadline.remove(_currentIndex);
+        if (!_initErrors.containsKey(_currentIndex)) {
+          _initErrors[_currentIndex] = c.errorMessage;
+          _fire(() => c.pause());
+          if (mounted) setState(() {});
+        }
+        return;
+      }
+
+      // ── 兼容内核（libmpv）首帧看门狗 ──
+      // media_kit 的 isFrameVisible 用「width>0」判定，正常片子 open 后很快就有
+      // 首帧；若 10 秒仍无首帧（且不在缓冲中、未报错），说明该编码本机放不出，
+      // 直接给明确错误页，避免永远停在 loading。
+      if (c.engine == TikTokEngine.compat &&
+          c.isInitialized &&
+          !c.isBuffering &&
+          !c.hasError &&
+          !c.isFrameVisible) {
+        final deadline = _frameDeadline.putIfAbsent(_currentIndex,
+            () => DateTime.now().add(const Duration(seconds: 10)));
+        if (DateTime.now().isAfter(deadline)) {
+          _frameDeadline.remove(_currentIndex);
+          _initErrors[_currentIndex] =
+              '视频解码首帧失败：该编码可能不受本机 libmpv 支持，或片源已损坏';
+          _fire(() => c.pause());
+          if (mounted) setState(() {});
+        }
+      } else {
+        _frameDeadline.remove(_currentIndex);
+      }
+
+      if (!c.isInitialized) return;
+      // 采样必须先于 setState，否则新速度要等下一帧才刷出来（肉眼可见延迟）
+      if (_enableNetworkSpeed) await _sampleNetworkSpeed(c);
+      if (!mounted) return;
+      final pos = c.position;
+      final dur = c.duration;
+      // 滑动调整进度期间，不从播放器读取位置，避免覆盖预览进度导致闪烁
+      setState(() { _pos = pos; _dur = dur; });
+      _subtitleController.updatePosition(pos.inMilliseconds);
+      if (dur > Duration.zero &&
+              pos >= dur - const Duration(milliseconds: 500) &&
               !_completing) {
             _completing = true;
             if (_loopMode == 2) {
@@ -487,8 +571,21 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
               _completing = false;
             }
           }
-        }
-      } catch (_) {}
+    } catch (_) {}
+  }
+
+  /// 内核控制调用的统一出口：后台执行，失败只记日志不冒泡。
+  ///
+  /// 内核的 play / pause / setLooping 现在都是异步的，原地 await 会把手势回调
+  /// 拖住；而原来的 `try { ctrl.play(); } catch (_) {}` 又抓不到 Future 里的异常，
+  /// 所以统一走这里。
+  void _fire(Future<void> Function() action) {
+    Future<void>(() async {
+      try {
+        await action();
+      } catch (e) {
+        log.Log.e('core call: $e');
+      }
     });
   }
 
@@ -721,10 +818,18 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
   Future<void> _safeInitCtrl(int idx) async {
     if (idx < 0 || idx >= _playList.videos.length) return;
     if (_controllers.containsKey(idx) || _initializingIndexes.contains(idx)) return;
-    if (_initializingIndexes.length >= 2) return;
+    // 并发上限只约束预加载；当前页永远放行，否则切内核 / 重试会被排队卡住
+    if (idx != _currentIndex && _initializingIndexes.length >= 2) return;
     _initializingIndexes.add(idx);
-    if (idx == _currentIndex) _loadStartTime = DateTime.now();
-    VideoPlayerController? ctrl;
+    // 代次号：[_recreateCurrent] 触发的重建会让还在路上的旧初始化整体作废
+    final gen = (_initGen[idx] ?? 0) + 1;
+    _initGen[idx] = gen;
+    if (idx == _currentIndex) {
+      _initErrors.remove(idx);
+      _frameDeadline.remove(idx);
+      if (mounted) setState(() {});
+    }
+    TikTokPlaybackCore? core;
     try {
       final v = _playList.videos[idx];
       if (v.videoUrl == null || v.videoUrl!.isEmpty) {
@@ -733,48 +838,60 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
         v.videoUrl = url;
       }
       if (!mounted) { _initializingIndexes.remove(idx); return; }
-      ctrl = VideoPlayerController.networkUrl(
-        Uri.parse(v.videoUrl!),
-        httpHeaders: v.provider == 'BaiduNetdisk' ? {'User-Agent': 'pan.baidu.com'} : {},
+
+      // ═══ 关键：建内核 ═══
+      // [TikTokPlaybackCore.create] 内部按「老扩展名 → FFmpeg；否则 Exo 优先、
+      // 4 秒未就绪与 libmpv 串行赛跑」挑内核；forceCompat / forceSoft 由
+      // 「手动切内核」按钮和「硬解黑屏自动重试」写入。
+      core = await TikTokPlaybackCore.create(
+        url: v.videoUrl!,
+        fileName: v.fileName,
+        headers:
+            v.provider == 'BaiduNetdisk' ? {'User-Agent': 'pan.baidu.com'} : const {},
+        autoPlay: false,
+        forceCompat: _forceCompat.contains(idx),
+        forceSoft: _softRetried.contains(idx),
+        // 代次变了 = 有更新的初始化接管（手动切内核 / 重试）→ 立刻中止在途
+        // 的旧尝试，避免旧 Exo 连接和新内核并存触发 CDN 多连接风控
+        isAborted: () => _initGen[idx] != gen,
       );
-      await ctrl.initialize();
-      if (!mounted || !_initializingIndexes.contains(idx)) {
-        try { ctrl.dispose(); } catch (_) {}
+      // 等待期间发生过手动切内核 / 重试：这次结果已过期，整体丢弃
+      if (gen != _initGen[idx]) {
+        try { await core.dispose(); } catch (_) {}
+        return;
+      }
+      if (!mounted) {
+        try { await core.dispose(); } catch (_) {}
         _initializingIndexes.remove(idx);
         return;
       }
       if ((idx - _currentIndex).abs() > _cacheRange) {
-        try { ctrl.dispose(); } catch (_) {}
+        try { await core.dispose(); } catch (_) {}
         _initializingIndexes.remove(idx);
         return;
       }
-      ctrl.setLooping(_loopMode == 2);
-      _controllers[idx] = ctrl;
+      await core.setLooping(_loopMode == 2);
+      _controllers[idx] = core;
       _initializingIndexes.remove(idx);
+      _initErrors.remove(idx);
+
+      // 用了兼容解码内核(libmpv)时给个提示：扩展名不在老格式清单里却回落了，说明
+      // ExoPlayer 打不开这条片子（编码异常 / 容器损坏），值得让用户知道。
+      if (mounted &&
+          core.engine == TikTokEngine.compat &&
+          !needsCompatKernel(v.fileName) &&
+          _fallbackNotified.add(idx)) {
+        SmartDialog.showToast('当前片源标准解码器无法解析，已自动切换至兼容解码内核');
+      }
+
       if (idx == _currentIndex) {
-        ctrl.play(); _isPlaying = true; _recordViewing(idx); _loadSubtitleForCurrent();
-        if (_enableNetworkSpeed) {
-          final loadElapsed = DateTime.now().difference(_loadStartTime);
-          final fs = v.fileSize;
-          final b = ctrl.value.buffered;
-          final durMs = ctrl.value.duration.inMilliseconds.toDouble();
-          if (loadElapsed.inMilliseconds > 300 && b.isNotEmpty && durMs > 0) {
-            // 起播瞬间的种子值：初始化完成时**实际已缓冲**的字节数 / 起播耗时。
-            // 只用于让徽标在第一个下载段结算前就有数，随后会被段速率替换。
-            // （这里不能用「整片大小 / 起播耗时」：起播往往只下载了整片的一小段，
-            //  那样会高估好几倍，一进来就顶到 125 MB/s 的上限。）
-            double bps = _fallbackBitrateBps;
-            if (fs != null && fs > 0) bps = fs * 1000.0 / durMs;
-            final cum = b.last.end.inMilliseconds / 1000.0 * bps;
-            _networkSpeed = (cum / (loadElapsed.inMilliseconds / 1000.0))
-                .clamp(0.0, _maxSpeedBps);
-            _displaySpeed = _networkSpeed;
-            _lastCumBytes = cum; // 对齐基准，免得下一帧被误判成缓冲回退
-            _lastBufferedEnd = b.last.end;
-            _lastSpeedSample = DateTime.now();
-            _lastSpeedUpdateAt = DateTime.now(); // 起算「读数过期」的倒计时
-          }
-        }
+        core.play(); _isPlaying = true; _recordViewing(idx); _loadSubtitleForCurrent();
+        // 网速不再需要「起播种子值」：系统流量采样在第一个 tick 就能给出真实读数，
+        // 而旧的种子算法在 Exo 起播即把整段标成 buffered 时会高估好几倍。
+      } else {
+        // 预加载的相邻视频：保持静默，绝不在后台出声（否则切到它之前就「幻听」）。
+        // 即便底层引擎某天默认开了自动播放，这里也兜底压住。
+        try { core.pause(); } catch (_) {}
       }
       if (mounted) setState(() {});
       // 进页面后只引导一次：第一次起播露 2 秒让人知道有 ±10s，之后不再露
@@ -792,10 +909,38 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
         });
       }
     } catch (e) {
+      // 被更新的初始化取代：静默退出，不记错误也不清别人的登记
+      if (e is KernelAbortedException) return;
       log.Log.e('initCtrl[$idx]: $e');
-      try { ctrl?.dispose(); } catch (_) {}
-      _initializingIndexes.remove(idx);
+      try { await core?.dispose(); } catch (_) {}
+      // 只作废自己这一代的登记：新一次初始化的登记不能被旧的错误路径清掉
+      if (gen == _initGen[idx]) _initializingIndexes.remove(idx);
+      // 只在当前页记失败原因，供 [_buildVideoItem] 渲染错误 + 重试。
+      // 预加载的相邻视频失败不用提示——用户根本没切过去。
+      if (idx == _currentIndex && gen == _initGen[idx]) {
+        _initErrors[idx] = e.toString();
+        if (mounted) setState(() {});
+      }
     }
+  }
+
+  /// 手动切内核 / 硬解→软解自动重试的统一入口。
+  ///
+  /// 作废当前索引的所有在途初始化（靠代次号），按新的 force 标记重建。
+  /// forceCompat / forceSoft 写进对应集合后对该文件本次会话持续生效，
+  /// 左右滑来回切不会反复从头试错。
+  Future<void> _recreateCurrent({bool forceCompat = false, bool forceSoft = false}) async {
+    final idx = _currentIndex;
+    if (forceCompat) _forceCompat.add(idx);
+    if (forceSoft) _softRetried.add(idx);
+    _frameDeadline.remove(idx);
+    final old = _controllers.remove(idx);
+    if (old != null) {
+      try { await old.dispose(); } catch (_) {}
+    }
+    _initializingIndexes.remove(idx);
+    _safeInitCtrl(idx);
+    if (mounted) setState(() {});
   }
 
   void _preloadNearby(int idx) {
@@ -808,6 +953,7 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
     final rm = _controllers.keys.where((k) => (k - idx).abs() > _cacheRange).toList();
     for (final k in rm) { try { _controllers[k]?.dispose(); } catch (_) {} _controllers.remove(k); }
     _initializingIndexes.removeWhere((k) => (k - idx).abs() > _cacheRange);
+    _frameDeadline.removeWhere((k, _) => (k - idx).abs() > _cacheRange);
     if (rm.isNotEmpty) _clearImageCache();
   }
 
@@ -818,6 +964,7 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
     }
     _controllers.clear();
     _initializingIndexes.clear();
+    _frameDeadline.clear();
     _clearImageCache();
   }
 
@@ -827,12 +974,22 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
   }
 
   void _safePlay() {
-    try { final c = _controllers[_currentIndex]; if (c != null && c.value.isInitialized) { c.play(); _isPlaying = true; if (mounted) setState(() {}); } } catch (_) {}
+    final c = _controllers[_currentIndex];
+    if (c != null && c.isInitialized) {
+      _fire(() => c.play());
+      _isPlaying = true;
+      if (mounted) setState(() {});
+    }
     _dismissCenterRow(); // 从后台回来继续播 → 同样不留中间那一行
   }
 
   void _safePause() {
-    try { final c = _controllers[_currentIndex]; if (c != null && c.value.isInitialized) { c.pause(); _isPlaying = false; if (mounted) setState(() {}); } } catch (_) {}
+    final c = _controllers[_currentIndex];
+    if (c != null && c.isInitialized) {
+      _fire(() => c.pause());
+      _isPlaying = false;
+      if (mounted) setState(() {});
+    }
   }
 
   /// 重置网速采样基线：切换视频 / 拖动进度后必须调用，
@@ -843,15 +1000,26 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
     _clearSpeedSegment();
     _lastSpeedUpdateAt = null;
     _lastCumBytes = 0;
-    _lastBufferedEnd = Duration.zero;
     _lastSpeedSample = DateTime.now();
+    // 真实流量通道也要清：换源 / seek 之间夹着别的应用流量，
+    // 留着旧基准会在下一 tick 差分出一个假峰值。
+    _lastRxBytes = -1;
+    _lastRxAt = null;
   }
 
-  /// 网速徽标当前是否需要占用布局。
+  /// 网速徽标当前是否需要显示。
   ///
-  /// 低于 1 KB/s（缓冲已追平播放进度、或已整片缓存）就不再显示，
-  /// 免得长期挂一个 "0 B/s" 白占版面。
-  bool _speedVisible() => _enableNetworkSpeed && _displaySpeed >= 1024;
+  /// 只在「还在加载 / 缓冲中」显示：这是用户真正在等网络的时候，且此时播放器
+  /// 在持续拉流，速率读数稳定不会乱跳。平稳播放时内核是**突发式拉流**（缓冲满了
+  /// 就停、播掉一段再拉），瞬时速率常在 1 KB/s 阈值上下反复横跳，挂在那会
+  /// 「一会儿有一会儿没」地抢占视觉，所以平稳播放阶段一律不显示。
+  bool _speedVisible() {
+    if (!_enableNetworkSpeed) return false;
+    final c = _controllers[_currentIndex];
+    if (c == null) return false;
+    final fetching = !c.isFrameVisible || c.isBuffering;
+    return fetching && _displaySpeed >= 1024;
+  }
 
   /// 结束当前「活跃下载段」的记账（不结算，只是丢弃）。
   void _clearSpeedSegment() {
@@ -869,6 +1037,73 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
     _updateDisplaySpeed();
   }
 
+  /// 取当前下行速率，按「越准越优先」的顺序挑数据源。
+  ///
+  /// **原来的实现准不准？不准，而且是方法性的不准。**
+  /// 老算法是「缓冲到的秒数 × 平均码率（文件大小 ÷ 时长）→ 估算已下载字节」，
+  /// 它有两处硬伤：
+  /// 1. 假设整片恒定码率。遇上 VBR 片源，实际下载量和估算能差一倍以上；
+  /// 2. ExoPlayer 起播时经常一次就把一大段（甚至整片）标成 buffered，
+  ///    「已下载字节」瞬间从 0 跳到几百 MB，算出来的速率直接顶到限幅上限。
+  ///
+  /// 所以这里改成按需取真值：
+  /// ① IJK 自己报的 `tcpSpeed` —— 精确到这一条连接；
+  /// ② Android `TrafficStats.getUidRxBytes` 做差分 —— 整个 App 的真实下行；
+  /// ③ 前两条都拿不到（设备不支持统计）时才退回下面的旧估算。
+  Future<void> _sampleNetworkSpeed(TikTokPlaybackCore core) async {
+    // ① 内核自带速率
+    final native = core.nativeSpeedBps;
+    if (native > 0) {
+      _applyRealSpeed(native.toDouble());
+      return;
+    }
+    // ② 系统真实流量
+    if (!_trafficStatsUnsupported) {
+      final rx = await AlistPlugin.trafficRxBytes();
+      if (rx < 0) {
+        // TrafficStats.UNSUPPORTED：这台设备读不到，之后都不再问
+        _trafficStatsUnsupported = true;
+      } else {
+        final now = DateTime.now();
+        final last = _lastRxBytes;
+        final lastAt = _lastRxAt;
+        _lastRxBytes = rx;
+        _lastRxAt = now;
+        if (last >= 0 && lastAt != null) {
+          final dtMs = now.difference(lastAt).inMilliseconds;
+          if (dtMs > 0) {
+            final delta = rx - last;
+            if (delta >= 0) {
+              _applyRealSpeed((delta * 1000.0 / dtMs).clamp(0.0, _maxSpeedBps));
+              return;
+            }
+          }
+        }
+        return; // 只有单个采样点，还没有差值可用，等下一轮
+      }
+    }
+    // ③ 兜底：旧估算
+    _calcNetworkSpeed(core);
+  }
+
+  /// 写入一个真实速率采样。
+  ///
+  /// 归零（下载停了）要立刻生效——缓冲追平后读数挂在旧值上不动最容易被当成 bug；
+  /// 有值时走一层 EMA，抹掉单次 400ms 采样的抖动。
+  void _applyRealSpeed(double bps) {
+    if (bps <= 0) {
+      _networkSpeed = 0;
+      _displaySpeed = 0;
+      _lastSpeedUpdateAt = DateTime.now();
+      return;
+    }
+    _networkSpeed = _networkSpeed <= 0
+        ? bps
+        : _networkSpeed + (bps - _networkSpeed) * _speedEmaAlpha;
+    _lastSpeedUpdateAt = DateTime.now();
+    _updateDisplaySpeed();
+  }
+
   /// 实时下载速度：**只统计「活跃下载段」**。
   ///
   /// 关键前提：播放器是「下一小段就停」的策略——缓冲到阈值就暂停下载，等播放
@@ -878,9 +1113,9 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
   /// 这里的做法：把连续有增长的一段时间记为一个「下载段」，段结束时用
   /// 「段内新增字节 / 段内时长」结算——这段时间里确实一直在下，所以得到的就是
   /// 别的播放器 / 下载工具显示的那个带宽读数。段速率本身已经是平均值，天然不抖。
-  void _calcNetworkSpeed(VideoPlayerController ctrl) {
+  void _calcNetworkSpeed(TikTokPlaybackCore core) {
     try {
-      final buffered = ctrl.value.buffered;
+      final buffered = core.buffered;
       if (buffered.isEmpty) return;
 
       final end = buffered.last.end;
@@ -888,7 +1123,6 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
 
       // 拖动进度期间缓冲区间会整体跳变，这一段样本不参与计算
       if (_isSeeking) {
-        _lastBufferedEnd = end;
         _lastSpeedSample = now;
         _clearSpeedSegment();
         return;
@@ -896,7 +1130,7 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
 
       // 每「音视频秒」对应的字节数
       double bytesPerSecOfVideo = _fallbackBitrateBps;
-      final durMs = ctrl.value.duration.inMilliseconds.toDouble();
+      final durMs = core.duration.inMilliseconds.toDouble();
       if (durMs > 0) {
         final fs = _playList.videos[_currentIndex].fileSize;
         if (fs != null && fs > 0) bytesPerSecOfVideo = fs * 1000.0 / durMs;
@@ -932,7 +1166,6 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
         }
       }
       _lastCumBytes = cumBytes;
-      _lastBufferedEnd = end;
       _lastSpeedSample = now;
 
       // 静默够久 → 这一段下载结束了，结算它
@@ -1064,12 +1297,12 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
   void _togglePlayPause() {
     try {
       final c = _controllers[_currentIndex];
-      if (c == null || !c.value.isInitialized) return;
+      if (c == null || !c.isInitialized) return;
       if (_isPlaying) {
-        c.pause(); _isPlaying = false;
+        _fire(() => c.pause()); _isPlaying = false;
         _cancelLandscapeAutoHide();
       } else {
-        c.play(); _isPlaying = true;
+        _fire(() => c.play()); _isPlaying = true;
         _hideUI = false;
         _manualHideUI = false;
         _startLandscapeAutoHide();
@@ -1165,7 +1398,8 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
 
   void _toggleLoop() {
     _loopMode = (_loopMode + 1) % 3;
-    try { _controllers[_currentIndex]?.setLooping(_loopMode == 2); } catch (_) {}
+    final loopCore = _controllers[_currentIndex];
+    if (loopCore != null) _fire(() => loopCore.setLooping(_loopMode == 2));
     if (mounted) setState(() {});
     final labels = ['自动下一个', '播完即停止', '单视频循环'];
     SmartDialog.showToast(labels[_loopMode]);
@@ -1229,9 +1463,17 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
       // 原理：pixelRatio = 视频原始宽度 / 控件逻辑宽度
       // 例如：视频1280x720，控件逻辑宽度384 → pixelRatio≈3.33 → 截图1280x720
       double pixelRatio = MediaQuery.of(context).devicePixelRatio;
-      final ctrl = _controllers[_currentIndex];
-      if (ctrl != null && ctrl.value.isInitialized) {
-        final videoSize = ctrl.value.size;
+      final core = _controllers[_currentIndex];
+      // IJK 走的是 SurfaceTexture：画面内容在 Flutter 合成层之外，
+      // RepaintBoundary.toImage() 截出来是黑的。这里提前说清楚，
+      // 免得用户拿到一张全黑图以为是截图功能坏了。
+      if (core != null && !core.supportsTextureScreenshot) {
+        SmartDialog.dismiss();
+        SmartDialog.showToast('当前片源跑的是 FFmpeg 纹理内核，暂不支持截图');
+        return;
+      }
+      if (core != null && core.isInitialized) {
+        final videoSize = core.size;
         final widgetWidth = boundary.size.width;
         if (widgetWidth > 0 && videoSize.width > 0) {
           pixelRatio = videoSize.width / widgetWidth;
@@ -1437,8 +1679,9 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
     _disposeOutOfRange(idx);
     if (mounted) setState(() {});
     final c = _controllers[idx];
-    if (c != null && c.value.isInitialized) {
-      c.play();
+    _initErrors.removeWhere((k, _) => k != idx); // 上一页的错误提示不带到新页
+    if (c != null && c.isInitialized) {
+      _fire(() => c.play());
       _isPlaying = true;
       _recordViewing(idx);
       // 切页后不再重复引导：[_centerRowIntroShown] 在第一次起播时已经放过一次
@@ -1456,21 +1699,160 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
     }
     _preloadNearby(idx);
     _loadStates(idx);
+    // 最后一道保险：切页后强制除当前页外全部静默，杜绝任何离屏视频「幻听」
+    _pauseAllExceptCurrent();
   }
 
+  /// 除当前页外，把其余所有内核强制暂停。
+  ///
+  /// 这是「幻听」的最后一道保险：理论上只有当前页会被 play()，但任何新增的
+  /// 代码路径只要不小心给离屏视频开了声音，这里都能立刻压下去。
+  void _pauseAllExceptCurrent() {
+    for (final k in _controllers.keys) {
+      if (k == _currentIndex) continue;
+      try { _controllers[k]?.pause(); } catch (_) {}
+    }
+  }
+
+  /// 单页画面。三态：**已有内核 → 出画面** / **初始化失败 → 错误 + 重试** /
+  /// **还在加载 → 小恐龙 + 实时网速**。
+  ///
+  /// 单页画面。三态：**已有内核 → 出画面** / **初始化失败 → 错误 + 重试** /
+  /// **还在加载 → 小恐龙 + 实时网速**。
+  ///
+  /// libmpv 分支用全屏固定尺寸渲染（见下方 `TikTokEngine.compat` 特判），
+  /// 其余内核走居中 AspectRatio；具体画面控件由 [TikTokPlaybackCore.buildView] 产出。
   Widget _buildVideoItem(BuildContext context, int idx) {
     final c = _controllers[idx];
-    if (c != null && c.value.isInitialized) {
+    // 必须用 [TikTokPlaybackCore.isFrameVisible]（真实首帧）而非 isInitialized：
+    // libmpv 的 isInitialized 在 open 后即真，但首帧可能还没解出；Exo 同理。
+    // 用 width>0 当「有画面」还顺带规避 media_kit 首帧撕裂——画面稳定后才上屏。
+    if (c != null && c.isFrameVisible) {
       final video = RepaintBoundary(
         key: idx == _currentIndex ? _repaintKey : null,
-        child: VideoPlayer(c),
+        child: c.buildView(),
       );
       if (_isLandscape) {
-        return _buildLandscapeVideo(video, c.value.size);
+        return _buildLandscapeVideo(video, c.size);
       }
-      return Center(child: AspectRatio(aspectRatio: c.value.aspectRatio, child: video));
+      // libmpv：全屏 contain + 固定尺寸，避开首帧布局抖动导致的撕裂
+      if (c.engine == TikTokEngine.compat) return video;
+      return Center(child: AspectRatio(aspectRatio: c.aspectRatio, child: video));
     }
-    return const Center(child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2));
+    if (_initErrors.containsKey(idx)) return _buildPlayError(idx);
+    // 加载中：Chrome 断网小恐龙 + 真实下行速率；超过 10 秒给「手动切兼容内核」入口
+    return Center(
+      child: _SlowLoadHint(
+        bytesPerSecond: _enableNetworkSpeed ? _displaySpeed : null,
+        showSwitch: idx < _playList.videos.length &&
+            !needsCompatKernel(_playList.videos[idx].fileName),
+        onSwitchKernel: () => _recreateCurrent(forceCompat: true),
+      ),
+    );
+  }
+
+  /// 当前这一页的画面是不是「真的出来了」。
+  ///
+  /// false 的情况只有两种：还在加载（正在显示小恐龙）、或者起播失败（错误页）。
+  /// 这两种状态下画面正中都已经被占用了，其余浮层控件要靠它来让位。
+  bool get _isFrameLive {
+    final c = _controllers[_currentIndex];
+    if (c == null || !c.isFrameVisible) return false;
+    return !_initErrors.containsKey(_currentIndex);
+  }
+
+  /// 起播失败页。
+  ///
+  /// 以前这里只会转圈到天荒地老；现在给一句能看懂的原因 + 一个重试按钮，
+  /// 因为老格式最大的痛点就是「不知道到底是链接坏了还是格式不支持」。
+  Widget _buildPlayError(int idx) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 36),
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          Icon(Icons.error_outline_rounded,
+              color: Colors.white.withOpacity(0.85), size: 42),
+          const SizedBox(height: 16),
+          if (idx < _playList.videos.length)
+            Text(
+              _playList.videos[idx].fileName,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              textAlign: TextAlign.center,
+              style: const TextStyle(
+                  color: Colors.white, fontSize: 14, fontWeight: FontWeight.w600),
+            ),
+          const SizedBox(height: 8),
+          Text(
+            '无法播放该视频\n${_friendlyPlayError(_initErrors[idx])}',
+            textAlign: TextAlign.center,
+            style: TextStyle(
+                color: Colors.white.withOpacity(0.62),
+                fontSize: 12,
+                height: 1.5),
+          ),
+          const SizedBox(height: 20),
+          TextButton.icon(
+            onPressed: () {
+              _initErrors.remove(idx);
+              _safeInitCtrl(idx);
+              if (mounted) setState(() {});
+            },
+            icon: const Icon(Icons.refresh_rounded, size: 18),
+            label: const Text('重试'),
+            style: TextButton.styleFrom(
+                foregroundColor: const Color(0xFF4FC3F7)),
+          ),
+          // 老格式失败说明 FFmpeg 也放不了，再重试 Exo 没有意义；
+          // 只有「扩展名正常但 Exo 打不开」的片子才值得给换内核的出口。
+          if (idx < _playList.videos.length &&
+              !needsCompatKernel(_playList.videos[idx].fileName)) ...[
+            const SizedBox(height: 4),
+            TextButton.icon(
+              onPressed: () => _recreateCurrent(forceCompat: true),
+              icon: const Icon(Icons.swap_horiz_rounded, size: 18),
+              label: const Text('用兼容解码内核重试'),
+              style: TextButton.styleFrom(
+                  foregroundColor: const Color(0xFF4FC3F7)),
+            ),
+          ],
+        ]),
+      ),
+    );
+  }
+
+  /// 把内核的原始异常翻译成人话。
+  ///
+  /// 原则：能定位到具体原因就说原因；定位不到就给「编码不受支持 / 文件已损坏」
+  /// 这种仍然有信息量的说法，不要把 `Exception: ...` 这种原始堆栈甩给用户。
+  String _friendlyPlayError(String? raw) {
+    // 剥掉 Dart 的 `Exception:` / `PlatformException(...)` 外壳
+    final cleaned = (raw ?? '')
+        .replaceFirst(RegExp(r'^\w*Exception\s*[:(]?\s*'), '')
+        .replaceFirst(RegExp(r'^\w*Error\s*[:(]?\s*'), '')
+        .replaceAll(RegExp(r'[)\s]+$'), '')
+        .trim();
+    final s = cleaned.toLowerCase();
+    if (s.contains('404')) return '链接已失效（404）';
+    if (s.contains('403')) return '没有访问权限（403）';
+    if (s.contains('401') || s.contains('unauthorized')) return '登录状态已过期（401）';
+    if (s.contains('timeout') || s.contains('timed out')) return '连接超时，请检查网络';
+    if (s.contains('failed to connect') ||
+        s.contains('unable to resolve') ||
+        s.contains('errno')) return '无法连接到服务器';
+    if (s.contains('socket') || s.contains('reset')) return '网络连接被中断';
+    if (s.contains('500') || s.contains('502') || s.contains('503')) {
+      return '服务器暂时不可用';
+    }
+    if (s.contains('unsatisfiedlink') || s.contains('loadlibrar')) {
+      return '解码组件未就绪，请重启应用后重试';
+    }
+    if (s.contains('decoder') || s.contains('codec') ||
+        s.contains('error (-1') || s.contains('error (-541')) {
+      return '视频编码不受支持或文件已损坏';
+    }
+    if (s.isEmpty) return '编码不受支持或文件已损坏';
+    return '播放失败：$cleaned';
   }
 
   /// 横屏全屏时的画面适配，具体行为由 [_fitMode] 决定（见 [LandscapeFitMode]）。
@@ -1540,11 +1922,8 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
           const Spacer(),
           Text('${_currentIndex + 1}/${_playList.videos.length}',
             style: const TextStyle(color: Colors.white70, fontSize: 14)),
-          // 实时网速：紧跟页码。放这里既避开底部拥挤区，又不用自己管显隐
-          if (_speedVisible()) ...[
-            const SizedBox(width: 8),
-            _buildSpeedBadge(),
-          ],
+          // 实时网速：紧跟页码（仅加载/缓冲中显示，平稳播放隐藏，避免闪烁抢占视觉）
+          _buildSpeedBadge(),
           const Spacer(),
           // 竖屏顶栏的显隐开关（横屏改用点击屏幕，见 [_buildLandscapeHud]）
           IconButton(
@@ -1692,23 +2071,27 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
   Widget _buildCenterControls() {
     // 暂停时 `_isPlaying == false` → 长亮：画面静止时它不挡内容，
     // 而这正是用户最需要看清这两个按钮的时刻。
-    final awake = _centerRowAwake || !_isPlaying;
+    //
+    // 但「还在加载」和「起播失败」时必须整行让位：那两种状态下画面正中是
+    // 小恐龙 loading / 错误页 + 重试按钮，三个圆钮再叠上去就糊成一团了。
+    // 这里用 `!_isFrameLive` 直接掐掉，而不是靠 AnimatedOpacity 淡出——
+    // 淡出期间仍然会重叠，只有真的不参与布局才干净。
+    if (!(_isFrameLive && (_centerRowAwake || !_isPlaying))) {
+      return const SizedBox.shrink();
+    }
     return Positioned.fill(
       child: Center(
         child: AnimatedOpacity(
-          opacity: awake ? _uiOpacity : 0.0,
+          opacity: _uiOpacity,
           duration: _centerRowFade,
           curve: Curves.easeOut,
-          child: IgnorePointer(
-            ignoring: !awake,
-            child: Row(mainAxisSize: MainAxisSize.min, children: [
+          child: Row(mainAxisSize: MainAxisSize.min, children: [
               _seekStepButton(icon: Icons.replay_10, seconds: -10),
               const SizedBox(width: 40),
               _buildCenterSlot(),
               const SizedBox(width: 40),
               _seekStepButton(icon: Icons.forward_10, seconds: 10),
             ]),
-          ),
         ),
       ),
     );
@@ -1732,31 +2115,37 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
   /// 而且右侧工具栏（bottom 160 起）和进度条（bottom 80）已经很挤；
   /// 顶栏中间是唯一的空白区，且横竖屏都对应同一处，切换后视线不需要重新找。
   ///
-  /// 显隐：本组件没有任何自己的 Timer / Controller，纯跟随所在浮层
-  /// —— 竖屏由 [_buildTopBar] 的 `if (!_hideUI)` + Opacity 控制，
-  /// 横屏由 [_buildLandscapeHud] 的 AnimatedOpacity 淡入淡出，
-  /// 因此天然符合原有的控件显隐规则。
+  /// 显隐自带淡入淡出：用 [AnimatedSwitcher] 包住，出现/消失都是渐变而非硬切，
+  /// 配合 [_speedVisible] 只在「加载/缓冲」阶段显示的策略，彻底消除原先
+  /// 平稳播放时速率读数上下跳动导致的「一会儿有一会儿没」闪烁。
   Widget _buildSpeedBadge({bool compact = false}) {
-    if (!_speedVisible()) return const SizedBox.shrink();
-    return Container(
-      padding: EdgeInsets.symmetric(
-          horizontal: compact ? 6 : 7, vertical: compact ? 2 : 3),
-      decoration: BoxDecoration(
-        color: Colors.black.withOpacity(compact ? 0.4 : 0.5),
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: Colors.white.withOpacity(0.14), width: 0.5),
-      ),
-      child: Row(mainAxisSize: MainAxisSize.min, children: [
-        Icon(Icons.downloading_rounded,
-            color: const Color(0xFF4FC3F7), size: compact ? 11 : 12),
-        const SizedBox(width: 3),
-        Text(_fmtSpeed(_displaySpeed),
-            style: TextStyle(
-                color: const Color(0xFF4FC3F7),
-                fontSize: compact ? 10 : 11,
-                fontWeight: FontWeight.w600,
-                fontFamily: 'monospace')),
-      ]),
+    final visible = _speedVisible();
+    return AnimatedSwitcher(
+      duration: const Duration(milliseconds: 220),
+      transitionBuilder: (child, anim) => FadeTransition(opacity: anim, child: child),
+      child: visible
+          ? Container(
+              key: const ValueKey('spd'),
+              padding: EdgeInsets.symmetric(
+                  horizontal: compact ? 6 : 7, vertical: compact ? 2 : 3),
+              decoration: BoxDecoration(
+                color: Colors.black.withOpacity(compact ? 0.4 : 0.5),
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(color: Colors.white.withOpacity(0.14), width: 0.5),
+              ),
+              child: Row(mainAxisSize: MainAxisSize.min, children: [
+                Icon(Icons.downloading_rounded,
+                    color: const Color(0xFF4FC3F7), size: compact ? 11 : 12),
+                const SizedBox(width: 3),
+                Text(_fmtSpeed(_displaySpeed),
+                    style: TextStyle(
+                        color: const Color(0xFF4FC3F7),
+                        fontSize: compact ? 10 : 11,
+                        fontWeight: FontWeight.w600,
+                        fontFamily: 'monospace')),
+              ]),
+            )
+          : const SizedBox.shrink(key: ValueKey('spd-empty')),
     );
   }
 
@@ -1907,10 +2296,7 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
                                 color: Colors.white.withOpacity(0.65),
                                 fontSize: 11)),
                         // 与竖屏保持同一处（页码旁），旋转后视线不用来回找
-                        if (_speedVisible()) ...[
-                          const SizedBox(width: 6),
-                          _buildSpeedBadge(compact: true),
-                        ],
+                        _buildSpeedBadge(compact: true),
                       ],
                     ),
                   ],
@@ -1930,7 +2316,12 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
     );
   }
 
-  /// 底部浮层：快退10s / 播放暂停 / 快进10s · 进度条与时间 · 上一个 / 下一个 · 切回竖屏。
+  /// 底部浮层：上一个 / 播放暂停 / 下一个 · 进度条与时间 · 快退10s / 快进10s · 画面适配 · 切回竖屏。
+  ///
+  /// 布局说明：**播放键两侧固定是「上一个 / 下一个」**，快退快进挪到了进度条
+  /// 右边那一组。（原布局是 ±10s 在播放键两侧、上下集在进度条右边，和大多数
+  /// 播放器反着来：切视频是高频操作却排在最右端。）现在左边一组负责换视频，
+  /// 右边一组负责在当前视频里挪位置，各司其职。
   Widget _buildLandscapeBottomBar() {
     final totalMs = _dur.inMilliseconds.toDouble();
     final curMs = _pos.inMilliseconds.toDouble();
@@ -1952,15 +2343,16 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
           child: Padding(
             padding: const EdgeInsets.fromLTRB(4, 26, 8, 2),
             child: Row(children: [
-              _hudBarButton(
-                  Icons.replay_10_rounded, '快退 10 秒', () => _seekBy(-10)),
+              // ← 播放键两侧：上一个 / 下一个（换视频）
+              _hudBarButton(Icons.skip_previous_rounded, '上一个',
+                  hasPrev ? () => _goToPage(_currentIndex - 1) : null),
               _hudBarButton(
                   _isPlaying ? Icons.pause_rounded : Icons.play_arrow_rounded,
                   _isPlaying ? '暂停' : '播放',
                   _togglePlayPause,
                   size: 32),
-              _hudBarButton(
-                  Icons.forward_10_rounded, '快进 10 秒', () => _seekBy(10)),
+              _hudBarButton(Icons.skip_next_rounded, '下一个',
+                  hasNext ? () => _goToPage(_currentIndex + 1) : null),
               const SizedBox(width: 10),
               Text(_fmtDur(_pos),
                   style: const TextStyle(color: Colors.white70, fontSize: 11)),
@@ -1987,10 +2379,11 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
               Text(_fmtDur(_dur),
                   style: const TextStyle(color: Colors.white70, fontSize: 11)),
               const SizedBox(width: 6),
-              _hudBarButton(Icons.skip_previous_rounded, '上一个',
-                  hasPrev ? () => _goToPage(_currentIndex - 1) : null),
-              _hudBarButton(Icons.skip_next_rounded, '下一个',
-                  hasNext ? () => _goToPage(_currentIndex + 1) : null),
+              // ← 进度条右侧：快退 / 快进 10 秒（在当前视频里挪位置）
+              _hudBarButton(
+                  Icons.replay_10_rounded, '快退 10 秒', () => _seekBy(-10)),
+              _hudBarButton(
+                  Icons.forward_10_rounded, '快进 10 秒', () => _seekBy(10)),
               _hudBarButton(
                   _fitMode.icon, '画面适配：${_fitMode.label}', _cycleFitMode),
               _hudBarButton(
@@ -2877,6 +3270,75 @@ class _SeekRippleAnimState extends State<_SeekRippleAnim>
           ),
         ),
       ),
+    );
+  }
+}
+
+/// 加载中的恐龙 + 「等待较久」的换内核入口。
+///
+/// 恐龙动画自带重建、不依赖外层 setState；超过 10 秒只在这个小组件里
+/// 追加一行提示与按钮，避免为了读秒把整页 setState 拖累性能。
+class _SlowLoadHint extends StatefulWidget {
+  final double? bytesPerSecond;
+
+  /// 老格式（本来就该跑 FFmpeg）不显示换内核按钮——换了也是同一条路。
+  final bool showSwitch;
+  final VoidCallback onSwitchKernel;
+
+  const _SlowLoadHint({
+    this.bytesPerSecond,
+    this.showSwitch = true,
+    required this.onSwitchKernel,
+  });
+
+  @override
+  State<_SlowLoadHint> createState() => _SlowLoadHintState();
+}
+
+class _SlowLoadHintState extends State<_SlowLoadHint> {
+  bool _slow = false;
+  Timer? _timer;
+
+  @override
+  void initState() {
+    super.initState();
+    _timer = Timer(const Duration(seconds: 10), () {
+      if (mounted) setState(() => _slow = true);
+    });
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        DinoLoadingIndicator(
+          bytesPerSecond: widget.bytesPerSecond,
+          text: '加载中…',
+        ),
+        if (_slow && widget.showSwitch) ...[
+          const SizedBox(height: 14),
+          Text(
+            '等待时间有点长，可能是解码内核不适合这个视频',
+            style: TextStyle(
+                color: Colors.white.withOpacity(0.55), fontSize: 11),
+          ),
+          const SizedBox(height: 6),
+          TextButton.icon(
+            onPressed: widget.onSwitchKernel,
+            icon: const Icon(Icons.swap_horiz_rounded, size: 16),
+            label: const Text('切换兼容解码内核'),
+            style: TextButton.styleFrom(
+                foregroundColor: const Color(0xFF4FC3F7)),
+          ),
+        ],
+      ],
     );
   }
 }

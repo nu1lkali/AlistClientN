@@ -140,7 +140,10 @@ dependencies {
     implementation 'androidx.appcompat:appcompat:1.6.1'
     implementation 'com.github.CarGuo.GSYVideoPlayer:gsyVideoPlayer-java:v8.4.0-release-jitpack'
     implementation 'com.github.CarGuo.GSYVideoPlayer:GSYVideoPlayer-exo2:v8.4.0-release-jitpack'
-    implementation 'com.github.CarGuo.GSYVideoPlayer:gsyVideoPlayer-arm64:v8.4.0-release-jitpack'
+    // IJK 的 3 个 native 库（libijkffmpeg.so/libijkplayer.so/libijksdl.so）改由
+    // app/src/main/jniLibs/arm64-v8a/ 提供：GSY 预编译的 libijkffmpeg.so 缺 ASF
+    // 解封装器，WMV 放不出来；带 ASF 的版本由 build_ijk_asf.sh 重编后覆盖此处。
+    // （原 gsyVideoPlayer-arm64 AAR 只含这 3 个 .so，移除避免与 jniLibs 重复）
     // 显式添加 IJK Java wrapper（因 component ID 冲突导致传递依赖丢失）
     implementation 'com.github.CarGuo:GSYIjkJava:1.0.0'
     // PhotoView for HEIC viewer gesture support
