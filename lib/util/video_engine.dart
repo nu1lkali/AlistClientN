@@ -12,6 +12,10 @@ abstract class VideoEngine {
   Future<void> seekTo(Duration position);
   Future<void> setSpeed(double speed);
   Future<void> setLooping(bool looping);
+  /// 设置播放音量（0.0 ~ 1.0）。
+  /// 用于「只有当前页出声、离屏页静音」的幻听根治：非当前页内核一律 volume=0，
+  /// 从创建起就不可能漏出声音，比事后 pause 更彻底（零窗口）。
+  Future<void> setVolume(double volume);
   Duration get position;
   Duration get duration;
   bool get isPlaying;
@@ -116,6 +120,9 @@ class VideoPlayerEngine implements VideoEngine {
   Future<void> setLooping(bool looping) => _ctrl?.setLooping(looping) ?? Future.value();
 
   @override
+  Future<void> setVolume(double volume) => _ctrl?.setVolume(volume) ?? Future.value();
+
+  @override
   Widget buildVideoWidget() {
     final c = _ctrl;
     if (c != null && c.value.isInitialized) {
@@ -161,6 +168,14 @@ class MediaKitEngine implements VideoEngine {
   static const _seekMinInterval = Duration(milliseconds: 400);
   Timer? _seekDebounceTimer;
   Duration? _pendingSeekPosition;
+
+  // Seek 实效校验：mpv 对流不可 seek（服务端没给 Accept-Ranges / Content-Length）
+  // 时不会报错，而是静默从头重开 → UI 上表现为「拖了进度条又弹回 00:00」。
+  // 与其让用户猜是片源问题还是 App 问题，不如 seek 后复查一次，没到位就回调上层。
+  Timer? _seekVerifyTimer;
+
+  /// seek 未真正生效时回调（mpv 静默回到开头）。由门面透传给页面弹提示。
+  void Function()? onSeekFailed;
 
   @override
   Duration get position => _player?.state.position ?? Duration.zero;
@@ -318,8 +333,17 @@ class MediaKitEngine implements VideoEngine {
       native.setProperty('video-sync', 'audio');
       // 双端丢帧（decoder + vo），软解跟不上时平滑降帧而非冻住
       native.setProperty('framedrop', 'decoder+vo');
-      // 精确 seek：WMV/ASF 无关键帧索引，启用后 seek 更快恢复
-      native.setProperty('hr-seek', 'yes');
+      // 关键帧 seek：FLV/ASF/WMV 等关键帧稀疏，强制精确 seek（hr-seek=yes）会因
+      // 找不到目标帧而 seek 失败（表现为进度条拖不动 / 松手回弹），改用关键帧 seek
+      // 对任意老格式都稳。对 MP4/MKV 也只损失亚帧级精度，体验无感。
+      native.setProperty('hr-seek', 'no');
+      // 【FLV 拖进度条弹回 0 的关键修复】
+      // mpv 打开网络流时会判断它「是否可 seek」。若服务端没回 Accept-Ranges /
+      // Content-Length（AList 某些驱动、反代、部分 CDN 会这样），mpv 会把整条流判为
+      // 不可 seek —— 此时拖进度条不会跳到目标点，而是把流从头重开，表现就是
+      // 「拖到一半松手，进度回到 00:00」。
+      // force-seekable=yes 强制按可 seek 处理，mpv 才会发 Range 请求做字节定位。
+      native.setProperty('force-seekable', 'yes');
 
       // ==================== 渲染兼容 ====================
       native.setProperty('correct-pts', 'yes');
@@ -349,6 +373,27 @@ class MediaKitEngine implements VideoEngine {
     _pendingSeekPosition = null;
     _lastSeekTime = DateTime.now();
     _player?.seek(position);
+
+    // seek 后复查：mpv 对流不可 seek 时是「静默失败」——不抛错、直接把流拉回开头。
+    // 1.5s 后看真实 position 有没有到目标附近，没到就回调上层给明确提示。
+    _seekVerifyTimer?.cancel();
+    if (position > const Duration(seconds: 3)) {
+      final target = position;
+      // 给 2.5s：FLV 这种无索引容器做网络 seek 要多次 Range 探测 + 重新缓冲，
+      // 判太快会把「seek 慢」误报成「seek 失败」。
+      _seekVerifyTimer = Timer(const Duration(milliseconds: 2500), () {
+        final st = _player?.state;
+        if (st == null) return;
+        // 还在缓冲 = seek 没跑完，不能下结论
+        if (st.buffering) return;
+        final dur = st.duration;
+        // 目标超过片源实际时长（元数据不准）不算 seek 失败
+        if (dur > Duration.zero && target > dur) return;
+        if ((st.position - target).abs() > const Duration(seconds: 3)) {
+          onSeekFailed?.call();
+        }
+      });
+    }
   }
 
   @override
@@ -377,6 +422,9 @@ class MediaKitEngine implements VideoEngine {
   }
 
   @override
+  Future<void> setVolume(double volume) async => _player?.setVolume(volume * 100);
+
+  @override
   Widget buildVideoWidget() {
     final vc = _videoCtrl;
     if (vc != null) {
@@ -389,7 +437,10 @@ class MediaKitEngine implements VideoEngine {
   Future<void> dispose() async {
     _seekDebounceTimer?.cancel();
     _seekDebounceTimer = null;
+    _seekVerifyTimer?.cancel();
+    _seekVerifyTimer = null;
     _pendingSeekPosition = null;
+    onSeekFailed = null;
     try { _player?.pause(); } catch (_) {}
     try { _player?.stop(); } catch (_) {}
     await _posSub?.cancel();

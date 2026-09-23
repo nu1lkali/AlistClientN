@@ -69,6 +69,10 @@ class TikTokPlaybackCore {
   /// 内核名，用于信息面板 / toast 提示
   String get engineName => engine == TikTokEngine.compat ? 'libmpv' : 'ExoPlayer';
 
+  /// seek 没真正生效时回调（libmpv 对流不可 seek 时会静默拉回开头）。
+  /// 页面挂上后弹明确提示，免得只看到进度条弹回 0 却不知道原因。
+  void Function()? onSeekFailed;
+
   Future<void> _prepare({
     required TikTokEngine engine,
     required String url,
@@ -79,6 +83,8 @@ class TikTokPlaybackCore {
   }) async {
     if (engine == TikTokEngine.compat) {
       final e = MediaKitEngine();
+      // 透传 seek 失败回调（libmpv 对不可 seek 的流是静默失败的）
+      e.onSeekFailed = () => onSeekFailed?.call();
       // 先挂到实例上再 initialize：并行赛跑中途弃用 compat 时 dispose 才有目标，
       // 不会把还在探测 / 下载的 native 播放器漏在后台。
       _mk = e;
@@ -410,6 +416,19 @@ class TikTokPlaybackCore {
       return;
     }
     await _mk?.setLooping(looping);
+  }
+
+  /// 设置音量（0.0~1.0）。
+  ///
+  /// 幻听根治的关键：非当前页内核全部 volume=0，从创建起就静音，
+  /// 不论底层引擎是否误把离屏视频开了声音都漏不出来。
+  Future<void> setVolume(double volume) async {
+    final exo = _exo;
+    if (exo != null) {
+      await exo.setVolume(volume);
+      return;
+    }
+    await _mk?.setVolume(volume);
   }
 
   /// libmpv 事件驱动（位置/时长走 Stream 自行刷新），无需轮询；Exo 自身是

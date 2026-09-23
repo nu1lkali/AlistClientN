@@ -108,6 +108,8 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
 
   Duration _pos = Duration.zero;
   Duration _dur = Duration.zero;
+  // 「片源不支持拖动」提示的节流时间戳：一次片子只提示一次，别反复弹。
+  DateTime _lastSeekFailHint = DateTime.fromMillisecondsSinceEpoch(0);
   late final SubtitleController _subtitleController;
   Timer? _progressTimer;
   final GlobalKey _repaintKey = GlobalKey();
@@ -872,6 +874,9 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
       }
       await core.setLooping(_loopMode == 2);
       _controllers[idx] = core;
+      // libmpv 遇到不可 seek 的流是「静默失败」——不报错、把流拉回开头，
+      // UI 上就是拖了进度条又弹回 00:00。这里接上回调，给用户一句明确提示。
+      core.onSeekFailed = () => _hintSeekUnavailable();
       _initializingIndexes.remove(idx);
       _initErrors.remove(idx);
 
@@ -885,12 +890,15 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
       }
 
       if (idx == _currentIndex) {
+        // 当前页：先把音量拉满再起播，保证「起播瞬间」就有声且不会误静音
+        try { core.setVolume(1.0); } catch (_) {}
         core.play(); _isPlaying = true; _recordViewing(idx); _loadSubtitleForCurrent();
         // 网速不再需要「起播种子值」：系统流量采样在第一个 tick 就能给出真实读数，
         // 而旧的种子算法在 Exo 起播即把整段标成 buffered 时会高估好几倍。
       } else {
-        // 预加载的相邻视频：保持静默，绝不在后台出声（否则切到它之前就「幻听」）。
-        // 即便底层引擎某天默认开了自动播放，这里也兜底压住。
+        // 预加载的相邻视频：音量直接置 0（从创建起就静音，杜绝任何幻听），
+        // 即便底层引擎误把离屏视频开了声音，volume=0 也漏不出来；再补一刀 pause 双保险。
+        try { core.setVolume(0.0); } catch (_) {}
         try { core.pause(); } catch (_) {}
       }
       if (mounted) setState(() {});
@@ -976,7 +984,11 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
   void _safePlay() {
     final c = _controllers[_currentIndex];
     if (c != null && c.isInitialized) {
-      _fire(() => c.play());
+      // 恢复前台续播：先拉满音量再播（此前可能在切走/暂停时被置 0）
+      _fire(() async {
+        try { await c.setVolume(1.0); } catch (_) {}
+        try { await c.play(); } catch (_) {}
+      });
       _isPlaying = true;
       if (mounted) setState(() {});
     }
@@ -986,7 +998,11 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
   void _safePause() {
     final c = _controllers[_currentIndex];
     if (c != null && c.isInitialized) {
-      _fire(() => c.pause());
+      // 暂停同时静音：即便被误触发 play，volume=0 也不会漏声
+      _fire(() async {
+        try { await c.pause(); } catch (_) {}
+        try { await c.setVolume(0.0); } catch (_) {}
+      });
       _isPlaying = false;
       if (mounted) setState(() {});
     }
@@ -1299,10 +1315,19 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
       final c = _controllers[_currentIndex];
       if (c == null || !c.isInitialized) return;
       if (_isPlaying) {
-        _fire(() => c.pause()); _isPlaying = false;
+        // 暂停同时静音：已暂停的视频理论上不该出声，多一道 volume=0 双保险
+        _fire(() async {
+          try { await c.pause(); } catch (_) {}
+          try { await c.setVolume(0.0); } catch (_) {}
+        });
+        _isPlaying = false;
         _cancelLandscapeAutoHide();
       } else {
-        _fire(() => c.play()); _isPlaying = true;
+        _fire(() async {
+          try { await c.setVolume(1.0); } catch (_) {}
+          try { await c.play(); } catch (_) {}
+        });
+        _isPlaying = true;
         _hideUI = false;
         _manualHideUI = false;
         _startLandscapeAutoHide();
@@ -1443,10 +1468,23 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
     try {
       if (_dur.inMilliseconds > 0) {
         _controllers[_currentIndex]?.seekTo(Duration(milliseconds: (val * _dur.inMilliseconds).round()));
+      } else {
+        // 时长未知：此时 Slider 的 value 恒为 0，拖了必然弹回 0。
+        // 与其让用户以为 App 坏了，不如直接说明原因。
+        _hintSeekUnavailable('该片源没有时长信息，无法拖动进度条');
       }
     } catch (_) {}
     _resetSpeedSample();
     _startTimer();
+  }
+
+  /// 提示「这个片源拖不动」，同一条片子只弹一次（避免连续拖动反复打扰用户）。
+  void _hintSeekUnavailable([String? msg]) {
+    final now = DateTime.now();
+    if (now.difference(_lastSeekFailHint) < const Duration(seconds: 8)) return;
+    _lastSeekFailHint = now;
+    SmartDialog.showToast(
+        msg ?? '该片源不支持拖动进度条（服务端未提供可定位的流）');
   }
 
   // ═══════════════ Screenshot ═══════════════
@@ -1669,7 +1707,14 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
     _flushPending();
     _centerRowAwake = false; // 换页先收起：新视频开头挡着主体最难受
     _cancelCenterRowFade();
-    try { _controllers[_currentIndex]?.pause(); } catch (_) {}
+    // 旧页：先静音再暂停，确保「切走那一瞬间」也不会漏一声（零窗口）
+    final old = _controllers[_currentIndex];
+    if (old != null) {
+      _fire(() async {
+        try { await old.setVolume(0.0); } catch (_) {}
+        try { await old.pause(); } catch (_) {}
+      });
+    }
     _currentIndex = idx;
     _isPlaying = false;
     _pos = Duration.zero;
@@ -1681,7 +1726,11 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
     final c = _controllers[idx];
     _initErrors.removeWhere((k, _) => k != idx); // 上一页的错误提示不带到新页
     if (c != null && c.isInitialized) {
-      _fire(() => c.play());
+      // 新页：先拉满音量再起播
+      _fire(() async {
+        try { await c.setVolume(1.0); } catch (_) {}
+        try { await c.play(); } catch (_) {}
+      });
       _isPlaying = true;
       _recordViewing(idx);
       // 切页后不再重复引导：[_centerRowIntroShown] 在第一次起播时已经放过一次
@@ -1710,7 +1759,12 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
   void _pauseAllExceptCurrent() {
     for (final k in _controllers.keys) {
       if (k == _currentIndex) continue;
-      try { _controllers[k]?.pause(); } catch (_) {}
+      final ctrl = _controllers[k];
+      if (ctrl != null) {
+        // 双保险：静音 + 暂停。非当前页音量恒为 0，结构性杜绝幻听。
+        try { ctrl.setVolume(0.0); } catch (_) {}
+        try { ctrl.pause(); } catch (_) {}
+      }
     }
   }
 
