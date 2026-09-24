@@ -175,6 +175,13 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
   DateTime? _lastGrowAt;
   /// 最近一次结算出速度的时刻，用来判断读数是否已经过期
   DateTime? _lastSpeedUpdateAt;
+  /// 「零速率」从什么时候开始；null 表示当前有流量。
+  ///
+  /// 播放器是**突发式拉流**：拉满一小段缓冲就停，播掉一段再拉。400ms 的采样窗口
+  /// 经常整窗口一个字节都没收到，但这**不代表带宽变成了 0**。若见到 0 就立刻归零，
+  /// 读数就会抽风成「18MB/s → 0 → 15MB/s」。所以零值先记起点，累计超过
+  /// [_speedIdleGrace] 才判定为真停（缓冲已满 / 已暂停）。
+  DateTime? _idleSince;
   /// 上一次的累计字节数，用来识别缓冲回退（seek / 换源）
   double _lastCumBytes = 0;
   DateTime _lastSpeedSample = DateTime.now();
@@ -190,6 +197,11 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
   static const int _segMaxMs = 1500;
   /// 超过这么久没有新的下载段：判定缓冲已满 / 停止下载 → 归零，徽标消失
   static const int _speedStaleMs = 3000;
+  /// 零速率要连续持续这么久，才认定「真的停了」并归零。
+  ///
+  /// 比它更短的空档视为**突发下载之间的间隙**，读数保持不变——带宽并没变，
+  /// 只是这一瞬间没在拉。取值需大于一个心跳周期（400ms）的数倍，否则压不住抖动。
+  static const Duration _speedIdleGrace = Duration(milliseconds: 1500);
   /// 显示死区：新值和当前显示值相差不到 8% 就不刷新数字
   static const double _speedDeadband = 0.08;
   /// 新段速率的融合权重（段速率本身已经是平均值，不用太保守）
@@ -1077,6 +1089,9 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
     _speedStickyUntil = DateTime.fromMillisecondsSinceEpoch(0);
     _clearSpeedSegment();
     _lastSpeedUpdateAt = null;
+    // 空档计时也要清：否则上一个片子遗留的「已空档 1.2 秒」会让新片子的
+    // 第一个采样就被判成「真停」而直接归零，白等一个宽限期。
+    _idleSince = null;
     _lastCumBytes = 0;
     _lastSpeedSample = DateTime.now();
     // 真实流量通道也要清：换源 / seek 之间夹着别的应用流量，
@@ -1186,17 +1201,30 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
   /// 归零（下载停了）要立刻生效——缓冲追平后读数挂在旧值上不动最容易被当成 bug；
   /// 有值时走一层 EMA，抹掉单次 400ms 采样的抖动。
   void _applyRealSpeed(double bps) {
-    if (bps <= 0) {
-      _networkSpeed = 0;
-      _displaySpeed = 0;
-      _lastSpeedUpdateAt = DateTime.now();
+    final now = DateTime.now();
+
+    if (bps > 0) {
+      _idleSince = null;
+      _lastSpeedUpdateAt = now;
+      _networkSpeed = _networkSpeed <= 0
+          ? bps
+          : _networkSpeed + (bps - _networkSpeed) * _speedEmaAlpha;
+      _updateDisplaySpeed();
       return;
     }
-    _networkSpeed = _networkSpeed <= 0
-        ? bps
-        : _networkSpeed + (bps - _networkSpeed) * _speedEmaAlpha;
-    _lastSpeedUpdateAt = DateTime.now();
-    _updateDisplaySpeed();
+
+    // ── 零速率：不立刻归零 ──
+    // 播放器是「拉满一小段缓冲就停、播掉一段再拉」的突发式拉流，400ms 采样窗口
+    // 经常整窗口零字节，但带宽并没变，只是这一瞬间没在拉。见到 0 就归零的话，
+    // 下一拍又拉起来时会因为 `_networkSpeed <= 0` 而**绕过 EMA 直接瞬跳到满值**，
+    // 两者叠加就是「18MB/s → 0 → 15MB/s」的抽风。
+    // 所以先记空档起点，累计超过 [_speedIdleGrace] 才认定真停并归零。
+    _idleSince ??= now;
+    if (now.difference(_idleSince!) >= _speedIdleGrace) {
+      _networkSpeed = 0;
+      _displaySpeed = 0;
+    }
+    // 宽限期内：保持旧读数，既不刷新也不归零。
   }
 
   /// 实时下载速度：**只统计「活跃下载段」**。
