@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
@@ -175,7 +176,17 @@ class MediaKitEngine implements VideoEngine {
   Timer? _seekVerifyTimer;
 
   /// seek 未真正生效时回调（mpv 静默回到开头）。由门面透传给页面弹提示。
-  void Function()? onSeekFailed;
+  ///
+  /// [reason] 是诊断后的结论：**必须区分**下面两种情况，因为它们的表现完全
+  /// 一样（进度弹回 0），但一个客户端能修、另一个根本无从下手。
+  void Function(String reason)? onSeekFailed;
+
+  /// 当前媒体地址与请求头。仅用于 seek 校验失败后做一次 Range 可用性实测。
+  String? _mediaUrl;
+  Map<String, String>? _mediaHeaders;
+
+  /// 诊断请求去重：拖动失败往往连着触发，别对同一条 URL 反复发探测请求。
+  bool _diagnosingSeek = false;
 
   @override
   Duration get position => _player?.state.position ?? Duration.zero;
@@ -280,6 +291,8 @@ class MediaKitEngine implements VideoEngine {
 
   /// 加载媒体（Player 和 VideoController 已提前创建）
   Future<void> openMedia(String url, {Map<String, String>? httpHeaders}) async {
+    _mediaUrl = url;
+    _mediaHeaders = httpHeaders;
     _player?.open(Media(url, httpHeaders: httpHeaders ?? {}), play: true);
     _mediaOpened = true;
   }
@@ -293,6 +306,8 @@ class MediaKitEngine implements VideoEngine {
   Future<void> createFromNetwork(String url,
       {Map<String, String>? httpHeaders, bool autoPlay = true}) async {
     createPlayer();
+    _mediaUrl = url;
+    _mediaHeaders = httpHeaders;
     _player?.open(Media(url, httpHeaders: httpHeaders ?? {}), play: autoPlay);
     _mediaOpened = true;
   }
@@ -301,53 +316,56 @@ class MediaKitEngine implements VideoEngine {
     try {
       final native = _player!.platform as dynamic;
 
+      // ════════════════════════════════════════════════════════════════
+      // 本套参数的原则：**尽量贴近 mpv 默认**。
+      //
+      // 实测对照：同一个 Emby 视频，Yamby（同样是 mpv 内核）能播、能拖进度条，
+      // 本项目却「播不了 / 拖不动」。差异不在 URL —— Emby 官方文档明确写了
+      // 「direct streaming 时文件按静态方式提供，客户端 seek 可用」，所以
+      // static=true 直连这条链路本身没问题。剩下的差异只可能在参数上。
+      // 之前堆的这批非默认选项里有多个是负优化，已逐条移除（理由见下方注释）。
+      // ════════════════════════════════════════════════════════════════
+
       // ==================== 硬件解码 ====================
-      // 优先尝试硬解（GPU 解码 WMV3 等老格式性能远超纯软解），失败自动回退软解
-      native.setProperty('hwdec', 'auto-safe');
+      // 锁死纯软解。走兼容内核的都是 FLV/WMV/AVI/RMVB 这类老格式，Android
+      // 根本没有对应硬件解码器（mediacodec 不支持 FLV1 / VC-1 / WMV3 / RV40），
+      // 硬解尝试只有副作用：部分机型 mediacodec 初始化会挂住 → 直接「播不了」。
+      native.setProperty('hwdec', 'no');
 
       // ==================== 视频解码 ====================
       native.setProperty('vd-lavc-dr', 'no');
       // 明确分配 4 个解码线程，避免 auto 策略对 WMV/ASF 只分 1~2 线程
       native.setProperty('vd-lavc-threads', '4');
-      native.setProperty('vd-lavc-error-resilience', '1');
-
-      // ==================== 容器探测 ====================
-      native.setProperty('demuxer-lavf-analyzeduration', '5000000');
-      native.setProperty('demuxer-lavf-probesize', '50000000');
-      native.setProperty('demuxer-lavf-format', '');
-      native.setProperty('network-timeout', '30');
 
       // ==================== 缓存 ====================
-      native.setProperty('cache', 'yes');
-      // 网络流缓存 10 秒即可，30 秒过大导致内存压力 + 起播慢
-      native.setProperty('cache-secs', '10');
-      native.setProperty('demuxer-max-bytes', '50MiB');
-      native.setProperty('demuxer-max-back-bytes', '10MiB');
+      // ⚠️ 已移除 cache=yes / cache-secs=10。这两个是 mpv 的 **legacy 流式缓存**，
+      // 新版 mpv 已改用 demuxer cache 并由它自行管理，手册明确把它们标为
+      // 「legacy option for backwards compatibility」。更关键的是：legacy cache 一旦
+      // 启用，网络流的 seek 要走 cache 层而非底层 HTTP Range ——正是「拖进度条被
+      // 顶回开头」的高发路径。去掉后 mpv 回到默认的 demuxer cache（默认即开启），
+      // seek 直接落到底层字节 seek。
+      // ⚠️ 不要再压 demuxer-max-bytes / demuxer-max-back-bytes：
+      // mpv 默认值远大于此前写的 50MiB / 10MiB。back-bytes 是解封装器的
+      // 「向后可 seek 缓存」，调小后往回拖时 mpv 拿不到已读区间，只能弃流重新拉，
+      // 表现就是进度被顶回开头。交回 mpv 默认。
 
       // ==================== 音频 ====================
       native.setProperty('ad-lavc-dr', 'no');
-      native.setProperty('audio-pitch-correction', 'yes');
 
       // ==================== 同步与 seek ====================
       // 视频跟音频时钟同步，避免画面卡住不动
       native.setProperty('video-sync', 'audio');
       // 双端丢帧（decoder + vo），软解跟不上时平滑降帧而非冻住
       native.setProperty('framedrop', 'decoder+vo');
-      // 关键帧 seek：FLV/ASF/WMV 等关键帧稀疏，强制精确 seek（hr-seek=yes）会因
-      // 找不到目标帧而 seek 失败（表现为进度条拖不动 / 松手回弹），改用关键帧 seek
-      // 对任意老格式都稳。对 MP4/MKV 也只损失亚帧级精度，体验无感。
-      native.setProperty('hr-seek', 'no');
-      // 【FLV 拖进度条弹回 0 的关键修复】
-      // mpv 打开网络流时会判断它「是否可 seek」。若服务端没回 Accept-Ranges /
-      // Content-Length（AList 某些驱动、反代、部分 CDN 会这样），mpv 会把整条流判为
-      // 不可 seek —— 此时拖进度条不会跳到目标点，而是把流从头重开，表现就是
-      // 「拖到一半松手，进度回到 00:00」。
-      // force-seekable=yes 强制按可 seek 处理，mpv 才会发 Range 请求做字节定位。
+      // ⚠️ 不再覆盖 hr-seek：mpv 默认 hr-seek=default，对「绝对位置 seek」会自动
+      // 启用精确 seek —— 进度条拖动走的正是这条路。之前强制 hr-seek=no（只对齐
+      // 关键帧），而 FLV 这种缺索引的容器定位不到目标关键帧就会落到 0。
+      // ⚠️ 同理不再设置 demuxer-lavf-probesize / analyzeduration / network-timeout：
+      //  · probesize=50MB 会让 mpv 起播前在网络上狂读一大段 → 表现为「播不了」/极慢；
+      //  · network-timeout=30s 对 FLV 这种要多次 Range 探测的慢 seek 太短，会中途放弃。
+      // 服务端没回 Accept-Ranges / Content-Length 时 mpv 会把流判为不可 seek，
+      // 拖动时直接从头重开 → 进度回到 0。强制按可 seek 处理才会发 Range 字节定位。
       native.setProperty('force-seekable', 'yes');
-
-      // ==================== 渲染兼容 ====================
-      native.setProperty('correct-pts', 'yes');
-      native.setProperty('video-aspect-override', '0');
     } catch (_) {}
   }
 
@@ -390,9 +408,44 @@ class MediaKitEngine implements VideoEngine {
         // 目标超过片源实际时长（元数据不准）不算 seek 失败
         if (dur > Duration.zero && target > dur) return;
         if ((st.position - target).abs() > const Duration(seconds: 3)) {
-          onSeekFailed?.call();
+          _diagnoseSeek();
         }
       });
+    }
+  }
+
+  /// seek 实效校验失败后定位真实原因。
+  ///
+  /// mpv 只会静默把流拉回开头，不会告诉你为什么。而两种最可能的原因——
+  /// **服务端不提供 HTTP Range** 和 **容器缺关键帧索引**——表现一模一样，
+  /// 却一个客户端无从下手、一个可以针对性修复。这里实测一次 Range 请求区分开，
+  /// 让用户/开发者能一步定性，而不是继续在播放器参数上试错。
+  Future<void> _diagnoseSeek() async {
+    if (_diagnosingSeek) return;
+    _diagnosingSeek = true;
+    try {
+      final url = _mediaUrl;
+      String reason;
+      // 文案一律精简到单行放得下：页面提示条已强制 maxLines=1，
+      // 折行会让那块本来「低调」的浮层突兀地鼓成两行。
+      if (url == null) {
+        reason = '拖动失败：媒体地址已失效';
+      } else if (!url.startsWith('http://') && !url.startsWith('https://')) {
+        reason = '拖动失败：非网络流，无法定位';
+      } else {
+        final rangeOk =
+            await SeekSupportProbe.isRangeSupported(url, _mediaHeaders);
+        reason = rangeOk
+            // Range 正常却仍拖不动 → 锅在容器本身：FLV/ASF 这类容器靠索引定位，
+            // 缺索引时解封装器找不到目标关键帧，只能退回头。
+            ? '拖动失败：片源缺少关键帧索引'
+            : '拖动失败：服务端不支持 Range 定位';
+      }
+      onSeekFailed?.call(reason);
+    } catch (_) {
+      onSeekFailed?.call('拖动失败：播放器无法定位到目标位置');
+    } finally {
+      _diagnosingSeek = false;
     }
   }
 
@@ -457,5 +510,53 @@ class MediaKitEngine implements VideoEngine {
     _player?.dispose();
     _player = null;
     _mediaOpened = false;
+  }
+}
+
+/// 实测服务端是否提供 HTTP Range（字节定位）请求。
+///
+/// 存在的理由：播放器拖进度条失败时，"服务端不可定位" 和 "容器缺索引" 的
+/// 表现完全一样，但前者是服务端限制（换任何播放器都拖不动），后者可针对性修复。
+/// 与其在参数上反复试错，不如发一次 Range 请求把两者钉死。
+class SeekSupportProbe {
+  SeekSupportProbe._();
+
+  /// [url] 媒体直链，[headers] 播放时用到的鉴权头（否则探到的是 401）。
+  static Future<bool> isRangeSupported(
+      String url, Map<String, String>? headers) async {
+    Dio? dio;
+    try {
+      dio = Dio(BaseOptions(
+        connectTimeout: const Duration(seconds: 8),
+        receiveTimeout: const Duration(seconds: 8),
+      ));
+      final res = await dio.get<dynamic>(
+        url,
+        options: Options(
+          // 只要 2 字节即可：够判定服务端认不认 Range，又不会多拉流量。
+          headers: <String, dynamic>{
+            if (headers != null) ...headers,
+            'Range': 'bytes=0-1',
+          },
+          responseType: ResponseType.plain,
+          followRedirects: true,
+        ),
+      );
+      final status = res.statusCode ?? 0;
+      // 206 Partial Content = 明确支持 Range
+      if (status == 206) return true;
+      // 少数服务端返 200 但仍带 Content-Range / Accept-Ranges，也算支持
+      final cr = res.headers.value('content-range');
+      if (cr != null && cr.isNotEmpty) return true;
+      final ar = res.headers.value('accept-ranges');
+      if (ar != null && ar.toLowerCase() == 'bytes') return true;
+      return false;
+    } catch (_) {
+      // 探测本身失败（超时 / DNS / TLS）不能据此断言服务端不支持，但也没别的信
+      // 息可用。返回 true 让结论落到「容器缺索引」这一侧，避免误导成服务端问题。
+      return true;
+    } finally {
+      dio?.close(force: true);
+    }
   }
 }

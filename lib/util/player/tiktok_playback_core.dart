@@ -71,7 +71,7 @@ class TikTokPlaybackCore {
 
   /// seek 没真正生效时回调（libmpv 对流不可 seek 时会静默拉回开头）。
   /// 页面挂上后弹明确提示，免得只看到进度条弹回 0 却不知道原因。
-  void Function()? onSeekFailed;
+  void Function(String reason)? onSeekFailed;
 
   Future<void> _prepare({
     required TikTokEngine engine,
@@ -84,7 +84,7 @@ class TikTokPlaybackCore {
     if (engine == TikTokEngine.compat) {
       final e = MediaKitEngine();
       // 透传 seek 失败回调（libmpv 对不可 seek 的流是静默失败的）
-      e.onSeekFailed = () => onSeekFailed?.call();
+      e.onSeekFailed = (reason) => onSeekFailed?.call(reason);
       // 先挂到实例上再 initialize：并行赛跑中途弃用 compat 时 dispose 才有目标，
       // 不会把还在探测 / 下载的 native 播放器漏在后台。
       _mk = e;

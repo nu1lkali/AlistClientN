@@ -65,6 +65,13 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
   final Map<int, String> _initErrors = {};
   /// 已经提示过「这条片子被回落到 FFmpeg 内核」的索引，避免每次切回去都弹一次
   final Set<int> _fallbackNotified = {};
+  /// 实际回落到兼容内核（libmpv）但**不是老格式**的索引。
+  ///
+  /// 与 [_fallbackNotified] 分开存的原因：预加载的相邻视频也会走完整选核流程，
+  /// 它回落时用户正在看的是**另一条**（Exo 正常播放中），此时弹提示就成了
+  /// 「看着 A 却被告知 B 换了内核」的假消息。这里只记不弹，等用户真滑到它
+  /// 再由 [_notifyFallbackIfNeeded] 补上。
+  final Set<int> _compatFallbackIdx = {};
   /// 用户手动指定走 FFmpeg 内核的索引（「切不动时手动换内核」按钮写入，
   /// 对该文件本次会话内持续生效，左右滑来回切不再反复重试 Exo）
   final Set<int> _forceCompat = {};
@@ -114,6 +121,14 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
   Timer? _progressTimer;
   final GlobalKey _repaintKey = GlobalKey();
 
+  // ── 播放器内「低调提示条」 ──
+  // 原来用的是 SmartDialog.showToast：一块居中的黑色圆角浮层，压在画面正中、
+  // 面积大、还拦截触摸，用户反馈「很抢视觉」。而这个页面顶部/底部已经排满了控件，
+  // 于是改成贴底居中、小字号、半透明药丸，**不参与命中测试**（IgnorePointer），
+  // 几秒自动淡出 —— 用户看得见，但不夺走画面的主导权。
+  String? _inlineHint;
+  Timer? _inlineHintTimer;
+
   /// 控件透明度
   double _uiOpacity = 1.0;
 
@@ -138,6 +153,13 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
   double _networkSpeed = 0;
   /// 真正显示出来的速度：在 [_networkSpeed] 之上再加一层死区，末位数字才不乱跳。
   double _displaySpeed = 0;
+
+  /// 网速徽标的显隐状态。由心跳 [_updateSpeedBadge] 计算，build 只读。
+  bool _speedBadgeOn = false;
+  /// 进入可见态后，至少要维持到这个时刻才允许重新评估（见 [_updateSpeedBadge]）。
+  DateTime _speedStickyUntil = DateTime.fromMillisecondsSinceEpoch(0);
+  /// 「粘滞」时长：徽标一旦出现就至少亮这么久，避免跟着内核的突发拉流一闪一闪。
+  static const Duration _speedSticky = Duration(seconds: 3);
 
   // ── 系统真实流量采样（TrafficStats）──
   /// 上一次采样到的 App 累计下行字节数；< 0 表示还没取到有效基准
@@ -400,6 +422,7 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
     _landscapeHideTimer?.cancel();
     _indicatorFadeTimer?.cancel();
     _centerRowFadeTimer?.cancel();
+    _inlineHintTimer?.cancel();
     _flushPending();
     WidgetsBinding.instance.removeObserver(this);
     for (final c in _controllers.values) {
@@ -508,8 +531,12 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
   Future<void> _onTick() async {
     if (!mounted) return;
     try {
-      final c = _controllers[_currentIndex];
-      if (c == null) return;
+    final c = _controllers[_currentIndex];
+    if (c == null) {
+      // 没有内核就谈不上「加载/缓冲」，别把上一个视频的粘滞状态残留成常驻徽标
+      _speedBadgeOn = false;
+      return;
+    }
       await c.tick();
       if (!mounted) return;
 
@@ -547,10 +574,16 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
         _frameDeadline.remove(_currentIndex);
       }
 
-      if (!c.isInitialized) return;
-      // 采样必须先于 setState，否则新速度要等下一帧才刷出来（肉眼可见延迟）
+      // 网速采样必须排在 isInitialized 检查**之前**。
+      // 加载阶段（画面还是小恐龙）恰恰是用户最想知道「到底有没有在下」的时候；
+      // 而这一路读的是**系统真实流量差值**（AlistPlugin.trafficRxBytes），
+      // 跟播放器有没有就绪并无关系 —— 原先被 isInitialized 挡在后面，
+      // 结果 loading 期间网速恒为 0，恐龙下面那行根本显示不出速率。
       if (_enableNetworkSpeed) await _sampleNetworkSpeed(c);
       if (!mounted) return;
+      _updateSpeedBadge(c);
+
+      if (!c.isInitialized) return;
       final pos = c.position;
       final dur = c.duration;
       // 滑动调整进度期间，不从播放器读取位置，避免覆盖预览进度导致闪烁
@@ -773,7 +806,7 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
         v.isDisliked = false;
       }
       if (mounted) setState(() {});
-      SmartDialog.showToast(target ? '已加入不喜欢列表' : '已取消不喜欢');
+      _showHint(target ? '已加入不喜欢列表' : '已取消不喜欢');
     } catch (e) {
       // 回滚
       v.isDisliked = !target;
@@ -876,18 +909,21 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
       _controllers[idx] = core;
       // libmpv 遇到不可 seek 的流是「静默失败」——不报错、把流拉回开头，
       // UI 上就是拖了进度条又弹回 00:00。这里接上回调，给用户一句明确提示。
-      core.onSeekFailed = () => _hintSeekUnavailable();
+      core.onSeekFailed = (reason) => _hintSeekUnavailable(reason);
       _initializingIndexes.remove(idx);
       _initErrors.remove(idx);
 
-      // 用了兼容解码内核(libmpv)时给个提示：扩展名不在老格式清单里却回落了，说明
+      // 用了兼容解码内核(libmpv)时做个标记：扩展名不在老格式清单里却回落了，说明
       // ExoPlayer 打不开这条片子（编码异常 / 容器损坏），值得让用户知道。
-      if (mounted &&
-          core.engine == TikTokEngine.compat &&
-          !needsCompatKernel(v.fileName) &&
-          _fallbackNotified.add(idx)) {
-        SmartDialog.showToast('当前片源标准解码器无法解析，已自动切换至兼容解码内核');
+      //
+      // ⚠️ 这里**不能直接弹提示**：本函数也被 [_preloadNearby] 用来预创建相邻视频，
+      // 而选核要经历「容器嗅探 + Exo 耐心等待（5~15 秒）」，等它回落完成时用户
+      // 正在看的往往是另一条 Exo 正常播放中的视频 —— 直接弹就会变成「看着 A
+      // 却被告知 B 换了内核」的假消息。所以只记录，等它成为当前页再补提示。
+      if (core.engine == TikTokEngine.compat && !needsCompatKernel(v.fileName)) {
+        _compatFallbackIdx.add(idx);
       }
+      _notifyFallbackIfNeeded(idx);
 
       if (idx == _currentIndex) {
         // 当前页：先把音量拉满再起播，保证「起播瞬间」就有声且不会误静音
@@ -957,6 +993,28 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
     }
   }
 
+  /// 「这条片子没走 Exo、被回落到兼容内核」的提示出口。
+  ///
+  /// 只在该索引**正好是当前正在播放的那一条**时才弹。预加载的相邻视频即便回落了
+  /// 也只记进 [_compatFallbackIdx]，等用户真滑到它（[_onPageChanged]）再补提示，
+  /// 否则会出现「正在用 Exo 正常播 A，却弹出 B 已切换内核」的假消息。
+  ///
+  /// [forceCompat] 是用户自己按「切内核」按钮触发的，文案去掉「自动」二字更准确。
+  void _notifyFallbackIfNeeded(int idx) {
+    if (idx != _currentIndex) return; // 不是正在看的那条 → 不打扰
+    if (!mounted) return;
+    if (idx < 0 || idx >= _playList.videos.length) return;
+    final c = _controllers[idx];
+    if (c == null || c.engine != TikTokEngine.compat) return;
+    // 老格式（avi/rmvb/wmv…）本就该走兼容内核，是预期行为，不算「切换」
+    if (needsCompatKernel(_playList.videos[idx].fileName)) return;
+    if (!_compatFallbackIdx.contains(idx)) return;
+    if (!_fallbackNotified.add(idx)) return; // 每条只提示一次
+    _showHint(_forceCompat.contains(idx)
+        ? '已切换至兼容解码内核'
+        : '已自动切换至兼容解码内核');
+  }
+
   void _disposeOutOfRange(int idx) {
     final rm = _controllers.keys.where((k) => (k - idx).abs() > _cacheRange).toList();
     for (final k in rm) { try { _controllers[k]?.dispose(); } catch (_) {} _controllers.remove(k); }
@@ -1013,6 +1071,10 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
   void _resetSpeedSample() {
     _networkSpeed = 0;
     _displaySpeed = 0;
+    // 换源/seek 后立刻收起徽标：粘滞窗口是给「同一次加载」去抖用的，
+    // 不能把上一个视频的可见状态带到下一个片子上。
+    _speedBadgeOn = false;
+    _speedStickyUntil = DateTime.fromMillisecondsSinceEpoch(0);
     _clearSpeedSegment();
     _lastSpeedUpdateAt = null;
     _lastCumBytes = 0;
@@ -1023,19 +1085,36 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
     _lastRxAt = null;
   }
 
+  /// 更新网速徽标显隐（每 400ms 心跳里算一次，build 只读 [_speedBadgeOn]）。
+  ///
+  /// 关键在于**粘滞**。原先直接拿「是否在加载/缓冲」当显隐条件，但播放器是
+  /// **突发式拉流**的：拉满一小段缓冲就把 buffering 标记置为 false，播掉一点
+  /// 又开始拉、再置 true —— 于是徽标跟着「出现 → 消失 → 又出现」，非常抢眼。
+  ///
+  /// 现在：一旦判定该显示，就锁定至少 [_speedSticky] 之后才允许重新评估。
+  /// 这样读数有起伏也不会闪，用户在这几秒里看清一个稳定数字就够了。
+  void _updateSpeedBadge(TikTokPlaybackCore c) {
+    if (!_enableNetworkSpeed) {
+      _speedBadgeOn = false;
+      return;
+    }
+    final now = DateTime.now();
+    final fetching = !c.isFrameVisible || c.isBuffering;
+    if (fetching && _displaySpeed >= 1024) {
+      _speedStickyUntil = now.add(_speedSticky);
+      _speedBadgeOn = true;
+    } else if (now.isAfter(_speedStickyUntil)) {
+      _speedBadgeOn = false;
+    }
+  }
+
   /// 网速徽标当前是否需要显示。
   ///
-  /// 只在「还在加载 / 缓冲中」显示：这是用户真正在等网络的时候，且此时播放器
-  /// 在持续拉流，速率读数稳定不会乱跳。平稳播放时内核是**突发式拉流**（缓冲满了
-  /// 就停、播掉一段再拉），瞬时速率常在 1 KB/s 阈值上下反复横跳，挂在那会
-  /// 「一会儿有一会儿没」地抢占视觉，所以平稳播放阶段一律不显示。
-  bool _speedVisible() {
-    if (!_enableNetworkSpeed) return false;
-    final c = _controllers[_currentIndex];
-    if (c == null) return false;
-    final fetching = !c.isFrameVisible || c.isBuffering;
-    return fetching && _displaySpeed >= 1024;
-  }
+  /// 只在「还在加载 / 缓冲中」显示：平稳播放时内核是**突发式拉流**（缓冲满了
+  /// 就停、播掉一段再拉），长期挂一个读数会持续抢占视觉。
+  /// 显隐本身交给 [_speedBadgeOn]（心跳里带粘滞计算），这里不做即时判断，
+  /// 否则 build 每帧重算就会重新引入闪烁。
+  bool _speedVisible() => _enableNetworkSpeed && _speedBadgeOn;
 
   /// 结束当前「活跃下载段」的记账（不结算，只是丢弃）。
   void _clearSpeedSegment() {
@@ -1427,7 +1506,7 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
     if (loopCore != null) _fire(() => loopCore.setLooping(_loopMode == 2));
     if (mounted) setState(() {});
     final labels = ['自动下一个', '播完即停止', '单视频循环'];
-    SmartDialog.showToast(labels[_loopMode]);
+    _showHint(labels[_loopMode]);
   }
 
   void _toggleLike() {
@@ -1471,7 +1550,7 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
       } else {
         // 时长未知：此时 Slider 的 value 恒为 0，拖了必然弹回 0。
         // 与其让用户以为 App 坏了，不如直接说明原因。
-        _hintSeekUnavailable('该片源没有时长信息，无法拖动进度条');
+        _hintSeekUnavailable('片源时长未知，无法拖动进度条');
       }
     } catch (_) {}
     _resetSpeedSample();
@@ -1483,8 +1562,22 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
     final now = DateTime.now();
     if (now.difference(_lastSeekFailHint) < const Duration(seconds: 8)) return;
     _lastSeekFailHint = now;
-    SmartDialog.showToast(
-        msg ?? '该片源不支持拖动进度条（服务端未提供可定位的流）');
+    _showHint(msg ?? '该片源不支持拖动进度条', stay: const Duration(seconds: 5));
+  }
+
+  /// 弹一条「看得见但不抢戏」的提示。
+  ///
+  /// 位置选在画面**底部偏上**（进度条上方），而不是 SmartDialog 那种居中大浮层；
+  /// 半透明小字号、无阴影、自动淡出，外层 IgnorePointer 保证它绝不参与命中测试
+  /// —— 这一层的上下滑 / 单击 / 双击是本页核心交互，任何浮层都不该吃掉手势。
+  void _showHint(String text, {Duration stay = const Duration(seconds: 3)}) {
+    _inlineHintTimer?.cancel();
+    if (!mounted) return;
+    setState(() => _inlineHint = text);
+    _inlineHintTimer = Timer(stay, () {
+      if (!mounted) return;
+      setState(() => _inlineHint = null);
+    });
   }
 
   // ═══════════════ Screenshot ═══════════════
@@ -1507,7 +1600,7 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
       // 免得用户拿到一张全黑图以为是截图功能坏了。
       if (core != null && !core.supportsTextureScreenshot) {
         SmartDialog.dismiss();
-        SmartDialog.showToast('当前片源跑的是 FFmpeg 纹理内核，暂不支持截图');
+        _showHint('当前片源跑的是 FFmpeg 纹理内核，暂不支持截图');
         return;
       }
       if (core != null && core.isInitialized) {
@@ -1531,7 +1624,7 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
       await tempFile.writeAsBytes(bytes);
       final result = await ImageGallerySaver.saveFile(tempFile.path, name: fileName);
       SmartDialog.dismiss();
-      SmartDialog.showToast(result['isSuccess'] == true ? '截图已保存到相册' : '保存失败');
+      _showHint(result['isSuccess'] == true ? '截图已保存到相册' : '保存失败');
     } catch (e) { SmartDialog.dismiss(); SmartDialog.showToast('截图失败: $e'); }
   }
 
@@ -1621,7 +1714,77 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
         // 页码指示器自身承担「休眠态」：隐藏控件时它淡化留守并兼作恢复入口，
         // 不额外新造控件，避免同一个位置出现两套视觉语言
         if (_pageIndicatorEnabled()) _buildIndicator(),
+        // 「低调提示条」放最后：压在所有控件之上，但自身 IgnorePointer 不吃手势
+        _buildInlineHint(),
       ]),
+    );
+  }
+
+  /// 贴底居中的「低调提示条」。
+  ///
+  /// 取代原先居中的 SmartDialog 浮层。定位考量：
+  /// - **不放正中**：画面中部是主体内容，任何常驻/半常驻浮层都会夺走注意力，
+  ///   这正是用户反馈「很抢视觉」的原因。
+  /// - **放在进度条上方那段留白**：既避开已经排满的底部信息行（文件路径/大小）、
+  ///   也不压占比右侧工具栏（它在很靠右的窄条上，这里的最大宽度已限制到 0.72 屏宽）。
+  /// - **整体 IgnorePointer**：本层承载翻页 / 单击暂停 / 双击等核心手势，
+  ///   提示条作为纯展示层必须完全不参与命中测试。
+  /// - 淡入 + 轻微上移出现，3 秒后自动淡出，不留下任何可交互残留。
+  Widget _buildInlineHint() {
+    final text = _inlineHint;
+    // 0.86：比 0.72 更宽，只为了给「单行」留出余量。
+    final maxWidth = MediaQuery.of(context).size.width * 0.86;
+    return Positioned(
+      left: 0,
+      right: 0,
+      bottom: _isLandscape ? 92.0 : 104.0,
+      child: IgnorePointer(
+        child: Center(
+          child: AnimatedSwitcher(
+            duration: const Duration(milliseconds: 260),
+            switchInCurve: Curves.easeOut,
+            switchOutCurve: Curves.easeIn,
+            transitionBuilder: (child, anim) => FadeTransition(
+              opacity: anim,
+              child: SlideTransition(
+                position: Tween<Offset>(
+                        begin: const Offset(0, 0.3), end: Offset.zero)
+                    .animate(anim),
+                child: child,
+              ),
+            ),
+            child: text == null
+                ? const SizedBox.shrink()
+                : Container(
+                    key: ValueKey<String>(text),
+                    constraints: BoxConstraints(maxWidth: maxWidth),
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 12, vertical: 6),
+                    decoration: BoxDecoration(
+                      color: Colors.black.withOpacity(0.55),
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(
+                          color: Colors.white.withOpacity(0.10), width: 0.5),
+                    ),
+                    child: Text(
+                      text,
+                      style: TextStyle(
+                        color: Colors.white.withOpacity(0.82),
+                        fontSize: 12,
+                        fontWeight: FontWeight.w500,
+                        height: 1.3,
+                      ),
+                      // 强制单行：换行后多出来的第二行会让这个「低调」的浮块突然
+                      // 变成视觉上一个明显的方块，正是用户反馈的突兀感来源。
+                      // 宁可截断（文案已精简到多数机型放得下），也不要折行。
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      textAlign: TextAlign.center,
+                    ),
+                  ),
+          ),
+        ),
+      ),
     );
   }
 
@@ -1719,6 +1882,9 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
     _isPlaying = false;
     _pos = Duration.zero;
     _dur = Duration.zero;
+    // 这条若在预加载阶段就回落到兼容内核，现在它成了当前页，补上那句提示
+    // （预加载时不弹，否则会变成「看着 A 却被告知 B 换了内核」的假消息）
+    _notifyFallbackIfNeeded(idx);
     _resetSpeedSample(); // 换视频后旧缓冲区间作废，否则会冒出一个假峰值
     _loadSubtitleForCurrent();
     _disposeOutOfRange(idx);
@@ -1952,7 +2118,7 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
     _fitMode = next;
     LandscapeFitModeHelper.write(next);
     setState(() {});
-    SmartDialog.showToast('画面适配：${next.label}');
+    _showHint('画面适配：${next.label}');
   }
 
   Widget _buildPageView() {
@@ -2002,7 +2168,7 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
     if (_hideHintShown) return;
     _hideHintShown = true;
     final tail = _pageIndicatorEnabled() ? '，或点右侧页码圆点' : '';
-    SmartDialog.showToast('控件已隐藏 · 点屏幕任意位置即可恢复$tail');
+    _showHint('控件已隐藏 · 点屏幕任意位置恢复$tail');
   }
 
   /// 竖屏右侧竖向工具栏：收藏 / 踩 / 循环 / 信息。
@@ -2100,7 +2266,10 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
             child: Slider(value: val, onChangeStart: (_) => _onSeekStart(),
               onChanged: _onSeekChanged, onChangeEnd: _onSeekEnd),
           )),
-          Text(_fmtDur(_dur), style: const TextStyle(color: Colors.white70, fontSize: 11)),
+          // 时长未知时不显示 "00:00" —— 那会让用户误以为「这是条 0 秒的视频」或
+          // 「是 seek 坏了」。显示 --:-- 一眼就知道是元数据没给时长。
+          Text(_dur.inMilliseconds > 0 ? _fmtDur(_dur) : '--:--',
+              style: const TextStyle(color: Colors.white38, fontSize: 11)),
         ]),
       )),
     );
@@ -2430,8 +2599,9 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
                   ),
                 ),
               ),
-              Text(_fmtDur(_dur),
-                  style: const TextStyle(color: Colors.white70, fontSize: 11)),
+              // 时长未知显示 --:-- 而非 00:00：避免被误读成「0 秒的视频」
+              Text(_dur.inMilliseconds > 0 ? _fmtDur(_dur) : '--:--',
+                  style: const TextStyle(color: Colors.white38, fontSize: 11)),
               const SizedBox(width: 6),
               // ← 进度条右侧：快退 / 快进 10 秒（在当前视频里挪位置）
               _hudBarButton(

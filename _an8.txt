@@ -1,0 +1,18 @@
+Analyzing tiktok_player_page.dart, video_engine.dart, dino_loading.dart...
+
+warning - D:\project\AlistClientN\lib\screen\tiktok_player_page.dart:93:8 - The value of the field '_manualHideUI' isn't used. Try removing the field, or using it. - unused_field
+warning - D:\project\AlistClientN\lib\util\video_engine.dart:168:12 - The value of the field '_lastSeekTime' isn't used. Try removing the field, or using it. - unused_field
+warning - D:\project\AlistClientN\lib\util\video_engine.dart:169:16 - The value of the field '_seekMinInterval' isn't used. Try removing the field, or using it. - unused_field
+warning - D:\project\AlistClientN\lib\util\video_engine.dart:171:13 - The value of the field '_pendingSeekPosition' isn't used. Try removing the field, or using it. - unused_field
+   info - D:\project\AlistClientN\lib\screen\tiktok_player_page.dart:3:8 - The import of 'dart:typed_data' is unnecessary because all of the used elements are also provided by the import of 'package:flutter/services.dart'. Try removing the import directive. - unnecessary_import
+   info - D:\project\AlistClientN\lib\screen\tiktok_player_page.dart:996:8 - The declaration '_disposeAll' isn't referenced. Try removing the declaration of '_disposeAll'. - unused_element
+   info - D:\project\AlistClientN\lib\screen\tiktok_player_page.dart:2220:5 - Use 'const' for final variables initialized to a constant value. Try replacing 'final' with 'const'. - prefer_const_declarations
+   info - D:\project\AlistClientN\lib\screen\tiktok_player_page.dart:2296:38 - The operator x ~/ y is more efficient than (x / y).toInt(). Try re-writing the expression to use the '~/' operator. - division_optimization
+   info - D:\project\AlistClientN\lib\screen\tiktok_player_page.dart:2362:27 - Unnecessary use of string interpolation. Try replacing the string literal with the variable name. - unnecessary_string_interpolations
+   info - D:\project\AlistClientN\lib\screen\tiktok_player_page.dart:2694:5 - Use 'const' for final variables initialized to a constant value. Try replacing 'final' with 'const'. - prefer_const_declarations
+   info - D:\project\AlistClientN\lib\screen\tiktok_player_page.dart:2822:5 - Use 'const' for final variables initialized to a constant value. Try replacing 'final' with 'const'. - prefer_const_declarations
+   info - D:\project\AlistClientN\lib\screen\tiktok_player_page.dart:2939:5 - Use 'const' for final variables initialized to a constant value. Try replacing 'final' with 'const'. - prefer_const_declarations
+   info - D:\project\AlistClientN\lib\screen\tiktok_player_page.dart:3159:10 - The private field _rot could be 'final'. Try making the field 'final'. - prefer_final_fields
+   info - D:\project\AlistClientN\lib\screen\tiktok_player_page.dart:3342:23 - Use 'const' with the constructor to improve performance. Try adding the 'const' keyword to the constructor invocation. - prefer_const_constructors
+
+14 issues found.

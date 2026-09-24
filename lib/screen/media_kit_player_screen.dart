@@ -230,21 +230,18 @@ class _MediaKitPlayerScreenState extends State<MediaKitPlayerScreen>
       native.setProperty('vd-lavc-error-resilience', '1');
 
       // ==================== 容器格式探测配置 ====================
-      // 增大分析时长到5秒，帮助识别老格式和复杂容器
-      native.setProperty('demuxer-lavf-analyzeduration', '5000000');
-      // 增大探测大小到50MB，覆盖更多格式场景
-      native.setProperty('demuxer-lavf-probesize', '50000000');
-      // 允许所有解封装器
-      native.setProperty('demuxer-lavf-format', '');
-      // 网络超时配置（使用 mpv 专有属性，确保兼容各底层桥接）
-      native.setProperty('network-timeout', '30');
+      // ⚠️ 已移除 analyzeduration / probesize / format / network-timeout 的覆盖：
+      //  · analyzeduration 写成 '5000000' 而 mpv 该选项单位是**秒**，等于要求扫 5e6 秒；
+      //  · probesize=50MB 会让 mpv 起播前在网络上狂读一大段 → 「播不了」/起播极慢；
+      //  · network-timeout=30s 对 FLV 这种要多次 Range 探测的 seek 太短，会中途放弃 seek。
+      // 交回 mpv 默认即可识别绝大多数容器。与 [MediaKitEngine._configureFfmpeg] 保持一致。
 
       // ==================== 缓存配置 ====================
-      native.setProperty('cache', 'yes');
-      // 网络流缓存 10 秒即可，30 秒过大导致内存压力 + 起播慢
-      native.setProperty('cache-secs', '10');
-      native.setProperty('demuxer-max-bytes', '50MiB');
-      native.setProperty('demuxer-max-back-bytes', '10MiB');
+      // ⚠️ 已移除 cache=yes / cache-secs=10 / demuxer-max-bytes / demuxer-max-back-bytes。
+      // 前两项是 mpv 的 legacy 流式缓存，一旦启用网络流的 seek 就走 cache 层而非
+      // 底层 HTTP Range，正是「拖进度条被顶回开头」的高发路径；后两项会把解封装器的
+      // 向后 seek 缓存砍到远低于默认，往回拖时 mpv 拿不到已读区间，同样被顶回开头。
+      // 全部交回 mpv 默认。与 [MediaKitEngine._configureFfmpeg] 保持一致。
 
       // ==================== 音频解码容错配置 ====================
       native.setProperty('ad-lavc-dr', 'no');
@@ -259,8 +256,12 @@ class _MediaKitPlayerScreenState extends State<MediaKitPlayerScreen>
       // ==================== 同步与渲染配置 ====================
       // 视频跟音频时钟同步，避免画面卡住不动
       native.setProperty('video-sync', 'audio');
-      // 精确 seek：对 WMV/ASF 无关键帧索引的容器尤为重要，seek 后更快恢复
-      native.setProperty('hr-seek', 'yes');
+      // ⚠️ 不再强制 hr-seek=yes：mpv 默认 hr-seek=default，对「绝对位置 seek」
+      // 会自动启用精确 seek，无需手配；而强制写成固定值反而会在缺关键帧索引的
+      // 容器（FLV/ASF）上适得其反。
+      // 服务端不回 Accept-Ranges / Content-Length 时 mpv 会把流判为不可 seek，
+      // 拖动时便直接从头重开 → 进度回到 0。强制按可 seek 处理才会发 Range 字节定位。
+      native.setProperty('force-seekable', 'yes');
       // 双端丢帧（decoder + vo），软解跟不上时平滑降帧而非冻住
       native.setProperty('framedrop', 'decoder+vo');
 

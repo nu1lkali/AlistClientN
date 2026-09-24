@@ -253,7 +253,7 @@ const List<String> kDinoFrameB = <String>[
 /// 恐龙 + 网速的组合 loading 指示器。
 ///
 /// [bytesPerSecond] 为当前真实下行速率（B/s）；
-/// 低于 1KB/s 时不显示网速徽标，避免一直闪 0。
+/// 无流量时不显示，避免一直钉着一个 0。
 class DinoLoadingIndicator extends StatelessWidget {
   final double? bytesPerSecond;
   final String text;
@@ -279,7 +279,9 @@ class DinoLoadingIndicator extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final speed = bytesPerSecond;
-    final showSpeed = speed != null && speed >= 1024;
+    // 加载阶段必然在拉流，任何非零读数都是有效信息；只在完全没有流量时隐藏，
+    // 免得钉一个静止的「0 B/s」在那里。
+    final showSpeed = speed != null && speed > 0;
     return IgnorePointer(
       ignoring: true,
       child: Center(
@@ -288,46 +290,41 @@ class DinoLoadingIndicator extends StatelessWidget {
           children: [
             DinoRunner(pixelSize: pixelSize, color: color),
             const SizedBox(height: 14),
-            Text(
-              text,
-              style: TextStyle(
-                color: color.withOpacity(0.85),
-                fontSize: 13,
-                fontWeight: FontWeight.w500,
-                letterSpacing: 0.5,
-              ),
-            ),
-            if (showSpeed) ...[
-              const SizedBox(height: 6),
-              Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                decoration: BoxDecoration(
-                  color: Colors.black.withOpacity(0.45),
-                  borderRadius: BorderRadius.circular(20),
-                  border: Border.all(
-                      color: Colors.white.withOpacity(0.14), width: 0.5),
+            // 「加载中」与实时速率放在**同一行**。
+            // 这个画面里用户唯一在乎的进度信号就是「有没有在下载」，压到同一
+            // 视线高度才看得到；单独排成一行会变成另一枚孤立的徽标，且和
+            // 「加载中」争夺注意力，反而让人不知道先看哪个。
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                Text(
+                  text,
+                  style: TextStyle(
+                    color: color.withOpacity(0.85),
+                    fontSize: 13,
+                    fontWeight: FontWeight.w500,
+                    letterSpacing: 0.5,
+                  ),
                 ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    const Icon(Icons.downloading_rounded,
-                        color: Color(0xFF4FC3F7), size: 12),
-                    const SizedBox(width: 4),
-                    Text(
-                      formatSpeed(speed),
-                      style: const TextStyle(
-                        color: Color(0xFF4FC3F7),
-                        fontSize: 11,
-                        fontWeight: FontWeight.w600,
-                        // 'tnum' 等宽数字，避免速率跳动时文本抖动。
-                        fontFeatures: <FontFeature>[FontFeature('tnum')],
-                      ),
+                if (showSpeed) ...[
+                  const SizedBox(width: 8),
+                  const Icon(Icons.downloading_rounded,
+                      color: Color(0xFF4FC3F7), size: 12),
+                  const SizedBox(width: 3),
+                  Text(
+                    formatSpeed(speed),
+                    style: const TextStyle(
+                      color: Color(0xFF4FC3F7),
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
+                      // 'tnum' 等宽数字，避免速率跳动时文本抖动。
+                      fontFeatures: <FontFeature>[FontFeature('tnum')],
                     ),
-                  ],
-                ),
-              ),
-            ],
+                  ),
+                ],
+              ],
+            ),
           ],
         ),
       ),
