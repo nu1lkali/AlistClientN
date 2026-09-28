@@ -111,10 +111,12 @@ windows/**/*.[Cc]ache
 .tools/
 
 # Local plugin overrides used during development
+# ⚠️ 注意：package_info_plus_local / flutter_media_metadata_local 是
+#    pubspec.yaml → dependency_overrides 里的 path 依赖，属于构建必需品，
+#    必须提交，否则 clone/fork 后 `flutter pub get` 直接失败、无法编译。
+#    这两个目录不要加回忽略列表。
 /flutter_media_metadata/
-/flutter_media_metadata_local/
 /image_gallery_saver/
-/package_info_plus_local/
 
 # Other local metadata
 .claude/
