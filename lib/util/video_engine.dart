@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 import 'package:video_player/video_player.dart';
+import 'package:alist/util/player/compat_video_engine.dart';
 
 /// 统一视频引擎接口，屏蔽 video_player 和 media_kit 的差异
 abstract class VideoEngine {
@@ -159,7 +160,7 @@ class VideoPlayerEngine implements VideoEngine {
 }
 
 /// media_kit 引擎（libmpv/FFmpeg 软解，AVI/WMV/RMVB 等老格式）
-class MediaKitEngine implements VideoEngine {
+class MediaKitEngine implements VideoEngine, CompatVideoEngine {
   Player? _player;
   VideoController? _videoCtrl;
   bool _mediaOpened = false;
@@ -188,8 +189,51 @@ class MediaKitEngine implements VideoEngine {
   /// 诊断请求去重：拖动失败往往连着触发，别对同一条 URL 反复发探测请求。
   bool _diagnosingSeek = false;
 
+  // ══════════ 画面健康检测（「有声无画面」）══════════
+  //
+  // **为什么需要这套东西**：`_player.state.width/height` 只能说明「视频轨的参数
+  // 已经被解析出来」，**完全不代表画面已经画出来了**。拿它当「有画面」的判据，
+  // 会在 libmpv 刚拿到视频尺寸、VO 还没输出任何一帧时就把 loading 撤掉 ——
+  // 于是音频照常播放、Flutter 端却是一块黑，即用户报的「有声无画面」。
+  //
+  // 真正能证明「画面输出了」的是 mpv 的 `estimated-frame-number`：它只在 VO
+  // **真的输出一帧**时才前进。把它作为判据，「有画面」才名副其实。
+  int _lastFrameNo = -1;
+  /// 画面帧号从什么时候开始停滞；null 表示画面在正常推进。
+  DateTime? _frameStalledSince;
+  /// 探针重入保护：`getProperty` 是异步 FFI，不能叠加调用。
+  bool _probingPicture = false;
+  /// 是否已经**真的输出过至少一帧画面**（区别于「已知视频尺寸」）。
+  bool _hasRenderedFrame = false;
+  /// 本机 libmpv 读不到（或不更新）`estimated-frame-number` 时为 true。
+  ///
+  /// 这时探针无从判断，[hasRenderedFrame] 直接认输出正常 —— 退回改造前的
+  /// `width>0` 行为。宁可放弃这次加固，也不能让看不到的接口把正常视频判成黑屏。
+  bool _pictureProbeUnsupported = false;
+  /// 上一次采样到的播放时钟（mpv `time-pos`，秒）。
+  double _lastTimePos = -1;
+  /// 播放时钟持续前进的起点，用来给探针做自检。
+  DateTime? _clockRunningSince;
+
+  /// 画面停滞回调：正在播放（音频在走），但画面帧号持续不动。
+  void Function()? onPictureStalled;
+
+  /// 帧号停滞多久算故障。
+  ///
+  /// 要大于一个起播 / GOP 周期，也要盖得住一次短暂的网络抖动，
+  /// 否则会把「缓冲一下」误判成「画面死了」。
+  static const Duration _pictureStallGrace = Duration(seconds: 5);
+
+  /// 探针自检窗口：播放时钟已经走了这么久，帧号却**一次都没变过** ——
+  /// 说明这台设备的 libmpv 根本不更新 `estimated-frame-number`，探针不可信，
+  /// 必须永久停用；否则每条片子都会被误判成「有声无画面」。
+  static const Duration _frameProbeTrustWindow = Duration(seconds: 3);
+
   @override
   Duration get position => _player?.state.position ?? Duration.zero;
+
+  @override
+  String get engineName => 'libmpv';
 
   @override
   Duration get duration => _player?.state.duration ?? Duration.zero;
@@ -199,6 +243,14 @@ class MediaKitEngine implements VideoEngine {
 
   @override
   bool get isInitialized => _player != null && _mediaOpened;
+
+  /// 是否已经**真的输出过至少一帧画面**。
+  ///
+  /// 与 [isInitialized] / `state.width>0` 的区别：那两者只代表「媒体已打开」
+  /// / 「视频轨参数已解析」，此时 VO 可能还没交付任何一帧（黑屏 + 有声）。
+  ///
+  /// 探针不可用时返回 true，退化成改造前的 `width>0` 判据，不会更差。
+  bool get hasRenderedFrame => _pictureProbeUnsupported || _hasRenderedFrame;
 
   @override
   double get aspectRatio {
@@ -308,6 +360,9 @@ class MediaKitEngine implements VideoEngine {
     createPlayer();
     _mediaUrl = url;
     _mediaHeaders = httpHeaders;
+    // 换片子必须重置画面跟踪：帧号是每条片子各自计数的，带着上一条的基准会把
+    // 新片子的前几帧误判成「画面停滞」。
+    resetPictureTracking();
     _player?.open(Media(url, httpHeaders: httpHeaders ?? {}), play: autoPlay);
     _mediaOpened = true;
   }
@@ -476,6 +531,149 @@ class MediaKitEngine implements VideoEngine {
 
   @override
   Future<void> setVolume(double volume) async => _player?.setVolume(volume * 100);
+
+  /// 读取 mpv 的 `estimated-frame-number`（当前 VO 已输出到第几帧）。
+  ///
+  /// 返回 null 有三种情况：player 已释放、该属性在本机 libmpv 上不可用、
+  /// 或 mpv 自己返回 `(unavailable)`。这三种都只意味着**这个探针用不了**，
+  /// 绝不意味着画面有问题 —— 上层据此退回旧的 `width>0` 判据。
+  Future<int?> _frameNumber() async {
+    final p = _player;
+    if (p == null) return null;
+    try {
+      final native = p.platform as dynamic;
+      final s = await native.getProperty('estimated-frame-number') as String?;
+      if (s == null || s.isEmpty || s.startsWith('(')) return null;
+      return double.tryParse(s)?.round();
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// 读取 mpv 的 `time-pos`（播放时钟，秒）。
+  ///
+  /// 与帧号配套使用：时钟在走说明解码 / 音频在推进，是「有声」的判据。
+  Future<double?> _timePos() async {
+    final p = _player;
+    if (p == null) return null;
+    try {
+      final native = p.platform as dynamic;
+      final s = await native.getProperty('time-pos') as String?;
+      if (s == null || s.isEmpty || s.startsWith('(')) return null;
+      return double.tryParse(s);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// 画面健康探针。由上层心跳（facade 的 `tick`）驱动，调用方不需要 await。
+  ///
+  /// 干两件事：
+  /// 1. 记录「是否真的输出过画面」，供 [hasRenderedFrame] 作为 `isFrameVisible`
+  ///    的判据 —— 替代之前只看 `width>0` 的做法（见字段处的说明）；
+  /// 2. 播放中画面长时间停滞 → 回调 [onPictureStalled]，由上层做恢复。
+  ///
+  /// 判定故障必须**同时**满足：① 正在播放；② 视频轨已就绪（width>0）；
+  /// ③ **播放时钟在走**（`time-pos` 前进 = 音频在走）；④ 帧号持续不动。
+  ///
+  /// ③ 是「有声无画面」的定义性判据，也是防误报的关键：
+  /// - 网络卡住时 mpv 的时钟**也停**（解码等数据），画面不动是正常的，不该自愈；
+  /// - 只有「时钟在走（有声音）而画面不动」才是真正的渲染链路断了。
+  /// 早期版本少了 ③，于是「缓冲一下」也会被判成画面死亡，弹出假提示。
+  Future<void> probePictureHealth() async {
+    final p = _player;
+    if (p == null || !_mediaOpened) return;
+    if (_pictureProbeUnsupported) return;
+    if (_probingPicture) return; // 上一次 FFI 还没回来，别叠加
+    if (!p.state.playing ||
+        p.state.buffering ||
+        (p.state.width ?? 0) <= 0) {
+      _resetStallTracking();
+      return;
+    }
+    _probingPicture = true;
+    try {
+      final n = await _frameNumber();
+      if (n == null) {
+        // 这台设备读不到帧号 → 永久放弃探针，退回 width>0 判据，别反复试。
+        _pictureProbeUnsupported = true;
+        return;
+      }
+      // ① 播放时钟是不是在走
+      final t = await _timePos();
+      if (t == null) {
+        // 读不到时钟就没法确认「有声」，宁可不判，绝不误伤
+        _resetStallTracking();
+        return;
+      }
+      if (t - _lastTimePos <= 0.05) {
+        // 时钟没走 → 这是在等数据（缓冲），不是画面死了
+        _resetStallTracking();
+        _lastTimePos = t;
+        return;
+      }
+      _lastTimePos = t;
+      _clockRunningSince ??= DateTime.now();
+
+      // ② 帧号动了 → 画面正常，一切从头算
+      if (n != _lastFrameNo) {
+        _lastFrameNo = n;
+        _hasRenderedFrame = true;
+        _frameStalledSince = null;
+        _clockRunningSince = null;
+        return;
+      }
+
+      // ③ 探针自检：时钟走了这么久，帧号一次都没变过 → 这台设备的帧号属性
+      //    压根不更新（属性存在但恒为旧值），探针不可信，永久停用。
+      if (!_hasRenderedFrame &&
+          DateTime.now().difference(_clockRunningSince!) >=
+              _frameProbeTrustWindow) {
+        _pictureProbeUnsupported = true;
+        _frameStalledSince = null;
+        return;
+      }
+
+      _frameStalledSince ??= DateTime.now();
+      if (DateTime.now().difference(_frameStalledSince!) >= _pictureStallGrace) {
+        _frameStalledSince = null;
+        onPictureStalled?.call();
+      }
+    } finally {
+      _probingPicture = false;
+    }
+  }
+
+  void _resetStallTracking() {
+    _frameStalledSince = null;
+    _clockRunningSince = null;
+  }
+
+  /// 画面故障后的自愈：**原地重开当前媒体并回到原位置**。
+  ///
+  /// 选它的原因：libmpv 的 VO 一旦没接上（Surface / 纹理时序错位），单纯等待不会
+  /// 恢复，但 reopen 会重建整条渲染链路，且这里是先把当前 position 记下来再重开，
+  /// 用户几乎无感（只丢不到一秒）。比整个销毁重建轻得多，也不会重新走一遍选核。
+  Future<void> recoverPicture() async {
+    final p = _player;
+    final url = _mediaUrl;
+    if (p == null || url == null) return;
+    // 重开后帧号会从 0 重新计数，跟踪状态必须清掉，否则新起的画面会被当成旧值。
+    resetPictureTracking();
+    try {
+      await reload(url, p.state.position, httpHeaders: _mediaHeaders);
+    } catch (_) {}
+  }
+
+  /// 重置画面跟踪。每次重开媒体 / seek 到新位置后都要清，
+  /// 否则帧号倒退会被误判成「画面停滞」。
+  void resetPictureTracking() {
+    _lastFrameNo = -1;
+    _frameStalledSince = null;
+    _hasRenderedFrame = false;
+    _lastTimePos = -1;
+    _clockRunningSince = null;
+  }
 
   @override
   Widget buildVideoWidget() {

@@ -48,6 +48,7 @@ class AlistConstant {
   static const String lyricsStyle = 'lyricsStyle'; // 歌词视图风格: 0=流线型(默认), 1=时间轴
   static const String groupedRandomSort = 'groupedRandomSort'; // 随机排序时按类型分组
   static const String enableMediaKitPlayer = 'enableMediaKitPlayer'; // 使用 libmpv 播放器
+  static const String enableMpvExPlayer = 'enableMpvExPlayer'; // 增强 MPV 播放器内核（mpvEx）：开关开启时，兼容内核由 media_kit(libmpv) 切换为 mpvEx(is.xyz mpv)，关闭回退
   static const String videoBrightness = 'videoBrightness'; // 视频播放亮度记忆
   static const String autoPipEnabled = 'autoPipEnabled'; // 自动进入画中画
   static const String extensionFilter = 'extensionFilter'; // 扩展名过滤
@@ -66,6 +67,10 @@ class AlistConstant {
   static const String strmBrightness = 'strmBrightness'; // strm 播放器亮度记忆
   static const String strmPreloadEnabled = 'strmPreloadEnabled'; // strm 预加载下一个视频
   static const String enableFfmpegSoftDecode = 'enableFfmpegSoftDecode'; // FFmpeg 软解 (IJK/libmpv)
+
+  // 按格式指定播放内核（视界流播放器）
+  static const String kernelRuleEnabled = 'kernelRuleEnabled'; // 总开关，默认关闭
+  static const String kernelRuleJson = 'kernelRuleJson'; // 扩展名 -> 内核 的规则表(JSON)
 
   // SmartStrm 联动删除
   static const String linkedDeletionEnabled = 'linkedDeletionEnabled'; // 联动删除总开关

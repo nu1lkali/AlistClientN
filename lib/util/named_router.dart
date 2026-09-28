@@ -34,6 +34,7 @@ class NamedRouter {
   static const tiktokPlayer = "/tiktokPlayer";
   static const strmPlayer = "/strmPlayer";
   static const linkedDeletionSettings = "/linkedDeletionSettings";
+  static const kernelRuleSettings = "/kernelRuleSettings";
   // Emby 随机播放（服务器 / 媒体库管理）
   static const embyServerManage = "/embyServerManage";
   static const embyLibraryManage = "/embyLibraryManage";

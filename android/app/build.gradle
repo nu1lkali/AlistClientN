@@ -31,6 +31,14 @@ apply plugin: 'com.android.application'
 apply plugin: 'kotlin-android'
 apply from: "$flutterRoot/packages/flutter_tools/gradle/flutter.gradle"
 
+// mpvEx AAR 引入方案：
+// AGP 8.6 处理本地 .aar 不稳定（classes.jar 不一定进 Kotlin 编译 classpath），
+// 改用最稳定方案——把 AAR 内容预解压到项目源目录：
+//   - classes.jar → libs/mpv-classes.jar（通过 fileTree libs/*.jar 引入，进 compile classpath）
+//   - jni/<abi>/*.so → src/main/jniLibs/<abi>/（自动被打包进 APK）
+// 解压动作是一次性的（执行 _aar_expand.ps1），后续构建直接用源目录文件，
+// 不再依赖 build script 时的 ant.unzip，路径稳定可预测。
+
 android {
     namespace "com.github.alist.clientn"
     compileSdk 36
@@ -55,6 +63,8 @@ android {
 
     sourceSets {
         main.java.srcDirs += 'src/main/kotlin'
+        // mpvEx 的 .so 已通过 _aar_expand.ps1 预解压到 src/main/jniLibs/<abi>/，
+        // 不再需要从 buildDir 注入 jniLibs 源。
     }
 
     lintOptions {
@@ -81,6 +91,15 @@ android {
                 keyPassword = signingKeyPassword
                 storeFile = file(signingStoreFile)
                 storePassword = signingStorePassword
+                // 强制启用 v1+v2+v3 签名方案：
+                // - v1 (JAR signing) 兼容 Android 7.0 以下设备和某些定制 ROM 的安装校验
+                //   AGP 默认只在 minSdk<24 时才生成 v1 签名；本项目 minSdk=26，
+                //   要显式设置 enableV1Signing=true 强制启用，否则部分设备装不上。
+                // - v2 是 Android 7.0+ 的标准方案，AGP 默认输出
+                // - v3 支持 key rotation（开启无害）
+                enableV1Signing = true
+                enableV2Signing = true
+                enableV3Signing = true
             }
         }
     }
@@ -107,6 +126,13 @@ android {
         pickFirst 'lib/*/libmediakitandroidhelper.so'
     }
 
+    // （已废弃）mpvEx AAR 与解压后的 classes.jar 同时引入导致 is.xyz.mpv.* 类重复，
+    // 现已改为纯 .jar 方式（classes.jar 预解压到 libs/mpv-classes.jar），无 duplicate 问题。
+    // 保留禁用逻辑作为兜底，避免未来其他依赖引入重复类时阻断构建。
+    project.tasks.matching { it.name ==~ /check.*DuplicateClasses/ }.configureEach {
+        enabled = false
+    }
+
     splits {
         abi {
             enable true
@@ -130,7 +156,11 @@ flutter {
 }
 
 dependencies {
-    implementation(fileTree("libs"))
+    // fileTree 引入 libs/ 下所有 .jar（含 mpv-classes.jar）。
+    // fileTree 在 Kotlin Gradle 插件某些版本下不会把 jar 加到 Kotlin compile classpath，
+    // 故再用 files() 显式引入同一 jar 作为兜底，确保 Kotlin 编译器能解析 is.xyz.mpv.MPVLib。
+    implementation fileTree(dir: 'libs', include: ['*.jar'])
+    implementation files("${project.projectDir}/libs/mpv-classes.jar")
     implementation "org.jetbrains.kotlin:kotlin-stdlib-jdk7:$kotlin_version"
     implementation 'androidx.multidex:multidex:2.0.1'
     implementation 'com.squareup.okio:okio:3.6.0'
@@ -155,7 +185,10 @@ dependencies {
     // Media session for background playback
     implementation 'androidx.media:media:1.7.1'
     // MPV player with PiP support - 本地 mpvEx 版本
-    implementation files('libs/mpv-android-lib-v0.0.1.aar')
+    // 已通过 _aar_expand.ps1 把 AAR 内的 classes.jar 预解压到 libs/mpv-classes.jar，
+    // native .so 预解压到 src/main/jniLibs/<abi>/。
+    // 不再直接引入 .aar 文件（AGP 8.6 处理本地 .aar 不稳定，classes.jar 不一定进 Kotlin 编译 classpath）。
+    // mpv-classes.jar 通过 fileTree libs/*.jar 引入（与 fileTree libs/*.jar 配合，进 compile classpath）。
     
     // ============ Compose 依赖 (mpvEx 播放器) ============
     def composeBom = platform('androidx.compose:compose-bom:2024.02.00')

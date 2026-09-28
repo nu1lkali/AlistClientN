@@ -1,4 +1,6 @@
 import 'package:alist/entity/tiktok_play_list_model.dart';
+import 'package:alist/util/player/kernel_rule_settings.dart';
+import 'package:alist/util/player/video_format.dart';
 import 'package:flutter/material.dart';
 
 /// 「视界流」播放器的视频信息面板内容（`showModalBottomSheet` 弹出的底部框）。
@@ -16,6 +18,7 @@ class TiktokVideoInfoSheet extends StatefulWidget {
     required this.video,
     required this.fromEmby,
     required this.position,
+    this.engineName,
   }) : super(key: key);
 
   /// 当前正在播放的视频项。
@@ -26,6 +29,9 @@ class TiktokVideoInfoSheet extends StatefulWidget {
 
   /// 播放位置文本，形如 `3 / 12`。
   final String position;
+
+  /// 当前实际在跑的内核名（ExoPlayer / libmpv），尚未创建出来时为 null。
+  final String? engineName;
 
   @override
   State<TiktokVideoInfoSheet> createState() => _TiktokVideoInfoSheetState();
@@ -99,7 +105,33 @@ class _TiktokVideoInfoSheetState extends State<TiktokVideoInfoSheet> {
       _InfoEntry('Provider', v.provider ?? '未知'),
       _InfoEntry('文件签名', v.sign ?? '无', fullWidth: true),
       _InfoEntry('播放位置', widget.position),
+      // 排障用：格式到底识别成什么、此刻跑的是哪个内核
+      _InfoEntry('识别格式', _formatText()),
+      if (widget.engineName != null)
+        _InfoEntry('播放内核', widget.engineName!),
     ];
+  }
+
+  /// 「识别成什么格式 + 规则指定走哪个内核」。
+  ///
+  /// 认不出格式时明确写出来，免得用户以为规则没生效。
+  String _formatText() {
+    final probe =
+        probeVideoFormat(widget.video.fileName, url: widget.video.videoUrl);
+    if (!probe.ok) {
+      final unknown = KernelRuleSettings.instance
+          .ruleOf(KernelRuleSettings.unknownKey);
+      return '未识别 → ${KernelRuleSettings.instance.enabled ? unknown.label : '自动'}'
+          '（读文件头嗅探真实容器）';
+    }
+    final src = const {
+      'bracket': '括号',
+      'name': '文件名',
+      'url': 'URL',
+    }[probe.source];
+    final s = KernelRuleSettings.instance;
+    return '.${probe.ext}（$src）'
+        '${s.enabled ? ' → ${s.ruleOf(probe.ext!).label}' : ''}';
   }
 
   List<Widget> _buildRows({required bool wide}) {

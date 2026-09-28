@@ -1,6 +1,10 @@
 import 'dart:async';
 
+import 'package:alist/util/player/compat_video_engine.dart';
 import 'package:alist/util/player/container_sniffer.dart';
+import 'package:alist/util/player/kernel_rule_settings.dart';
+import 'package:alist/util/player/mpvex_engine.dart';
+import 'package:alist/util/player/video_format.dart';
 import 'package:alist/util/video_engine.dart';
 import 'package:flutter/material.dart';
 import 'package:video_player/video_player.dart';
@@ -43,11 +47,15 @@ const Set<String> kCompatFormatsHandledByMediaKit = <String>{
 };
 
 /// 文件名 → 是否需要使用兼容解码内核（libmpv）。
-bool needsCompatKernel(String fileName) {
-  final dot = fileName.lastIndexOf('.');
-  if (dot < 0 || dot == fileName.length - 1) return false;
-  final ext = fileName.substring(dot + 1).toLowerCase();
-  return kCompatFormatsHandledByMediaKit.contains(ext);
+///
+/// 走 [probeVideoFormat] 而不是简单的 `lastIndexOf('.')`：网盘 / Emby 直链里
+/// 的 `abcdef.(wmv).strm`、`movie.mkv.strm` 这类名字，真实格式藏在括号里或
+/// 被 .strm 壳包着，按老办法会把它们当成未知格式丢给 Exo（然后失败回落，
+/// 白白多等一个「耐心窗口」，还会误弹「已自动切换内核」的提示）。
+bool needsCompatKernel(String fileName, {String? url}) {
+  final probe = probeVideoFormat(fileName, url: url);
+  if (!probe.ok) return false;
+  return kCompatFormatsHandledByMediaKit.contains(probe.ext);
 }
 
 /// TikTok 播放器的播放内核门面。
@@ -61,17 +69,30 @@ class TikTokPlaybackCore {
   final TikTokEngine engine;
 
   VideoPlayerController? _exo;
-  MediaKitEngine? _mk;
+  CompatVideoEngine? _mk;
   // 缓存 media_kit 的 Video 控件实例：避免每次进度刷新 setState 都重建 Texture
   // 导致画面闪烁 / 平台视图反复挂载。
   Widget? _mkView;
 
+  /// 当前兼容内核是否为增强 mpvEx（开关开启且热升级成功）。
+  bool get isMpvEx => _isMpvEx;
+  bool _isMpvEx = false;
+
   /// 内核名，用于信息面板 / toast 提示
-  String get engineName => engine == TikTokEngine.compat ? 'libmpv' : 'ExoPlayer';
+  String get engineName =>
+      engine == TikTokEngine.compat ? (_isMpvEx ? 'mpvEx' : 'libmpv') : 'ExoPlayer';
 
   /// seek 没真正生效时回调（libmpv 对流不可 seek 时会静默拉回开头）。
   /// 页面挂上后弹明确提示，免得只看到进度条弹回 0 却不知道原因。
   void Function(String reason)? onSeekFailed;
+
+  /// 兼容内核画面停滞回调（音频在走、画面却没有帧输出）。
+  /// 页面会先自愈一次，仍无效再提示用户。
+  void Function()? onPictureStalled;
+
+  // 最近一次加载的媒体信息，供热升级到 mpvEx 时续播用。
+  String? _lastUrl;
+  Map<String, String>? _lastHeaders;
 
   Future<void> _prepare({
     required TikTokEngine engine,
@@ -81,10 +102,13 @@ class TikTokPlaybackCore {
     required String fileName,
     bool forceSoft = false,
   }) async {
+    _lastUrl = url;
+    _lastHeaders = headers;
     if (engine == TikTokEngine.compat) {
       final e = MediaKitEngine();
       // 透传 seek 失败回调（libmpv 对不可 seek 的流是静默失败的）
       e.onSeekFailed = (reason) => onSeekFailed?.call(reason);
+      e.onPictureStalled = () => onPictureStalled?.call();
       // 先挂到实例上再 initialize：并行赛跑中途弃用 compat 时 dispose 才有目标，
       // 不会把还在探测 / 下载的 native 播放器漏在后台。
       _mk = e;
@@ -191,8 +215,16 @@ class TikTokPlaybackCore {
     bool forceSoft = false,
     bool Function()? isAborted,
   }) async {
-    // 老格式（或手动指定）：Exo 必失败，直接 libmpv，一秒都不浪费
-    if (forceCompat || needsCompatKernel(fileName)) {
+    // ═══ 用户规则（设置页「按格式指定内核」）═══
+    // 优先级：手动切内核 forceCompat > 用户规则 > 扩展名自动判定。
+    // 规则指定 exo 时不跳过后续流程（仍会嗅探、仍会在 Exo 失败后回落 libmpv），
+    // 只是不再因为「扩展名在老格式清单里」而直接判死 Exo —— 指定了也不至于播不了。
+    final rule = KernelRuleSettings.instance.resolve(fileName, url: url);
+
+    // 老格式 / 用户指定 libmpv：Exo 必失败，直接 libmpv，一秒都不浪费
+    if (forceCompat ||
+        rule == KernelChoice.compat ||
+        (rule != KernelChoice.exo && needsCompatKernel(fileName, url: url))) {
       return _createCompat(
         url: url,
         headers: headers,
@@ -205,8 +237,9 @@ class TikTokPlaybackCore {
     // ── 容器嗅探：先弄清「这到底是什么容器」再选内核 ──
     final sniff = await ContainerSniffer.sniff(url, headers ?? const {});
     if (isAborted?.call() == true) throw const KernelAbortedException();
-    if (sniff != null && !sniff.kind.exoFriendly) {
+    if (rule != KernelChoice.exo && sniff != null && !sniff.kind.exoFriendly) {
       // 嗅探确认是 Exo 放不了的容器（AVI/RM/ASF/MPEG-PS/TS）→ 直接 libmpv
+      // （用户明确指定 exo 时尊重用户：先试 Exo，真放不出来后面还有回落）
       return _createCompat(
         url: url,
         headers: headers,
@@ -282,6 +315,105 @@ class TikTokPlaybackCore {
     );
   }
 
+  // ══════════════ 增强 mpvEx 内核热升级 / 降级 ══════════════
+  //
+  // **为什么需要这套轮转**：原生 MPVLib 是进程级单例，同一时刻只能有一个
+  // mpvEx 实例存活。抖音流预加载要同时挂 3 个内核实例，不可能全部用 mpvEx。
+  // 折中：相邻页保持 MediaKitEngine 静默预载（连接已建立 + 缓冲就绪，滑过去
+  // 即刻出画面，抖音式体验不变）；当前页稳定后**后台**升级到 mpvEx，**首帧
+  // 就绪才换画面**（无黑屏无跳变），随后释放旧 media_kit。
+  //
+  // 离开当前页时反向降级：释放 mpvEx（让出单例给新当前页），回退到
+  // MediaKitEngine 在原位置静默续载，保证来回滑都顺滑。
+
+  bool _upgrading = false;
+
+  /// 当前页稳定后调用：尝试热升级到 mpvEx。开关关 / 已是 mpvEx / 非 compat
+  /// 内核 / 升级中 → 直接返回。单例被占时静默跳过（保持 media_kit）。
+  Future<void> upgradeToMpvExIfNeeded() async {
+    if (!MpvExEngine.enabled) return;
+    if (engine != TikTokEngine.compat) return;
+    if (_isMpvEx || _upgrading) return;
+    final mk = _mk;
+    if (mk == null || !mk.isInitialized) return;
+    final url = _lastUrl;
+    if (url == null) return;
+    _upgrading = true;
+    try {
+      final ex = await MpvExEngine.create();
+      // 被单例仲裁踢出时：本引擎已无效，标记并放弃升级，保持 media_kit。
+      bool evicted = false;
+      ex.onEvicted = () {
+        evicted = true;
+        _isMpvEx = false;
+        // 降级路径会重建 media_kit；这里仅清标记，避免重复重建
+      };
+      final pos = mk.position;
+      final wasPlaying = mk.isPlaying;
+      await ex.openAt(url, _lastHeaders, pos.inMilliseconds / 1000.0, false);
+      // 等首帧（最多 4 秒）：mpvEx 首帧就绪才换画面，杜绝黑屏跳变。
+      final deadline = DateTime.now().add(const Duration(seconds: 4));
+      while (!ex.hasRenderedFrame &&
+          !ex.hasError &&
+          DateTime.now().isBefore(deadline)) {
+        if (evicted) break;
+        await Future<void>.delayed(const Duration(milliseconds: 80));
+      }
+      if (evicted || ex.hasError || !ex.isInitialized) {
+        // 升级失败 / 被踢：回退，保持原 media_kit
+        try { await ex.dispose(); } catch (_) {}
+        _isMpvEx = false;
+        return;
+      }
+      // 首帧就绪：换内核。先同步音量与播放状态，再换 _mk，最后释放旧 media_kit。
+      try { await ex.setVolume(1.0); } catch (_) {}
+      // 透传回调
+      ex.onSeekFailed = onSeekFailed;
+      ex.onPictureStalled = onPictureStalled;
+      _mk = ex;
+      _mkView = SizedBox.expand(child: ex.buildVideoWidget());
+      _isMpvEx = true;
+      if (wasPlaying) {
+        try { await ex.play(); } catch (_) {}
+      }
+      // 旧 media_kit 释放（它的单例由 media_kit 自己管，不影响 mpvEx 单例）
+      try { await mk.dispose(); } catch (_) {}
+    } catch (_) {
+      _isMpvEx = false;
+    } finally {
+      _upgrading = false;
+    }
+  }
+
+  /// 离开当前页时调用：若持有 mpvEx，释放单例并回退到 MediaKitEngine 在
+  /// 原位置静默续载（autoPlay=false，离屏页保持静默）。
+  Future<void> downgradeFromMpvExIfNeeded() async {
+    if (!_isMpvEx) return;
+    final mk = _mk;
+    if (mk is! MpvExEngine) return;
+    final pos = mk.position;
+    final url = _lastUrl;
+    final headers = _lastHeaders;
+    _isMpvEx = false;
+    try { await mk.dispose(); } catch (_) {}
+    _mk = null;
+    _mkView = null;
+    if (url == null) return;
+    // 重建 media_kit 静默续载（离屏页 autoPlay=false，不出声）
+    final e = MediaKitEngine();
+    e.onSeekFailed = onSeekFailed;
+    e.onPictureStalled = onPictureStalled;
+    try {
+      await e.createFromNetwork(url, httpHeaders: headers ?? const {}, autoPlay: false);
+      // 续到原位置（静默 seek，不触发画面）
+      unawaited(e.seekTo(pos).timeout(const Duration(seconds: 2)));
+      _mk = e;
+      _mkView = SizedBox.expand(child: e.buildVideoWidget());
+    } catch (_) {
+      // 重建失败：留给页面 _safeInitCtrl 兜底
+    }
+  }
+
   // ══════════════ 读值 ══════════════
 
   bool get isInitialized {
@@ -296,16 +428,16 @@ class TikTokPlaybackCore {
   /// - ExoPlayer 到达 ready 时就已经把首帧画上（暂停状态也有静帧），所以
   ///   `isInitialized` ≈ 有画面；
   /// - libmpv 的 `isInitialized` 在 `open()` 后立刻为真，但首帧可能还没解出。
-  ///   这里用 `width > 0` 当「有画面」判据——这同时是规避 media_kit
-  ///   **首帧撕裂**的关键：画面真正稳定（首帧解出）后才允许上屏，
-  ///   撕裂只出现在首帧解出前的瞬时 Surface，被 loading 画面挡住，用户看不到。
+  ///   这里不能只看 `width>0` —— 那只代表「视频轨参数已解析出来」，VO 可能连
+  ///   一帧都还没交付，此时撤掉 loading 上屏就是「有声无画面」（一块黑 + 音频照播）。
+  ///   必须再加上 [MediaKitEngine.hasRenderedFrame]（画面真的输出过帧）才算有画面。
   bool get isFrameVisible {
     final exo = _exo;
     if (exo != null) return exo.value.isInitialized;
     final mk = _mk;
     if (mk != null) {
       final sz = mk.videoSize;
-      return mk.isInitialized && sz.width > 0 && sz.height > 0;
+      return mk.isInitialized && sz.width > 0 && sz.height > 0 && mk.hasRenderedFrame;
     }
     return false;
   }
@@ -435,6 +567,19 @@ class TikTokPlaybackCore {
   /// ChangeNotifier，也无需处理。这里留作统一出口，便于将来扩展。
   Future<void> tick() async {
     await _mk?.refresh();
+    // 画面健康探针走异步 FFI，**绝不能 await**：一旦底层卡住会把整个 400ms
+    // 心跳拖死，UI 全僵。丢给它自己跑，内部有重入保护，天然不会堆积。
+    final mk = _mk;
+    if (mk != null) unawaited(mk.probePictureHealth());
+  }
+
+  /// 尝试修好「有声无画面」：原地重开当前媒体并回到原位置。
+  ///
+  /// 只在兼容内核下有意义（Exo 的画面链路由系统管，不会出现这种卡死）。
+  Future<void> recoverPicture() async {
+    try {
+      await _mk?.recoverPicture();
+    } catch (_) {}
   }
 
   Future<void> dispose() async {

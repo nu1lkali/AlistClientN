@@ -20,6 +20,7 @@ import 'package:alist/util/subtitle/subtitle_matcher.dart';
 import 'package:alist/util/subtitle/subtitle_settings.dart';
 import 'package:alist/util/log_utils.dart';
 import 'package:alist/util/named_router.dart';
+import 'package:alist/util/player/kernel_rule_settings.dart';
 import 'package:alist/util/user_controller.dart';
 import 'package:alist/util/video_fit_mode.dart';
 import 'package:alist/util/widget_utils.dart';
@@ -174,6 +175,7 @@ class _SettingsContainerState extends State<_SettingsContainer>
   late final RxBool _aggressiveCacheEnabled;
   late final RxBool _wifiOnlyPreloadEnabled;
   late final RxBool _enableMediaKitPlayer;
+  late final RxBool _enableMpvExPlayer;
   late final RxBool _showFabButton;
   late final RxBool _groupedRandomSort;
   late final RxBool _showTiktokPageIndicator;
@@ -198,6 +200,8 @@ class _SettingsContainerState extends State<_SettingsContainer>
         (SpUtil.getBool(AlistConstant.wifiOnlyPreload, defValue: true) ?? true).obs;
     _enableMediaKitPlayer =
         (SpUtil.getBool(AlistConstant.enableMediaKitPlayer, defValue: false) ?? false).obs;
+    _enableMpvExPlayer =
+        (SpUtil.getBool(AlistConstant.enableMpvExPlayer, defValue: false) ?? false).obs;
     _showFabButton =
         (SpUtil.getBool(AlistConstant.showFabButton, defValue: true) ?? true).obs;
     _groupedRandomSort =
@@ -324,6 +328,19 @@ class _SettingsContainerState extends State<_SettingsContainer>
               SpUtil.putBool(AlistConstant.enableMediaKitPlayer, v);
               _enableMediaKitPlayer.value = v;
             }),
+        // 「增强 MPV 播放器」开关暂时隐藏：原生 mpvEx 内核集成在 AlistClientN 上不生效，
+        // 改为在 mpvEx-master 项目基础上独立开发支持 Emby 的播放器，不在本仓库继续集成。
+        // 保留代码不删，未来若重启 mpvEx 集成时去掉下面注释即可恢复开关。
+        // SettingsItemData(
+        //     icon: Icons.auto_awesome, title: '增强 MPV 播放器',
+        //     subtitle: '兼容内核由 mpvEx(libmpv+Anime4K) 替换 media_kit；抖音流当前页热升级、保留预加载',
+        //     searchTerms: ['mpvex', 'mpv', '增强内核', 'anime4k', 'libmpv'],
+        //     type: SettingsItemType.switchTile,
+        //     switchValue: () => _enableMpvExPlayer.value,
+        //     switchOnChanged: (v) {
+        //       SpUtil.putBool(AlistConstant.enableMpvExPlayer, v);
+        //       _enableMpvExPlayer.value = v;
+        //     }),
         SettingsItemData(
             icon: Icons.memory_rounded, title: 'FFmpeg 软解',
             subtitle: 'strm 采用 FFmpeg 软解处理',
@@ -336,6 +353,14 @@ class _SettingsContainerState extends State<_SettingsContainer>
             }),
         SettingsItemData(icon: Icons.tune_rounded, title: Intl.settingsScreen_item_videoPlayer.tr,
             searchTerms: ['player', '播放'], onTap: () => Get.toNamed(NamedRouter.playerSettings)),
+        SettingsItemData(icon: Icons.memory_outlined, title: '按格式指定内核',
+            subtitle: '手动指定哪些格式走 ExoPlayer / libmpv（默认关闭，由播放器自动选路）',
+            trailingText: KernelRuleSettings.instance.enabled ? '已启用' : '自动',
+            searchTerms: ['kernel', '内核', 'exo', 'exoplayer', 'mpv', 'libmpv', '解码', '格式', 'wmv', 'avi', 'rmvb', 'strm'],
+            onTap: () async {
+              await Get.toNamed(NamedRouter.kernelRuleSettings);
+              if (mounted) setState(() {}); // 回来刷新「已启用 / 自动」
+            }),
         SettingsItemData(icon: Icons.aspect_ratio_rounded, title: '横屏画面适配',
             subtitle: '横屏全屏时画面如何适配屏幕',
             trailingText: LandscapeFitModeHelper.read().label,

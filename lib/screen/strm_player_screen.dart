@@ -14,6 +14,8 @@ import 'package:alist/util/file_title.dart';
 import 'package:alist/util/alist_plugin.dart';
 import 'package:alist/util/constant.dart';
 import 'package:alist/util/video_engine.dart';
+import 'package:alist/util/player/compat_video_engine.dart';
+import 'package:alist/util/player/mpvex_engine.dart';
 import 'package:alist/util/subtitle/subtitle.dart';
 import 'package:alist/widget/network_speed_indicator.dart';
 import 'package:alist/widget/subtitle_view.dart';
@@ -381,7 +383,19 @@ class _StrmPlayerScreenState extends State<StrmPlayerScreen>
           ['avi', 'wmv', 'rmvb', 'mpg', 'mpeg', 'vob', 'flv', 'divx', 'xvid', 'rm', 'asf', 'ogv', 'ogm'].contains(remoteExt);
 
       VideoEngine engine;
-      if (useMediaKit) {
+      // mpvEx 开关开启时，原本会用 media_kit (libmpv) 的兼容内核一律改走 mpvEx；
+      // video_player (ExoPlayer) 路径保持不变，因为 mpvEx 只替换 libmpv 兼容内核。
+      final useMpvEx = MpvExEngine.enabled && useMediaKit;
+      if (useMpvEx) {
+        // 增强 mpvEx 内核：先创建实例（占用原生 MPVLib 单例），让 Texture 提前上树，
+        // 再异步加载媒体。首帧就绪前 build 仍能渲染（显示 loading）。
+        final mpvExEngine = await MpvExEngine.create();
+        _engine = mpvExEngine;
+        if (mounted) setState(() {});
+        await mpvExEngine.createFromNetwork(url, httpHeaders: httpHeaders);
+        engine = mpvExEngine;
+        if (_enableNetworkSpeed) _startMpvSpeedPolling();
+      } else if (useMediaKit) {
         final mkEngine = MediaKitEngine();
         mkEngine.createPlayer(); // 先创建 Player+VideoController，让 PlatformView 提前上树
         _engine = mkEngine;     // 立即设置，让 build 能渲染 Video widget
@@ -570,8 +584,8 @@ class _StrmPlayerScreenState extends State<StrmPlayerScreen>
       final engine = _engine;
       if (engine == null || !engine.isInitialized) return;
 
-      if (engine is MediaKitEngine) {
-        // MPV engine: cache-speed is polled by timer
+      if (engine is CompatVideoEngine) {
+        // MPV 兼容内核（media_kit / mpvEx）：cache-speed 由定时器轮询，本函数直接返回
         return;
       }
 
@@ -621,6 +635,12 @@ class _StrmPlayerScreenState extends State<StrmPlayerScreen>
           }
           if (speed != null && mounted) {
             setState(() => _networkSpeed = speed!);
+          }
+        } else if (engine is MpvExEngine) {
+          // mpvEx：原生通过事件回调持续刷新 nativeSpeedBps，这里只需读值
+          final bps = engine.nativeSpeedBps;
+          if (bps > 0 && mounted) {
+            setState(() => _networkSpeed = bps.toDouble());
           }
         }
       } catch (_) {}
@@ -1309,13 +1329,16 @@ class _StrmPlayerScreenState extends State<StrmPlayerScreen>
   Widget _buildVideoView() {
     final engine = _engine;
     if (engine != null && engine.isInitialized) {
-      // media_kit 引擎：Video 是 PlatformView，必须一直在树里，撑满
-      if (engine is MediaKitEngine) {
+      // 兼容内核（media_kit / mpvEx）：底层均为 Texture / PlatformView，必须一直在树里撑满
+      // 用局部变量 ce 接住 cast 后的 CompatVideoEngine，避免在 children 数组（隐式闭包）
+      // 内类型提升失效，导致 engine.isBuffering / buildVideoWidget 找不到成员。
+      if (engine is CompatVideoEngine) {
+        final ce = engine as CompatVideoEngine;
         return Stack(
           fit: StackFit.expand,
           children: [
-            engine.buildVideoWidget(),
-            if (engine.isBuffering)
+            ce.buildVideoWidget(),
+            if (ce.isBuffering)
               const Center(
                 child: CircularProgressIndicator(
                     color: Colors.white, strokeWidth: 2),

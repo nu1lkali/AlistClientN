@@ -17,6 +17,7 @@ import 'package:alist/util/file_utils.dart';
 import 'package:alist/util/log_utils.dart' as log;
 import 'package:alist/util/alist_plugin.dart';
 import 'package:alist/util/player/ijk_video_controller.dart';
+import 'package:alist/util/player/mpvex_engine.dart';
 import 'package:alist/util/player/tiktok_playback_core.dart';
 import 'package:alist/util/subtitle/subtitle.dart';
 import 'package:alist/widget/dino_loading.dart';
@@ -147,6 +148,10 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
   Timer? _centerRowFadeTimer;
   static const _centerRowLinger = Duration(seconds: 2);
   static const _centerRowFade = Duration(milliseconds: 260);
+
+  /// mpvEx 热升级防抖计时器：切到新当前页后等 800ms 且仍在该页，才升级内核，
+  /// 避免快速连滑时内核反复重建（MPVLib 单例 destroy/create 有开销）。
+  Timer? _mpvexUpgradeTimer;
 
   /// 实时下载速度（字节/秒）。**数据源优先级见 [_sampleNetworkSpeed]**：
   /// 首选 IJK 自己的 tcpSpeed，其次 Android 系统真实流量，最后才是旧估算。
@@ -420,6 +425,9 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
     _initBrightnessAndVolume();
     // 预热 FFmpeg 内核的 native 库：把 5MB 级 .so 的装载挪出「切内核」关键路径
     IjkVideoController.preloadLibraries();
+    // 预热 mpvEx native 库（libplayer.so）：开关开启时当前页会热升级到 mpvEx，
+    // 提前装载，升级瞬间不用等库装载。
+    if (MpvExEngine.enabled) unawaited(MpvExEngine.preload());
     _safeInitCtrl(_currentIndex);
     _preloadNearby(_currentIndex);
     _loadStates(_currentIndex);
@@ -435,6 +443,7 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
     _indicatorFadeTimer?.cancel();
     _centerRowFadeTimer?.cancel();
     _inlineHintTimer?.cancel();
+    _mpvexUpgradeTimer?.cancel();
     _flushPending();
     WidgetsBinding.instance.removeObserver(this);
     for (final c in _controllers.values) {
@@ -922,6 +931,8 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
       // libmpv 遇到不可 seek 的流是「静默失败」——不报错、把流拉回开头，
       // UI 上就是拖了进度条又弹回 00:00。这里接上回调，给用户一句明确提示。
       core.onSeekFailed = (reason) => _hintSeekUnavailable(reason);
+      // 「有声无画面」自愈：libmpv 的渲染链路偶尔没接上，音频照走但画面全黑。
+      core.onPictureStalled = () => _recoverPicture(idx);
       _initializingIndexes.remove(idx);
       _initErrors.remove(idx);
 
@@ -932,7 +943,8 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
       // 而选核要经历「容器嗅探 + Exo 耐心等待（5~15 秒）」，等它回落完成时用户
       // 正在看的往往是另一条 Exo 正常播放中的视频 —— 直接弹就会变成「看着 A
       // 却被告知 B 换了内核」的假消息。所以只记录，等它成为当前页再补提示。
-      if (core.engine == TikTokEngine.compat && !needsCompatKernel(v.fileName)) {
+      if (core.engine == TikTokEngine.compat &&
+          !needsCompatKernel(v.fileName, url: v.videoUrl)) {
         _compatFallbackIdx.add(idx);
       }
       _notifyFallbackIfNeeded(idx);
@@ -941,6 +953,10 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
         // 当前页：先把音量拉满再起播，保证「起播瞬间」就有声且不会误静音
         try { core.setVolume(1.0); } catch (_) {}
         core.play(); _isPlaying = true; _recordViewing(idx); _loadSubtitleForCurrent();
+        // 手动重载：等时长出来后跳回原进度（异步跑，不拖慢起播）
+        unawaited(_applyReloadSeek(idx));
+        // 当前页就绪：安排 mpvEx 热升级（防抖，仅兼容内核 + 开关开时生效）
+        _scheduleMpvExUpgrade(idx);
         // 网速不再需要「起播种子值」：系统流量采样在第一个 tick 就能给出真实读数，
         // 而旧的种子算法在 Exo 起播即把整段标成 buffered 时会高估好几倍。
       } else {
@@ -1005,6 +1021,119 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
     }
   }
 
+  // ═══════════════ 手动重载 ═══════════════
+  /// 连点保护：一次重载在途时忽略后续点击。
+  ///
+  /// [_safeInitCtrl] 内部还有一层「已登记 / 已创建」去重，这里只是让用户
+  /// 疯狂连点时不会反复弹提示。
+  bool _reloading = false;
+
+  /// 重载完成后要跳回的进度（键为视频索引）。
+  ///
+  /// 内核刚建好时 duration 常常还是 0，此刻 seek 会被静默丢掉（libmpv 最明显：
+  /// 拖完又弹回 00:00）。所以这里只登记目标，由 [_applyReloadSeek] 等到时长
+  /// 出来之后再跳。
+  final Map<int, Duration> _reloadSeek = {};
+
+  /// 重载前的播放状态：暂停状态下点重载不该突然出声。
+  bool _reloadResumePlay = true;
+
+  /// 手动重载当前视频。
+  ///
+  /// 不管当前跑的是 ExoPlayer 还是 libmpv：原地销毁内核、用**同一套内核策略**
+  /// 重建（不重置 forceCompat / forceSoft，用户手动切过的内核保持生效），
+  /// 并回到重载前的进度。
+  ///
+  /// 和 [_recreateCurrent] 的区别：那个是「换内核」，这个是「同一内核重开」，
+  /// 用来对付偶发的解码卡死、CDN 连接半死不活、有声无画面这类一次性故障。
+  Future<void> _reloadCurrent() async {
+    if (_reloading) return;
+    final idx = _currentIndex;
+    if (idx < 0 || idx >= _playList.videos.length) return;
+    final c = _controllers[idx];
+    final pos = c?.position ?? Duration.zero;
+    final keep = pos > Duration.zero ? pos : _pos;
+    _reloadResumePlay = _isPlaying;
+    if (keep > Duration.zero) {
+      _reloadSeek[idx] = keep;
+    } else {
+      _reloadSeek.remove(idx);
+    }
+    _reloading = true;
+    Future<void>.delayed(const Duration(milliseconds: 1200), () {
+      _reloading = false;
+    });
+
+    _showHint('正在重载…');
+    // 重载本身就是一次全新尝试：清掉「只救一次」的限额，让画面自愈可以再来一轮
+    _pictureHealed.remove(idx);
+    _frameDeadline.remove(idx);
+    _initErrors.remove(idx);
+    _resetSpeedSample();
+
+    final old = _controllers.remove(idx);
+    if (old != null) {
+      try { await old.dispose(); } catch (_) {}
+    }
+    _initializingIndexes.remove(idx);
+    _safeInitCtrl(idx);
+    if (mounted) setState(() {});
+  }
+
+  /// 重载收尾：等时长出来后跳回原进度，并还原播放 / 暂停状态。
+  Future<void> _applyReloadSeek(int idx) async {
+    final target = _reloadSeek.remove(idx);
+    if (target == null) return;
+    final c = _controllers[idx];
+    if (c == null) return;
+    // 最多等 6 秒：等到 duration > 0 才 seek，否则会被内核静默丢弃
+    for (var i = 0; i < 60; i++) {
+      if (!mounted || _controllers[idx] != c) return;
+      if (c.duration.inMilliseconds > 0) break;
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+    }
+    if (!mounted || _controllers[idx] != c) return;
+    final dur = c.duration;
+    if (dur.inMilliseconds <= 0) return;
+    // 贴着片尾 seek 会直接触发播放结束，末尾 1.5 秒以内就从头开始
+    var ms = target.inMilliseconds;
+    final tail = dur.inMilliseconds - 1500;
+    if (ms > tail) ms = tail < 0 ? 0 : tail;
+    try { await c.seekTo(Duration(milliseconds: ms)); } catch (_) {}
+    if (!mounted || _controllers[idx] != c) return;
+    if (_reloadResumePlay) {
+      try { await c.play(); } catch (_) {}
+      if (mounted) setState(() => _isPlaying = true);
+    } else {
+      try { await c.pause(); } catch (_) {}
+      if (mounted) setState(() => _isPlaying = false);
+    }
+  }
+
+  /// 「有声无画面」的自愈入口。
+  ///
+  /// 每条片子只救一次：反复重启播放器会把一次偶发故障放大成「一直在缓冲」，
+  /// 不如救一次，救不回来就下一次回调时明确提示用户。
+  ///
+  /// **自愈过程不弹提示**：reload 是原地重开、进度不变，救回来用户几乎无感，
+  /// 弹一句「正在恢复画面…」反而是打扰（尤其在误判时会把正常播放吓一跳）。
+  /// 只有救不回来（第二次仍然停滞）才提示——那时候用户确实需要知道。
+  final Set<int> _pictureHealed = {};
+
+  Future<void> _recoverPicture(int idx) async {
+    if (idx != _currentIndex) return; // 只救正在看的那条
+    final c = _controllers[idx];
+    if (c == null) return;
+    if (!_pictureHealed.add(idx)) {
+      // 已经救过一次仍然没画面 → 不再无限重启，明确告诉用户
+      _showHint('画面渲染失败，该视频可能无法在本机播放',
+          stay: const Duration(seconds: 5));
+      return;
+    }
+    log.Log.d('picture stalled on #$idx, recovering silently');
+    await c.recoverPicture();
+  }
+
   /// 「这条片子没走 Exo、被回落到兼容内核」的提示出口。
   ///
   /// 只在该索引**正好是当前正在播放的那一条**时才弹。预加载的相邻视频即便回落了
@@ -1019,7 +1148,8 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
     final c = _controllers[idx];
     if (c == null || c.engine != TikTokEngine.compat) return;
     // 老格式（avi/rmvb/wmv…）本就该走兼容内核，是预期行为，不算「切换」
-    if (needsCompatKernel(_playList.videos[idx].fileName)) return;
+    if (needsCompatKernel(_playList.videos[idx].fileName,
+        url: _playList.videos[idx].videoUrl)) return;
     if (!_compatFallbackIdx.contains(idx)) return;
     if (!_fallbackNotified.add(idx)) return; // 每条只提示一次
     _showHint(_forceCompat.contains(idx)
@@ -1676,6 +1806,7 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
         video: v,
         fromEmby: _playList.fromEmby,
         position: '${_currentIndex + 1} / ${_playList.videos.length}',
+        engineName: _controllers[_currentIndex]?.engineName,
       ),
     );
   }
@@ -1901,6 +2032,9 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
     // 旧页：先静音再暂停，确保「切走那一瞬间」也不会漏一声（零窗口）
     final old = _controllers[_currentIndex];
     if (old != null) {
+      // 旧页若持有 mpvEx 单例，降级回 media_kit 释放单例给新当前页。
+      // 用 unawaited：降级在后台跑（含 media_kit 重建），不阻塞切页手感。
+      unawaited(old.downgradeFromMpvExIfNeeded());
       _fire(() async {
         try { await old.setVolume(0.0); } catch (_) {}
         try { await old.pause(); } catch (_) {}
@@ -1944,6 +2078,20 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
     _loadStates(idx);
     // 最后一道保险：切页后强制除当前页外全部静默，杜绝任何离屏视频「幻听」
     _pauseAllExceptCurrent();
+    // 新当前页稳定后安排 mpvEx 热升级（防抖 800ms，仅当前页且为兼容内核时生效）
+    _scheduleMpvExUpgrade(idx);
+  }
+
+  /// 安排一次 mpvEx 热升级（防抖）。仅当目标页仍为当前页、且其内核为
+  /// 兼容内核（libmpv）且开关开启时，门面内部才真正发起升级。
+  void _scheduleMpvExUpgrade(int idx) {
+    _mpvexUpgradeTimer?.cancel();
+    _mpvexUpgradeTimer = Timer(const Duration(milliseconds: 800), () {
+      if (idx != _currentIndex) return;
+      final c = _controllers[idx];
+      if (c == null || !c.isInitialized) return;
+      unawaited(c.upgradeToMpvExIfNeeded());
+    });
   }
 
   /// 除当前页外，把其余所有内核强制暂停。
@@ -1993,7 +2141,8 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
       child: _SlowLoadHint(
         bytesPerSecond: _enableNetworkSpeed ? _displaySpeed : null,
         showSwitch: idx < _playList.videos.length &&
-            !needsCompatKernel(_playList.videos[idx].fileName),
+            !needsCompatKernel(_playList.videos[idx].fileName,
+                url: _playList.videos[idx].videoUrl),
         onSwitchKernel: () => _recreateCurrent(forceCompat: true),
       ),
     );
@@ -2041,11 +2190,7 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
           ),
           const SizedBox(height: 20),
           TextButton.icon(
-            onPressed: () {
-              _initErrors.remove(idx);
-              _safeInitCtrl(idx);
-              if (mounted) setState(() {});
-            },
+            onPressed: () => _reloadCurrent(),
             icon: const Icon(Icons.refresh_rounded, size: 18),
             label: const Text('重试'),
             style: TextButton.styleFrom(
@@ -2054,7 +2199,8 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
           // 老格式失败说明 FFmpeg 也放不了，再重试 Exo 没有意义；
           // 只有「扩展名正常但 Exo 打不开」的片子才值得给换内核的出口。
           if (idx < _playList.videos.length &&
-              !needsCompatKernel(_playList.videos[idx].fileName)) ...[
+              !needsCompatKernel(_playList.videos[idx].fileName,
+                  url: _playList.videos[idx].videoUrl)) ...[
             const SizedBox(height: 4),
             TextButton.icon(
               onPressed: () => _recreateCurrent(forceCompat: true),
@@ -2220,6 +2366,12 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
           label: ['自动下一个', '播完即停止', '单视频循环'][_loopMode],
           color: _loopMode != 0 ? Colors.amber : Colors.white,
           onTap: _toggleLoop),
+      // 手动重载：卡住 / 黑屏 / 拖不动时不用退出重进，原地重开当前内核
+      _btn(
+          icon: Icons.refresh_rounded,
+          label: '重载',
+          color: Colors.white,
+          onTap: _reloadCurrent),
       _btn(
           icon: Icons.info_outline,
           label: '信息',
@@ -2559,6 +2711,7 @@ class _TikTokPlayerPageState extends State<TikTokPlayerPage>
                       color: Colors.white.withOpacity(0.85), fontSize: 13)),
               const SizedBox(width: 4),
               _hudBarButton(Icons.camera_alt_outlined, '截图', _takeScreenshot),
+              _hudBarButton(Icons.refresh_rounded, '重载', _reloadCurrent),
               _hudBarButton(Icons.info_outline, '信息', _showInfo),
             ]),
           ),

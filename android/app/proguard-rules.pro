@@ -7,6 +7,11 @@
 -keep class tv.danmaku.ijk.** { *; }
 -keep class com.google.android.exoplayer2.** { *; }
 
+# mpvEx / is.xyz.mpv（libmpv JNI 绑定 + EventObserver/LogObserver 回调，
+# native 通过方法名/签名反射调用，混淆会破坏回调与 native 属性事件分发）
+-keep class is.xyz.mpv.** { *; }
+-keepclassmembers class is.xyz.mpv.** { *; }
+
 # Gson
 -keepattributes Signature
 -keepattributes *Annotation*

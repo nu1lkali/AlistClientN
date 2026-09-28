@@ -60,6 +60,7 @@ class AlistPlugin(private val activity: Activity, private val scope: CoroutineSc
 
     override fun onDetachedFromEngine(binding: FlutterPlugin.FlutterPluginBinding) {
         IjkFlutterPlayerRegistry.disposeAll()
+        MpvExFlutterPlayerRegistry.disposeAll()
         channel.setMethodCallHandler(null)
     }
 
@@ -334,6 +335,81 @@ class AlistPlugin(private val activity: Activity, private val scope: CoroutineSc
 
             "ijkDispose" -> {
                 IjkFlutterPlayerRegistry.dispose(call.argument<Int>("id"))
+                result.success(null)
+            }
+
+            // =============== 增强 MPV 内核（mpvEx） ===============
+            // 与 IJK 同样的纹理桥接模式：SurfaceTexture → Flutter Texture。
+            // 区别：MPVLib 是进程级单例，MpvExKernel 串行仲裁，同时只活一个实例。
+            "mpvPreload" -> {
+                // 预热：仅触发 libplayer 装载，不创建实例。进播放器页时调一次，
+                // 第一次热升级时不用再等库装载。
+                MpvExKernel.run { /* 触发 object 初始化 */ }
+                result.success(true)
+            }
+
+            "mpvCreate" -> {
+                try {
+                    val player = MpvExFlutterPlayerRegistry.create(context, messenger, textureRegistry)
+                    result.success(mapOf("id" to player.id, "textureId" to player.textureId))
+                } catch (e: Throwable) {
+                    result.error("-2", "create mpvex player failed: ${e.message}", null)
+                }
+            }
+
+            "mpvOpen" -> {
+                val id = call.argument<Int>("id")
+                val url = call.argument<String>("url") ?: ""
+                val headers = call.argument<Map<String, String>>("headers") ?: emptyMap()
+                val startSec = (call.argument<Number>("startSec")?.toDouble() ?: 0.0)
+                val autoPlay = call.argument<Boolean>("autoPlay") ?: true
+                MpvExFlutterPlayerRegistry.get(id)?.let { p ->
+                    p.open(url, headers, startSec, autoPlay)
+                    result.success(null)
+                } ?: result.error("-1", "mpvex player not found", null)
+            }
+
+            "mpvPlay" -> {
+                MpvExFlutterPlayerRegistry.get(call.argument<Int>("id"))?.play()
+                result.success(null)
+            }
+
+            "mpvPause" -> {
+                MpvExFlutterPlayerRegistry.get(call.argument<Int>("id"))?.pause()
+                result.success(null)
+            }
+
+            "mpvSeekTo" -> {
+                val sec = call.argument<Number>("sec")?.toDouble() ?: 0.0
+                MpvExFlutterPlayerRegistry.get(call.argument<Int>("id"))?.seekTo(sec)
+                result.success(null)
+            }
+
+            "mpvSetSpeed" -> {
+                val v = call.argument<Number>("speed")?.toDouble() ?: 1.0
+                MpvExFlutterPlayerRegistry.get(call.argument<Int>("id"))?.setSpeed(v)
+                result.success(null)
+            }
+
+            "mpvSetVolume" -> {
+                val v = call.argument<Number>("volume")?.toDouble() ?: 1.0
+                MpvExFlutterPlayerRegistry.get(call.argument<Int>("id"))?.setVolume(v)
+                result.success(null)
+            }
+
+            "mpvSetLooping" -> {
+                val looping = call.argument<Boolean>("looping") ?: false
+                MpvExFlutterPlayerRegistry.get(call.argument<Int>("id"))?.setLooping(looping)
+                result.success(null)
+            }
+
+            "mpvGetState" -> {
+                val id = call.argument<Int>("id")
+                result.success(MpvExFlutterPlayerRegistry.get(id)?.snapshot())
+            }
+
+            "mpvDispose" -> {
+                MpvExFlutterPlayerRegistry.dispose(call.argument<Int>("id"))
                 result.success(null)
             }
 
