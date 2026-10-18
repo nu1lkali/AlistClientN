@@ -1,8 +1,7 @@
 import 'dart:async';
 
-import 'package:alist/entity/file_list_resp_entity.dart';
 import 'package:alist/l10n/intl_keys.dart';
-import 'package:alist/net/dio_utils.dart';
+import 'package:alist/net/alist_fs.dart';
 import 'package:alist/util/file_utils.dart';
 import 'package:alist/util/image_utils.dart';
 import 'package:extended_image/extended_image.dart';
@@ -57,17 +56,14 @@ class _FileDetailsDialogState extends State<FileDetailsDialog> {
     final body = {
       "path": widget.path,
       "password": widget.password ?? "",
-      "page": 1,
-      "per_page": 0,
       "refresh": false,
     };
-    DioUtils.instance.requestNetwork<FileListRespEntity>(
-      Method.post, "fs/list",
+    AlistFs.requestAll(
       params: body,
       onSuccess: (data) {
         if (!mounted) return;
         setState(() {
-          _folderItemCount = "${data?.total ?? 0} 个项目";
+          _folderItemCount = "${data.total} 个项目";
         });
       },
       onError: (_, __) {},
@@ -88,13 +84,12 @@ class _FileDetailsDialogState extends State<FileDetailsDialog> {
 
   Future<int> _calcFolderSize(String path) async {
     num total = 0;
-    final body = {"path": path, "password": widget.password ?? "", "page": 1, "per_page": 0, "refresh": false};
+    final body = {"path": path, "password": widget.password ?? "", "refresh": false};
     final completer = Completer<int>();
-    DioUtils.instance.requestNetwork<FileListRespEntity>(
-      Method.post, "fs/list",
+    AlistFs.requestAll(
       params: body,
       onSuccess: (data) async {
-        for (final f in data?.content ?? []) {
+        for (final f in data.content ?? []) {
           if (f.isDir) {
             final sub = await _calcFolderSize("$path/${f.name}");
             total = total + sub;

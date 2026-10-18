@@ -16,6 +16,7 @@ import 'package:alist/entity/file_rename_req.dart';
 import 'package:alist/entity/mkdir_req.dart';
 import 'package:alist/generated/images.dart';
 import 'package:alist/l10n/intl_keys.dart';
+import 'package:alist/net/alist_fs.dart';
 import 'package:alist/net/dio_utils.dart';
 import 'package:alist/router.dart';
 import 'package:alist/screen/audio_player_screen.dart';
@@ -402,19 +403,17 @@ class _FileListScreenState extends State<FileListScreen>
     _cancelToken?.cancel();
     _cancelToken = dio.CancelToken();
 
-    // 使用 per_page: 0 一次性获取全部数据，避免分页逻辑依赖 API 返回
-    // has_more / pages_total 字段（Alist 标准 API 可能不返回这些字段，导致分页提前终止）。
+    // ⚠️ 不能再写 per_page: 0 —— AList 后端会把 <=0 归一化成**默认 200 条**，
+    //    大目录（>200 个条目）在界面上只显示一部分，且没有任何提示。
+    //    AlistFs.requestAll 内部按每页 500 自动翻页拉全。
     final body = {
       "path": path,
       "password": _password ?? "",
-      "page": 1,
-      "per_page": 0,
       "refresh": _forceRefresh,
     };
 
     final completer = Completer<FileListRespEntity?>();
-    DioUtils.instance.requestNetwork<FileListRespEntity>(
-      Method.post, "fs/list",
+    AlistFs.requestAll(
       cancelToken: _cancelToken,
       params: body,
       onSuccess: (data) {
@@ -1443,17 +1442,14 @@ class _FileListScreenState extends State<FileListScreen>
       final checkBody = {
         "path": folderPath,
         "password": _password ?? "",
-        "page": 1,
-        "per_page": 0,
         "refresh": false
       };
       
       bool isEmpty = false;
-      await DioUtils.instance.requestNetwork<FileListRespEntity>(
-        Method.post, "fs/list",
+      await AlistFs.requestAll(
         params: checkBody,
         onSuccess: (data) {
-          final files = data?.content ?? [];
+          final files = data.content ?? [];
           isEmpty = files.isEmpty;
         },
         onError: (_, __) {
@@ -2429,16 +2425,12 @@ class _FileListScreenState extends State<FileListScreen>
       final body = {
         "path": dirPath,
         "password": _password ?? "",
-        "page": 1,
-        "per_page": 0,
         "refresh": false,
       };
       
-      await DioUtils.instance.requestNetwork<FileListRespEntity>(
-        Method.post, "fs/list",
+      await AlistFs.requestAll(
         params: body,
         onSuccess: (data) {
-          if (data == null) return;
           final vos = (data.content ?? [])
               .map((f) => _fileResp2VO(data.provider, f))
               .toList();
@@ -3379,19 +3371,16 @@ class _FileListScreenState extends State<FileListScreen>
     final body = {
       "path": folderPath,
       "password": _password ?? "",
-      "page": 1,
-      "per_page": 0,
       "refresh": false,
     };
 
     final Completer<void> completer = Completer<void>();
     List<TikTokVideoItem> tiktokVideos = [];
 
-    await DioUtils.instance.requestNetwork<FileListRespEntity>(
-      Method.post, "fs/list",
+    await AlistFs.requestAll(
       params: body,
       onSuccess: (data) {
-        final files = data?.content ?? [];
+        final files = data.content ?? [];
         for (var file in files) {
           if (!file.isDir && FileUtils.getFileType(false, file.name) == FileType.video) {
             final filePath = folderPath == '/' ? '/${file.name}' : '$folderPath/${file.name}';
@@ -3402,7 +3391,7 @@ class _FileListScreenState extends State<FileListScreen>
               size: file.size,
               sizeDesc: file.formatBytes(),
               sign: file.sign,
-              provider: data?.provider ?? '',
+              provider: data.provider,
               thumb: file.thumb,
               modifiedMilliseconds: modifyTime?.millisecondsSinceEpoch ?? -1,
             ));

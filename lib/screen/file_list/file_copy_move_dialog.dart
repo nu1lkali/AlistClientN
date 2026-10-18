@@ -4,6 +4,7 @@ import 'package:alist/entity/file_list_resp_entity.dart';
 import 'package:alist/entity/copy_move_req.dart';
 import 'package:alist/entity/mkdir_req.dart';
 import 'package:alist/l10n/intl_keys.dart';
+import 'package:alist/net/alist_fs.dart';
 import 'package:alist/net/dio_utils.dart';
 import 'package:alist/router.dart';
 import 'package:alist/screen/file_list/director_password_dialog.dart';
@@ -304,20 +305,16 @@ class FileCopyMoveController extends GetxController {
     var body = {
       "path": path,
       "password": (_password ?? ""),
-      "page": 1,
-      "per_page": 0,
       "refresh": false
     };
 
-    return DioUtils.instance.requestNetwork<FileListRespEntity>(
-      Method.post,
-      "fs/list",
+    return AlistFs.requestAll(
       cancelToken: _cancelToken,
       params: body,
       onSuccess: (data) {
         _passwordRetrying = false;
-        data?.content?.removeWhere((element) => !element.isDir);
-        files.value = data?.content ?? [];
+        data.content?.removeWhere((element) => !element.isDir);
+        files.value = data.content ?? [];
       },
       onError: (code, msg) {
         if (code == 403) {

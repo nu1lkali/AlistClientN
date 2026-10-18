@@ -1,6 +1,6 @@
 import 'package:alist/entity/copy_move_req.dart';
 import 'package:alist/entity/file_rename_req.dart';
-import 'package:alist/entity/file_list_resp_entity.dart';
+import 'package:alist/net/alist_fs.dart';
 import 'package:alist/net/dio_utils.dart';
 import 'package:alist/util/file_organize_task.dart';
 import 'package:alist/util/log_utils.dart';
@@ -54,18 +54,14 @@ class FileOrganizeExecutor {
     if (_dirFileCache.containsKey(targetPath)) return;
 
     final existingFiles = <String>{};
-    await DioUtils.instance.requestNetwork<FileListRespEntity>(
-      Method.post,
-      'fs/list',
+    await AlistFs.requestAll(
       params: {
         'path': targetPath,
         'password': password ?? '',
-        'page': 1,
-        'per_page': 0,
         'refresh': false,
       },
       onSuccess: (data) {
-        existingFiles.addAll((data?.content ?? []).map((f) => f.name));
+        existingFiles.addAll((data.content ?? []).map((f) => f.name));
       },
       onError: (_, __) {},
     );

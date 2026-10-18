@@ -7,6 +7,7 @@ import 'package:alist/entity/file_list_resp_entity.dart';
 import 'package:alist/entity/file_search_resp.dart';
 import 'package:alist/entity/tiktok_play_list_model.dart';
 import 'package:alist/l10n/intl_keys.dart';
+import 'package:alist/net/alist_fs.dart';
 import 'package:alist/net/dio_utils.dart';
 import 'package:alist/screen/audio_player_screen.dart';
 import 'package:alist/screen/file_reader_screen.dart';
@@ -823,16 +824,14 @@ class FileSearchController extends GetxController {
     var body = {
       "path": folderPath,
       "password": password ?? "",
-      "page": 1,
-      "per_page": 0,
       "refresh": false
     };
 
     List<FileItemVO>? result;
-    await DioUtils.instance.requestNetwork<FileListRespEntity>(
-        Method.post, "fs/list", cancelToken: _cancelToken, params: body,
+    await AlistFs.requestAll(
+        params: body, cancelToken: _cancelToken,
         onSuccess: (data) {
-      var files = data?.content
+      var files = data.content
           ?.map((e) => _fileResp2VO(folderPath, data.provider, e))
           .where((element) => (fileType == null || element.type == fileType))
           .toList();

@@ -5,6 +5,7 @@ import 'package:charset/charset.dart';
 
 import 'package:alist/entity/file_list_resp_entity.dart';
 import 'package:alist/entity/lyric_line.dart';
+import 'package:alist/net/alist_fs.dart';
 import 'package:alist/net/dio_utils.dart';
 import 'package:alist/util/constant.dart';
 import 'package:alist/util/file_utils.dart';
@@ -243,12 +244,12 @@ class LyricsController extends GetxController {
 
   Future<List<_LrcFileEntry>?> _listDirFiles(String dirPath) async {
     final c = Completer<List<_LrcFileEntry>?>();
-    DioUtils.instance.requestNetwork<FileListRespEntity>(
-      Method.post, 'fs/list',
-      params: {'path': dirPath, 'password': '', 'page': 1, 'per_page': 0, 'refresh': false},
+    AlistFs.requestAll(
+      params: {'path': dirPath, 'password': '', 'refresh': false},
       onSuccess: (data) {
-        if (data?.content == null) { c.complete(null); return; }
-        c.complete(data!.content!.map((f) => _LrcFileEntry(f.name, f.sign)).toList());
+        c.complete((data.content ?? <FileListRespContent>[])
+            .map((f) => _LrcFileEntry(f.name, f.sign))
+            .toList());
       },
       onError: (code, msg) { addLog('    fs/list err: $code $msg'); c.complete(null); },
     );

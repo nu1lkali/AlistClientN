@@ -10,7 +10,7 @@ import 'package:alist/util/favorite_helper.dart';
 import 'package:alist/entity/file_list_resp_entity.dart';
 import 'package:alist/entity/tiktok_play_list_model.dart';
 import 'package:alist/l10n/intl_keys.dart';
-import 'package:alist/net/dio_utils.dart';
+import 'package:alist/net/alist_fs.dart';
 import 'package:alist/screen/audio_player_screen.dart';
 import 'package:alist/screen/file_reader_screen.dart';
 import 'package:alist/screen/gallery_screen.dart';
@@ -567,16 +567,14 @@ class _FavoriteScreenState extends State<FavoriteScreen>
     var body = {
       "path": folderPath,
       "password": password ?? "",
-      "page": 1,
-      "per_page": 0,
       "refresh": false
     };
 
     List<FileItemVO>? result;
-    await DioUtils.instance.requestNetwork<FileListRespEntity>(
-        Method.post, "fs/list", cancelToken: _cancelToken, params: body,
+    await AlistFs.requestAll(
+        params: body, cancelToken: _cancelToken,
         onSuccess: (data) async {
-      var files = data?.content
+      var files = data.content
           ?.map((e) => _fileResp2VO(folderPath, data.provider, e))
           .where((element) => element.type == fileType)
           .toList();
@@ -806,19 +804,17 @@ class _FavoriteScreenState extends State<FavoriteScreen>
       var body = {
         "path": path,
         "password": password ?? "",
-        "page": 1,
-        "per_page": 0,
         "refresh": false
       };
-      await DioUtils.instance.requestNetwork<FileListRespEntity>(
-          Method.post, "fs/list", cancelToken: _cancelToken, params: body,
+      await AlistFs.requestAll(
+          params: body, cancelToken: _cancelToken,
           onSuccess: (result) {
         var user = _userController.user.value;
         if (currentUser != user) {
           // 切换用户、终止操作
           return;
         }
-        updateThumbs(path, result?.content);
+        updateThumbs(path, result.content);
       }, onError: (code, mess) {});
     }
   }
